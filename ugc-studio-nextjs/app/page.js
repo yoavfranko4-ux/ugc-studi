@@ -25,6 +25,17 @@ const STEP_INFO = {
 export default function Home() {
   const [page, setPage] = useState('main') // main | editor
   const [keys, setKeys] = useState({ fal: '', eleven: '', voiceId: '73z5yvUD5zgBgz92lJMW' })
+  const [keysLoaded, setKeysLoaded] = useState(false)
+
+  // Load keys from server env vars on mount
+  useState(() => {
+    fetch('/api/keys').then(r => r.json()).then(data => {
+      if (data.fal || data.eleven) {
+        setKeys(k => ({ ...k, fal: data.fal||k.fal, eleven: data.eleven||k.eleven, voiceId: data.voiceId||k.voiceId }))
+      }
+      setKeysLoaded(true)
+    }).catch(() => setKeysLoaded(true))
+  })
   const [keysOpen, setKeysOpen] = useState(false)
   const [selectedAvatar, setSelectedAvatar] = useState(null)
   const [customAvatarUrl, setCustomAvatarUrl] = useState(null)
