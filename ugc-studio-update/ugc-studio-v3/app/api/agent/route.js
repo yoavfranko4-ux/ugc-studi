@@ -14,12 +14,12 @@ function prepareImageUrl(url) {
 async function pollFal(requestId, maxWait = 300000) {
   const start = Date.now();
   while (Date.now() - start < maxWait) {
-    const res = await fetch(`https://queue.fal.run/fal-ai/nano-banana-2/edit/requests/${requestId}/status`, {
+    const res = await fetch(`https://queue.fal.run/fal-ai/nano-banana-2/requests/${requestId}/status`, {
       headers: { Authorization: `Key ${FAL_KEY}` }
     });
     const data = await res.json();
     if (data.status === 'COMPLETED') {
-      const result = await fetch(`https://queue.fal.run/fal-ai/nano-banana-2/edit/requests/${requestId}`, {
+      const result = await fetch(`https://queue.fal.run/fal-ai/nano-banana-2/requests/${requestId}`, {
         headers: { Authorization: `Key ${FAL_KEY}` }
       });
       return await result.json();
