@@ -47,22 +47,31 @@ async function pollKling(requestId, maxWait = 300000) {
 // Upload image buffer to fal storage
 async function uploadToFal(url) {
   if (!url) return null;
-  if (url.startsWith('data:')) {
-    const base64 = url.split(',')[1];
-    const mime = url.split(';')[0].split(':')[1];
-    const buffer = Buffer.from(base64, 'base64');
-    const form = new FormData();
-    const blob = new Blob([buffer], { type: mime });
-    form.append('file', blob, 'image.jpg');
-    const res = await fetch('https://fal.run/fal-ai/storage/upload', {
-      method: 'POST',
-      headers: { Authorization: `Key ${FAL_KEY}` },
-      body: form
-    });
-    const data = await res.json();
-    return data.url;
+  try {
+    if (url.startsWith('data:')) {
+      const base64 = url.split(',')[1];
+      const mime = url.split(';')[0].split(':')[1];
+      const buffer = Buffer.from(base64, 'base64');
+      const blob = new Blob([buffer], { type: mime });
+      const form = new FormData();
+      form.append('file', blob, 'image.jpg');
+      const res = await fetch('https://fal.run/fal-ai/storage/upload/initiate', {
+        method: 'POST',
+        headers: { 
+          Authorization: `Key ${FAL_KEY}`,
+          'Content-Type': mime
+        },
+        body: buffer
+      });
+      const data = await res.json();
+      console.log('Upload result:', JSON.stringify(data));
+      return data.url || data.file_url || null;
+    }
+    return url;
+  } catch(e) {
+    console.error('Upload failed:', e.message);
+    return null;
   }
-  return url;
 }
 
 // Generate Nano Banana frame
