@@ -24,7 +24,7 @@ export async function POST(req) {
   console.log(`Kling scene ${sceneIndex}: starting`);
 
   try {
-    const res = await fetch('https://queue.fal.run/fal-ai/kling-video/v1.6/pro/image-to-video', {
+    const res = await fetch('https://queue.fal-ai/kling-video/v3/pro/image-to-video', {
       method: 'POST',
       headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ image_url: imageUrl, prompt, duration: '5', aspect_ratio: '9:16' })
