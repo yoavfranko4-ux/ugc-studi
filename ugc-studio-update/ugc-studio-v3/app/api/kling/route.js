@@ -3,12 +3,12 @@ const FAL_KEY = process.env.FAL_API_KEY;
 async function pollKling(requestId, maxWait = 300000) {
   const start = Date.now();
   while (Date.now() - start < maxWait) {
-    const res = await fetch(`https://queue.fal.run/fal-ai/kling-video/requests/${requestId}/status`, {
+    const res = await fetch(`https://queue.fal-ai/kling-video/v3/pro/image-to-video/requests/${requestId}/status`, {
       headers: { Authorization: `Key ${FAL_KEY}` }
     });
     const data = await res.json();
     if (data.status === 'COMPLETED') {
-      const result = await fetch(`https://queue.fal.run/fal-ai/kling-video/requests/${requestId}`, {
+      const result = await fetch(`https://queue.fal-ai/kling-video/v3/pro/image-to-video/requests/${requestId}`, {
         headers: { Authorization: `Key ${FAL_KEY}` }
       });
       return await result.json();
