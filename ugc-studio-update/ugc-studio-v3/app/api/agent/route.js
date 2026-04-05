@@ -52,19 +52,18 @@ async function uploadToFal(url) {
       const base64 = url.split(',')[1];
       const mime = url.split(';')[0].split(':')[1];
       const buffer = Buffer.from(base64, 'base64');
-      const blob = new Blob([buffer], { type: mime });
-      const form = new FormData();
-      form.append('file', blob, 'image.jpg');
-      const res = await fetch('https://fal.run/fal-ai/storage/upload/initiate', {
+      const res = await fetch('https://fal.run/files/upload', {
         method: 'POST',
         headers: { 
           Authorization: `Key ${FAL_KEY}`,
-          'Content-Type': mime
+          'Content-Type': mime,
+          'Accept': 'application/json'
         },
         body: buffer
       });
-      const data = await res.json();
-      console.log('Upload result:', JSON.stringify(data));
+      const text = await res.text();
+      console.log('Upload raw response:', text);
+      const data = JSON.parse(text);
       return data.url || data.file_url || null;
     }
     return url;
