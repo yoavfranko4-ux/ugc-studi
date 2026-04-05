@@ -1,11 +1,8 @@
-import { NextResponse } from 'next/server';
-
 const FAL_KEY = process.env.FAL_API_KEY;
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
-// fal.ai accepts base64 data URIs directly — no upload needed!
 function prepareImageUrl(url) {
   if (!url) return null;
   return url;
@@ -30,34 +27,15 @@ async function pollFal(requestId, maxWait = 300000) {
   throw new Error('Timeout');
 }
 
-async function pollFalText(requestId, maxWait = 120000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    const res = await fetch(`https://queue.fal.run/fal-ai/nano-banana-2/requests/${requestId}/status`, {
-      headers: { Authorization: `Key ${FAL_KEY}` }
-    });
-    const data = await res.json();
-    if (data.status === 'COMPLETED') {
-      const result = await fetch(`https://queue.fal.run/fal-ai/nano-banana-2/requests/${requestId}`, {
-        headers: { Authorization: `Key ${FAL_KEY}` }
-      });
-      return await result.json();
-    }
-    if (data.status === 'FAILED') throw new Error('Failed');
-    await new Promise(r => setTimeout(r, 3000));
-  }
-  throw new Error('Timeout');
-}
-
 async function pollKling(requestId, maxWait = 300000) {
   const start = Date.now();
   while (Date.now() - start < maxWait) {
-    const res = await fetch(`https://queue.fal.run/fal-ai/kling-video/v1.6/pro/image-to-video/requests/${requestId}/status`, {
+    const res = await fetch(`https://queue.fal.run/fal-ai/kling-video/requests/${requestId}/status`, {
       headers: { Authorization: `Key ${FAL_KEY}` }
     });
     const data = await res.json();
     if (data.status === 'COMPLETED') {
-      const result = await fetch(`https://queue.fal.run/fal-ai/kling-video/v1.6/pro/image-to-video/requests/${requestId}`, {
+      const result = await fetch(`https://queue.fal.run/fal-ai/kling-video/requests/${requestId}`, {
         headers: { Authorization: `Key ${FAL_KEY}` }
       });
       return await result.json();
@@ -79,9 +57,8 @@ async function generateNBFrame(prompt, imageUrls) {
       body: JSON.stringify({ prompt, image_size: 'portrait_4_3' })
     });
     const json = await res.json();
-    console.log('NB text submit:', JSON.stringify(json).slice(0, 200));
     if (!json.request_id) throw new Error('No request_id: ' + JSON.stringify(json));
-    const result = await pollFalText(json.request_id);
+    const result = await pollFal(json.request_id);
     return result?.images?.[0]?.url || null;
   }
 
@@ -174,12 +151,7 @@ export async function POST(req) {
 
   const { productName, productDesc, applicationArea, avatarUrl, productImageUrl } = await req.json();
 
-  console.log('Agent started:', {
-    productName,
-    hasAvatar: !!avatarUrl,
-    avatarType: avatarUrl?.startsWith('data:') ? 'base64' : 'url',
-    hasProduct: !!productImageUrl
-  });
+  console.log('Agent started:', { productName, hasAvatar: !!avatarUrl, avatarType: avatarUrl?.startsWith('data:') ? 'base64' : 'url', hasProduct: !!productImageUrl });
 
   (async () => {
     try {
