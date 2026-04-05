@@ -111,7 +111,8 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           product: productDesc, productName, applicationArea,
-          avatarUrl: finalAvatarUrl, productImageUrl,
+          avatarUrl: customAvatar || selectedAvatar?.url || null,
+productImageUrl: productImageUrl || null,
           falKey, elevenKey, voiceId: 'Z3R5wn05IrDiVCyEkUrK'
         })
       })
