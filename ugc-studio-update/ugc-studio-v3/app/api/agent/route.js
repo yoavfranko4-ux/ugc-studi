@@ -48,8 +48,9 @@ async function generateNBFrame(prompt, imageUrls) {
   return result?.images?.[0]?.url || null;
 }
 
-async function generateScript(productName, productDesc, applicationArea) {
+async function generateScript(productName, productDesc, applicationArea, storyDescription) {
   if (!ANTHROPIC_KEY) return null;
+  const storyContext = storyDescription ? `\nStory/events the client wants: ${storyDescription}` : '';
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
@@ -57,15 +58,21 @@ async function generateScript(productName, productDesc, applicationArea) {
       model: 'claude-sonnet-4-20250514', max_tokens: 1500,
       messages: [{ role: 'user', content: `You are a UGC ad expert. Create a viral 4-scene ad for: "${productName}".
 Description: ${productDesc}
-How to use: ${applicationArea}
+How to use: ${applicationArea}${storyContext}
+
+IMPORTANT for scene 3 (שימוש):
+- nb_prompt must describe ONE single realistic photo, NOT a collage, NOT a grid, NOT split screen, NOT multiple panels
+- The photo should show the person mid-action using the product naturally
+- Add to nb_prompt: "single frame photo, not collage, not grid, not split screen, not multiple panels"
+
 Return ONLY valid JSON (no markdown):
 {
   "voiceover": "Hebrew monologue 20 seconds natural speaking style mentioning ${productName} specifically",
   "scenes": [
-    { "type": "כאב", "nb_prompt": "woman frustrated overwhelmed in bathroom mirror stressed expression, morning natural light iPhone selfie vertical, do not change person appearance from reference", "kling_prompt": "Person sighs looks at mirror frustrated shakes head overwhelmed, slight camera shake handheld iPhone natural light then settles", "subtitle": "Hebrew subtitle max 6 words" },
-    { "type": "גילוי", "nb_prompt": "same person from reference photo discovers ${productName} holds it label facing camera curious smile, bathroom natural light iPhone vertical, maintain exact facial features", "kling_prompt": "Continuing from previous scene same person picks up product reads label eyes widen holds toward camera, handheld natural light", "subtitle": "Hebrew subtitle max 6 words" },
-    { "type": "שימוש", "nb_prompt": "same person from reference photo ${applicationArea} showing product application clearly, genuine amazed expression, bathroom natural light, maintain exact facial features from reference", "kling_prompt": "Continuing from previous scene same person actively ${applicationArea} showing process close up, genuine reaction, handheld iPhone", "subtitle": "Hebrew subtitle max 6 words" },
-    { "type": "CTA", "nb_prompt": "same person from reference photo holds ${productName} product confidently points at camera big smile satisfied result, bathroom natural light, maintain exact facial features", "kling_prompt": "Continuing from previous scene same person holds product points directly at camera thumbs up excited authentic energy then settles", "subtitle": "Hebrew subtitle max 6 words" }
+    { "type": "כאב", "nb_prompt": "woman frustrated overwhelmed in bathroom mirror stressed expression, morning natural light iPhone selfie vertical, single frame photo, do not change person appearance from reference", "kling_prompt": "Person sighs looks at mirror frustrated shakes head overwhelmed, slight camera shake handheld iPhone natural light then settles", "subtitle": "Hebrew subtitle max 6 words" },
+    { "type": "גילוי", "nb_prompt": "same person from reference photo discovers ${productName} holds it label facing camera curious smile, bathroom natural light iPhone vertical, single frame photo, maintain exact facial features", "kling_prompt": "Continuing from previous scene same person picks up product reads label eyes widen holds toward camera, handheld natural light", "subtitle": "Hebrew subtitle max 6 words" },
+    { "type": "שימוש", "nb_prompt": "same person from reference photo actively ${applicationArea}, close up showing the action clearly, single frame photo not collage not grid not split screen not multiple panels, genuine focused expression, natural light, maintain exact facial features from reference", "kling_prompt": "Continuing from previous scene same person performs ${applicationArea} step by step showing the full process, close up genuine reaction, hands clearly visible, handheld iPhone natural light", "subtitle": "Hebrew subtitle max 6 words" },
+    { "type": "CTA", "nb_prompt": "same person from reference photo holds ${productName} product confidently points at camera big smile satisfied result, bathroom natural light, single frame photo, maintain exact facial features", "kling_prompt": "Continuing from previous scene same person holds product points directly at camera thumbs up excited authentic energy then settles", "subtitle": "Hebrew subtitle max 6 words" }
   ]
 }` }]
     })
@@ -75,7 +82,6 @@ Return ONLY valid JSON (no markdown):
   try { return JSON.parse(text.replace(/```json|```/g, '').trim()); } catch { return null; }
 }
 
-// Phase 1: script + voice + NB frames (fast, fits in stream timeout)
 export async function POST(req) {
   const encoder = new TextEncoder();
   const stream = new TransformStream();
@@ -84,8 +90,8 @@ export async function POST(req) {
     try { await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch {}
   };
 
-  const { productName, productDesc, applicationArea, avatarUrl, productImageUrl } = await req.json();
-  console.log('Agent started:', { productName, hasAvatar: !!avatarUrl, hasProduct: !!productImageUrl });
+  const { productName, productDesc, applicationArea, storyDescription, avatarUrl, productImageUrl } = await req.json();
+  console.log('Agent started:', { productName, hasAvatar: !!avatarUrl, hasProduct: !!productImageUrl, hasStory: !!storyDescription });
 
   (async () => {
     try {
@@ -95,7 +101,7 @@ export async function POST(req) {
       await send({ step: 'upload_done', progress: 8, message: '✅ תמונות מוכנות!' });
 
       await send({ step: 'script', progress: 10, message: '✍️ Claude כותב סקריפט...' });
-      const script = await generateScript(productName, productDesc, applicationArea);
+      const script = await generateScript(productName, productDesc, applicationArea, storyDescription);
       const scenes = script?.scenes || getDefaultScenes(productName, applicationArea);
       const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea);
       await send({ step: 'script_done', progress: 15, message: '✅ סקריפט מוכן!', scenes, voiceover });
@@ -140,7 +146,6 @@ export async function POST(req) {
         }
       }
 
-      // Send frame URLs so client can poll Kling independently
       await send({
         step: 'frames_done', progress: 70,
         message: '🎬 פריימים מוכנים! מתחיל Kling...',
@@ -167,9 +172,9 @@ function getDefaultVoiceover(productName, applicationArea) {
 
 function getDefaultScenes(productName, applicationArea) {
   return [
-    { type: 'כאב', nb_prompt: 'woman frustrated overwhelmed in bathroom mirror stressed expression hand on forehead, morning natural light iPhone selfie vertical, do not change person appearance from reference', kling_prompt: 'Person sighs looks at mirror frustrated shakes head overwhelmed, slight camera shake handheld iPhone natural light then settles', subtitle: 'כל כך נמאס לי מהבעיה הזאת' },
-    { type: 'גילוי', nb_prompt: `same person from reference photo discovers ${productName} holds it label facing camera curious smile, bathroom natural light iPhone vertical, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person picks up ${productName} reads label eyes widen holds toward camera, handheld natural light`, subtitle: `מצאתי את ${productName} ולא האמנתי` },
-    { type: 'שימוש', nb_prompt: `same person from reference photo ${applicationArea} showing product application clearly, genuine amazed expression, bathroom natural light, maintain exact facial features from reference`, kling_prompt: `Continuing from previous scene same person actively ${applicationArea} showing process close up, genuine reaction, handheld iPhone`, subtitle: 'שבוע אחד ולא האמנתי לתוצאות' },
-    { type: 'CTA', nb_prompt: `same person from reference photo holds ${productName} product confidently points at camera big smile satisfied result, bathroom natural light, maintain exact facial features`, kling_prompt: 'Continuing from previous scene same person holds product points directly at camera thumbs up excited authentic energy then settles', subtitle: 'תנסו — יש אחריות מלאה!' }
+    { type: 'כאב', nb_prompt: 'woman frustrated overwhelmed in bathroom mirror stressed expression hand on forehead, morning natural light iPhone selfie vertical, single frame photo, do not change person appearance from reference', kling_prompt: 'Person sighs looks at mirror frustrated shakes head overwhelmed, slight camera shake handheld iPhone natural light then settles', subtitle: 'כל כך נמאס לי מהבעיה הזאת' },
+    { type: 'גילוי', nb_prompt: `same person from reference photo discovers ${productName} holds it label facing camera curious smile, bathroom natural light iPhone vertical, single frame photo, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person picks up ${productName} reads label eyes widen holds toward camera, handheld natural light`, subtitle: `מצאתי את ${productName} ולא האמנתי` },
+    { type: 'שימוש', nb_prompt: `same person from reference photo actively ${applicationArea}, close up showing the action clearly, single frame photo not collage not grid not split screen not multiple panels, genuine focused expression, natural light, maintain exact facial features from reference`, kling_prompt: `Continuing from previous scene same person performs ${applicationArea} step by step showing full process, close up genuine reaction, hands clearly visible, handheld iPhone natural light`, subtitle: 'שבוע אחד ולא האמנתי לתוצאות' },
+    { type: 'CTA', nb_prompt: `same person from reference photo holds ${productName} product confidently points at camera big smile satisfied result, bathroom natural light, single frame photo, maintain exact facial features`, kling_prompt: 'Continuing from previous scene same person holds product points directly at camera thumbs up excited authentic energy then settles', subtitle: 'תנסו — יש אחריות מלאה!' }
   ];
 }
