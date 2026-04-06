@@ -21,6 +21,7 @@ export default function Home() {
   const [productName, setProductName] = useState('');
   const [productDesc, setProductDesc] = useState('');
   const [applicationArea, setApplicationArea] = useState('');
+  const [storyDescription, setStoryDescription] = useState('');
   const [logs, setLogs] = useState([]);
   const [progress, setProgress] = useState(0);
   const [scenes, setScenes] = useState([]);
@@ -49,15 +50,13 @@ export default function Home() {
     reader.readAsDataURL(file);
   };
 
-  // Run Kling for one scene independently
   const runKling = useCallback(async (frameUrl, klingPrompt, index) => {
     if (!frameUrl) return;
     setKlingStatus(prev => { const n=[...prev]; n[index]='loading'; return n; });
     addLog(`🎬 Kling — מייצר סרטון ${index+1}/4...`);
     try {
       const res = await fetch('/api/kling', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl: frameUrl, prompt: klingPrompt, sceneIndex: index })
       });
       const data = await res.json();
@@ -90,7 +89,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productName, productDesc, applicationArea, avatarUrl, productImageUrl: productImage || null })
+        body: JSON.stringify({ productName, productDesc, applicationArea, storyDescription, avatarUrl, productImageUrl: productImage || null })
       });
 
       const reader = res.body.getReader();
@@ -122,18 +121,14 @@ export default function Home() {
             if (data.step === 'frames_done') {
               finalFrameUrls = data.frameUrls || finalFrameUrls;
               finalKlingPrompts = data.klingPrompts || finalScenes.map(s=>s.kling_prompt);
-              // Now fire Kling requests in parallel from the browser
               finalFrameUrls.forEach((frameUrl, i) => {
-                if (frameUrl && finalKlingPrompts[i]) {
-                  runKling(frameUrl, finalKlingPrompts[i], i);
-                }
+                if (frameUrl && finalKlingPrompts[i]) runKling(frameUrl, finalKlingPrompts[i], i);
               });
             }
           } catch {}
         }
       }
     } catch (e) { addLog(`❌ שגיאה: ${e.message}`, 'error'); }
-
     setIsGenerating(false);
   };
 
@@ -144,6 +139,7 @@ export default function Home() {
     productName={productName} setProductName={setProductName}
     productDesc={productDesc} setProductDesc={setProductDesc}
     applicationArea={applicationArea} setApplicationArea={setApplicationArea}
+    storyDescription={storyDescription} setStoryDescription={setStoryDescription}
     runAgent={runAgent}
   />;
 
@@ -216,13 +212,10 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
   const audioSrc = audioBase64 ? `data:audio/mpeg;base64,${audioBase64}` : null;
   const timePercent = Math.min((currentTime / TOTAL_DURATION) * 100, 100);
   const sceneTypes = ['כאב 😤','גילוי 💡','שימוש ✨','CTA 🚀'];
-
   const klingIcon = (s) => s==='loading'?'⏳':s==='done'?'🎬':s==='error'?'❌':'—';
 
   return (
     <div style={{ height:'100vh', background:'#0d0e14', color:'#fff', fontFamily:'system-ui', direction:'rtl', display:'flex', flexDirection:'column', overflow:'hidden' }}>
-
-      {/* Top Bar */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 16px', background:'#111318', borderBottom:'1px solid #1e2030', flexShrink:0, height:46 }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <button onClick={onNew} style={{ padding:'5px 12px', background:'#1e2030', border:'1px solid #2a2d40', borderRadius:7, color:'#aaa', cursor:'pointer', fontSize:12 }}>← חדש</button>
@@ -245,7 +238,6 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
         </div>
       </div>
 
-      {/* Logs */}
       {showLogs && (
         <div style={{ height:140, background:'#090a0f', borderBottom:'1px solid #1e2030', overflow:'auto', padding:'8px 16px', flexShrink:0 }}>
           {logs.map((log,i) => (
@@ -257,10 +249,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
         </div>
       )}
 
-      {/* Main */}
       <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
-
-        {/* Left: scenes */}
         <div style={{ width:155, background:'#111318', borderLeft:'1px solid #1e2030', overflow:'auto', padding:10, flexShrink:0 }}>
           <div style={{ fontSize:10, color:'#374151', fontWeight:700, marginBottom:8, textTransform:'uppercase', letterSpacing:1 }}>מדיה</div>
           {[0,1,2,3].map(i => (
@@ -273,7 +262,6 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
           ))}
         </div>
 
-        {/* Center: monitor */}
         <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', background:'#0a0b10', padding:16 }}>
           <div style={{ position:'relative', height:'100%', maxHeight:500, aspectRatio:'9/16', background:'#000', borderRadius:12, overflow:'hidden', boxShadow:'0 0 60px rgba(168,85,247,0.15)' }}>
             {[0,1,2,3].map(i => (
@@ -299,10 +287,8 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
           </div>
         </div>
 
-        {/* Right: controls */}
         <div style={{ width:255, background:'#111318', borderRight:'1px solid #1e2030', overflow:'auto', padding:14, flexShrink:0 }}>
           <div style={{ fontSize:10, color:'#374151', fontWeight:700, marginBottom:12, textTransform:'uppercase', letterSpacing:1 }}>עריכה</div>
-
           <RightSection title="💬 כתוביות">
             {[0,1,2,3].map(i => (
               <div key={i} style={{ marginBottom:8 }}>
@@ -313,9 +299,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
               </div>
             ))}
           </RightSection>
-
           {voiceover && <RightSection title="📝 סקריפט"><p style={{ fontSize:11, color:'#9ca3af', lineHeight:1.7, margin:0 }}>{voiceover}</p></RightSection>}
-
           <RightSection title="⬇️ הורדות">
             {[0,1,2,3].map(i => videoUrls[i]
               ? <a key={i} href={videoUrls[i]} download target="_blank" style={{ display:'block', padding:'7px 10px', marginBottom:6, background:'#0f1f0f', border:'1px solid #22c55e', borderRadius:7, color:'#22c55e', textDecoration:'none', fontSize:12, textAlign:'center' }}>⬇️ סצנה {i+1}</a>
@@ -325,10 +309,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
         </div>
       </div>
 
-      {/* TIMELINE */}
       <div style={{ height:165, background:'#0a0b0f', borderTop:'2px solid #1e2030', flexShrink:0, display:'flex', flexDirection:'column' }}>
-
-        {/* Controls row */}
         <div style={{ display:'flex', alignItems:'center', gap:12, padding:'8px 16px', borderBottom:'1px solid #1e2030' }}>
           <button onClick={isPlaying?stopAll:playAll} style={{ width:32, height:32, borderRadius:'50%', background:'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', color:'#fff', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center' }}>
             {isPlaying?'⏸':'▶'}
@@ -346,23 +327,16 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
             <div style={{ position:'absolute', top:-4, left:`${timePercent}%`, width:12, height:12, background:'#a855f7', borderRadius:'50%', transform:'translateX(-50%)', border:'2px solid #0a0b0f' }} />
           </div>
         </div>
-
-        {/* Tracks */}
         <div style={{ flex:1, padding:'8px 16px', display:'flex', flexDirection:'column', gap:5, overflow:'hidden' }}>
-
-          {/* Ruler */}
           <div style={{ display:'flex', height:14 }}>
             <div style={{ width:70, flexShrink:0 }} />
             <div style={{ flex:1, position:'relative' }}>
               {[0,5,10,15,20].map(t => (
                 <div key={t} style={{ position:'absolute', left:`${(t/TOTAL_DURATION)*100}%`, fontSize:9, color:'#374151', transform:'translateX(-50%)' }}>{t}s</div>
               ))}
-              {/* Playhead line */}
               <div style={{ position:'absolute', top:0, left:`${timePercent}%`, width:1, height:300, background:'#a855f7', zIndex:10, opacity:0.8, pointerEvents:'none' }} />
             </div>
           </div>
-
-          {/* Video track */}
           <Track label="🎬 וידאו">
             {[0,1,2,3].map(i => (
               <div key={i} onClick={()=>setActiveScene(i)} style={{ flex:1, height:'100%', borderRadius:5, overflow:'hidden', cursor:'pointer', border:activeScene===i?'2px solid #a855f7':'2px solid transparent', marginLeft:i>0?2:0, background:'#150e2a', position:'relative', display:'flex', alignItems:'center', gap:4, padding:'0 5px' }}>
@@ -374,8 +348,6 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
               </div>
             ))}
           </Track>
-
-          {/* Audio track */}
           <Track label="🎙️ קול">
             <div style={{ flex:1, height:'100%', borderRadius:5, background:audioBase64?'#0a1f0f':'#0a100c', border:`1px solid ${audioBase64?'#22c55e':'#1e2030'}`, display:'flex', alignItems:'center', padding:'0 10px', gap:6, overflow:'hidden' }}>
               {audioBase64 ? (
@@ -392,8 +364,6 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
               ) : <span style={{ fontSize:11, color:'#374151' }}>{isGenerating?'⏳ מייצר קריינות...':'— אין קריינות'}</span>}
             </div>
           </Track>
-
-          {/* Subtitles track */}
           <Track label="💬 כתובית">
             {[0,1,2,3].map(i => (
               <div key={i} style={{ flex:1, height:'100%', borderRadius:5, background:'#110e00', border:'1px solid #78350f', marginLeft:i>0?2:0, display:'flex', alignItems:'center', padding:'0 5px', overflow:'hidden' }}>
@@ -401,10 +371,8 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
               </div>
             ))}
           </Track>
-
         </div>
       </div>
-
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
@@ -437,7 +405,7 @@ function formatTime(s) {
   return `${m}:${sec.toString().padStart(2,'0')}`;
 }
 
-function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAvatarUpload, productImage, handleProductUpload, productName, setProductName, productDesc, setProductDesc, applicationArea, setApplicationArea, runAgent }) {
+function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAvatarUpload, productImage, handleProductUpload, productName, setProductName, productDesc, setProductDesc, applicationArea, setApplicationArea, storyDescription, setStoryDescription, runAgent }) {
   return (
     <div style={{ minHeight:'100vh', background:'#0a0a0f', color:'#fff', fontFamily:'system-ui', direction:'rtl' }}>
       <div style={{ maxWidth:680, margin:'0 auto', padding:'40px 20px' }}>
@@ -445,6 +413,7 @@ function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAva
           <h1 style={{ fontSize:36, fontWeight:800, background:'linear-gradient(135deg,#a855f7,#ec4899)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', margin:0 }}>🎬 UGC Studio</h1>
           <p style={{ color:'#888', marginTop:8 }}>צור סרטוני UGC ויראליים עם AI</p>
         </div>
+
         <Section title="👤 בחר אווטאר">
           <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:8, marginBottom:12 }}>
             {AVATARS.map(a => (
@@ -459,6 +428,7 @@ function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAva
             <span style={{ color:'#aaa', fontSize:14 }}>{customAvatar?'✅ אווטאר אישי הועלה':'העלה אווטאר אישי'}</span>
           </label>
         </Section>
+
         <Section title="📦 תמונת מוצר">
           <label style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer', padding:'12px 16px', background:'#1a1a2e', borderRadius:10, border:productImage?'2px solid #a855f7':'2px dashed #333' }}>
             <input type="file" accept="image/*" onChange={handleProductUpload} style={{ display:'none' }} />
@@ -466,11 +436,26 @@ function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAva
             <span style={{ color:'#aaa', fontSize:14 }}>{productImage?'✅ תמונת מוצר הועלתה':'העלה תמונת מוצר'}</span>
           </label>
         </Section>
+
         <Section title="✍️ פרטי המוצר">
           <Input label="שם המוצר *" value={productName} onChange={e=>setProductName(e.target.value)} placeholder="מדבקות הלבנת שיניים FRAKO" />
           <Input label="מה המוצר פותר" value={productDesc} onChange={e=>setProductDesc(e.target.value)} placeholder="מלבין שיניים תוך 7 ימים, ללא רגישות" />
           <Input label="איך משתמשים" value={applicationArea} onChange={e=>setApplicationArea(e.target.value)} placeholder="מניחים על השיניים 30 דקות, מסירים ושוטפים" />
         </Section>
+
+        <Section title="🎭 תאר את הסיפור (אופציונלי)">
+          <div style={{ fontSize:12, color:'#666', marginBottom:10 }}>
+            תאר אירועים, סגנון, או רעיון ספציפי שאתה רוצה — למשל: "מותג בגדים, אישה בחנות מנסה שמלה ומתאהבת בה" או "גבר בחדר כושר מגלה כמסי כוח חדש לאחר נטילת התוסף"
+          </div>
+          <textarea
+            value={storyDescription}
+            onChange={e=>setStoryDescription(e.target.value)}
+            placeholder="כתוב כאן את הסיפור שאתה רוצה..."
+            rows={3}
+            style={{ width:'100%', padding:'12px 14px', background:'#0a0a0f', border:'1px solid #2a2a3e', borderRadius:10, color:'#fff', fontSize:14, outline:'none', boxSizing:'border-box', resize:'vertical', fontFamily:'system-ui' }}
+          />
+        </Section>
+
         <button onClick={runAgent} style={{ width:'100%', padding:'18px', fontSize:18, fontWeight:700, background:'linear-gradient(135deg,#a855f7,#ec4899)', color:'#fff', border:'none', borderRadius:14, cursor:'pointer', marginTop:8 }}>
           🎬 צור 4 סצנות UGC עכשיו
         </button>
