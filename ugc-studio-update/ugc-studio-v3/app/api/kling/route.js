@@ -8,7 +8,7 @@ async function pollKling(requestId, maxWait = 300000) {
     });
     const data = await res.json();
     if (data.status === 'COMPLETED') {
-      const result = await fetch(`https://queue.queue.fal.run/fal-ai/kling-video/requests/${requestId}`, {
+      const result = await fetch(`https://queue.fal.run/fal-ai/kling-video/requests/${requestId}`, {
         headers: { Authorization: `Key ${FAL_KEY}` }
       });
       return await result.json();
