@@ -20,13 +20,15 @@ async function pollKling(requestId, maxWait = 300000) {
 }
 
 export async function POST(req) {
-  const { imageUrl, prompt, sceneIndex } = await req.json();
-  console.log(`Kling scene ${sceneIndex}: starting`);
+  const { imageUrl, prompt, sceneIndex, duration } = await req.json();
+  // Kling supports 5 or 10 seconds — map 8s to 10s (closest supported)
+  const klingDuration = duration === '10' ? '10' : '5';
+  console.log(`Kling scene ${sceneIndex}: starting, requested ${duration}s → using ${klingDuration}s`);
   try {
     const res = await fetch('https://queue.fal.run/fal-ai/kling-video/v3/pro/image-to-video', {
       method: 'POST',
       headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_url: imageUrl, prompt, duration: '5', aspect_ratio: '9:16' })
+      body: JSON.stringify({ image_url: imageUrl, prompt, duration: klingDuration, aspect_ratio: '9:16' })
     });
     const json = await res.json();
     console.log(`Kling ${sceneIndex} submit:`, JSON.stringify(json).slice(0, 150));
