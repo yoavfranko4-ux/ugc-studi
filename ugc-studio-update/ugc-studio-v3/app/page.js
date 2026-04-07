@@ -44,6 +44,7 @@ export default function Home() {
   const [klingStatus, setKlingStatus] = useState(['idle','idle','idle','idle']);
   const [editSubtitles, setEditSubtitles] = useState(['','','','']);
   const [selectedMusic, setSelectedMusic] = useState(0);
+  const [isExporting, setIsExporting] = useState(false);
 
   const addLog = (msg, type='info') => setLogs(prev => [...prev.slice(-60), { msg, type, time: new Date().toLocaleTimeString('he-IL') }]);
 
@@ -61,21 +62,14 @@ export default function Home() {
     reader.readAsDataURL(file);
   };
 
-  // runKling now accepts per-scene audioBase64 for lipsync
-  const runKling = useCallback(async (frameUrl, klingPrompt, index, sceneAudio) => {
+  const runKling = useCallback(async (frameUrl, klingPrompt, index) => {
     if (!frameUrl) return;
     setKlingStatus(prev => { const n=[...prev]; n[index]='loading'; return n; });
-    const isLipsync = sceneAudio && index !== 2; // scene 3 (index 2) = no lipsync
-    addLog(`🎬 Kling ${isLipsync ? '+ Lipsync' : ''} — סצנה ${index+1}/4...`);
+    addLog(`🎬 Kling — סצנה ${index+1}/4...`);
     try {
       const res = await fetch('/api/kling', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageUrl: frameUrl,
-          prompt: klingPrompt,
-          sceneIndex: index,
-          audioBase64: sceneAudio || null
-        })
+        body: JSON.stringify({ imageUrl: frameUrl, prompt: klingPrompt, sceneIndex: index })
       });
       const data = await res.json();
       if (data.videoUrl) {
@@ -93,37 +87,67 @@ export default function Home() {
     }
   }, []);
 
+  const exportFinal = async () => {
+    const validVideos = videoUrls.filter(Boolean);
+    if (validVideos.length === 0) return alert('אין סרטונים לייצוא');
+    setIsExporting(true);
+    addLog('📦 מייצר סרטון סופי עם כתוביות ומוזיקה...', 'start');
+    try {
+      const musicTrack = MUSIC_TRACKS[selectedMusic];
+      const res = await fetch('/api/export', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoUrls,
+          audioBase64,
+          musicUrl: musicTrack?.url || null,
+          subtitles: editSubtitles,
+          sceneDuration: SCENE_DURATION
+        })
+      });
+      const data = await res.json();
+      if (data.videoBase64) {
+        const blob = new Blob([Uint8Array.from(atob(data.videoBase64), c => c.charCodeAt(0))], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ugc_final.mp4';
+        a.click();
+        URL.revokeObjectURL(url);
+        addLog('✅ סרטון סופי הורד!', 'success');
+      } else {
+        addLog(`❌ ייצוא נכשל: ${data.error||'שגיאה לא ידועה'}`, 'error');
+      }
+    } catch (e) {
+      addLog(`❌ ייצוא שגיאה: ${e.message}`, 'error');
+    }
+    setIsExporting(false);
+  };
+
   const runAgent = async () => {
     if (!productName.trim()) return alert('נא להכניס שם מוצר');
     const avatarUrl = customAvatar || selectedAvatar?.url || null;
     if (!avatarUrl) return alert('נא לבחור או להעלות אווטאר');
-
     setLogs([]); setProgress(0); setScenes([]); setVoiceover('');
     setAudioBase64(null); setFrameUrls([null,null,null,null]);
     setVideoUrls([null,null,null,null]); setKlingStatus(['idle','idle','idle','idle']);
     setEditSubtitles(['','','','']); setIsGenerating(true); setScreen('editor');
     addLog('🚀 מתחיל Agent...', 'start');
-
     try {
       const res = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productName, productDesc, applicationArea, storyDescription, avatarUrl, productImageUrl: productImage || null })
       });
-
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       let finalFrameUrls = [null,null,null,null];
       let finalKlingPrompts = [];
-      let finalSceneAudios = [null,null,null,null];
       let finalScenes = [];
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n'); buffer = lines.pop();
-
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
@@ -140,12 +164,8 @@ export default function Home() {
             if (data.step === 'frames_done') {
               finalFrameUrls = data.frameUrls || finalFrameUrls;
               finalKlingPrompts = data.klingPrompts || finalScenes.map(s=>s.kling_prompt);
-              finalSceneAudios = data.sceneAudios || [null,null,null,null];
-              // Fire Kling for each scene with per-scene audio
               finalFrameUrls.forEach((frameUrl, i) => {
-                if (frameUrl && finalKlingPrompts[i]) {
-                  runKling(frameUrl, finalKlingPrompts[i], i, finalSceneAudios[i]);
-                }
+                if (frameUrl && finalKlingPrompts[i]) runKling(frameUrl, finalKlingPrompts[i], i);
               });
             }
           } catch {}
@@ -177,11 +197,12 @@ export default function Home() {
     editSubtitles={editSubtitles} setEditSubtitles={setEditSubtitles}
     allDone={allDone} totalDone={totalDone}
     selectedMusic={selectedMusic} setSelectedMusic={setSelectedMusic}
+    isExporting={isExporting} exportFinal={exportFinal}
     onNew={() => setScreen('form')}
   />;
 }
 
-function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBase64, frameUrls, videoUrls, klingStatus, activeScene, setActiveScene, editSubtitles, setEditSubtitles, allDone, totalDone, selectedMusic, setSelectedMusic, onNew }) {
+function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBase64, frameUrls, videoUrls, klingStatus, activeScene, setActiveScene, editSubtitles, setEditSubtitles, allDone, totalDone, selectedMusic, setSelectedMusic, isExporting, exportFinal, onNew }) {
   const audioRef = useRef(null);
   const musicRef = useRef(null);
   const videoRefs = useRef([null,null,null,null]);
@@ -247,7 +268,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
     const lines = [];
     let current = '';
     for (const w of words) {
-      if ((current + ' ' + w).trim().length > 22 && current) {
+      if ((current + ' ' + w).trim().length > 20 && current) {
         lines.push(current.trim());
         current = w;
         if (lines.length >= 2) break;
@@ -279,8 +300,12 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
           )}
           <button onClick={()=>setShowLogs(!showLogs)} style={{ padding:'5px 10px', background:showLogs?'#a855f720':'#1e2030', border:`1px solid ${showLogs?'#a855f7':'#2a2d40'}`, borderRadius:7, color:showLogs?'#a855f7':'#aaa', cursor:'pointer', fontSize:11 }}>📋 לוג</button>
           {videoUrls.some(Boolean) && (
-            <button onClick={() => videoUrls.forEach((u,i) => { if(!u) return; const a=document.createElement('a'); a.href=proxyUrl(u); a.download=`scene_${i+1}.mp4`; a.click(); })}
-              style={{ padding:'5px 14px', background:'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', borderRadius:7, color:'#fff', cursor:'pointer', fontSize:12, fontWeight:700 }}>ייצא ⬇️</button>
+            <button
+              onClick={exportFinal}
+              disabled={isExporting}
+              style={{ padding:'5px 14px', background: isExporting ? '#4a1a5e' : 'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', borderRadius:7, color:'#fff', cursor: isExporting ? 'wait' : 'pointer', fontSize:12, fontWeight:700, opacity: isExporting ? 0.7 : 1 }}>
+              {isExporting ? '⏳ מייצר...' : '⬇️ ייצא הכל'}
+            </button>
           )}
         </div>
       </div>
@@ -305,8 +330,6 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
               {frameUrls[i] ? <img src={frameUrls[i]} style={{ width:'100%', aspectRatio:'9/16', objectFit:'cover', display:'block' }} />
                 : <div style={{ width:'100%', aspectRatio:'9/16', display:'flex', alignItems:'center', justifyContent:'center', background:'#111318' }}>{isGenerating?<Spinner size={20}/>:<span style={{ color:'#374151', fontSize:20 }}>□</span>}</div>}
               <div style={{ position:'absolute', top:4, left:4, fontSize:12 }}>{klingIcon(klingStatus[i])}</div>
-              {/* Lipsync badge */}
-              {i !== 2 && <div style={{ position:'absolute', top:4, right:4, background:'#7c3aed', borderRadius:3, padding:'1px 4px', fontSize:8, color:'#fff' }}>👄</div>}
               <div style={{ padding:'4px 6px', fontSize:10, color:'#9ca3af' }}>{scenes[i]?.type||sceneTypes[i]}</div>
             </div>
           ))}
@@ -326,13 +349,28 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
                     {isGenerating?<><Spinner size={40}/><span style={{ color:'#374151', fontSize:13 }}>מייצר...</span></>:<span style={{ fontSize:48 }}>🎬</span>}
                   </div>
             )}
-            {editSubtitles[activeScene] && (
-              <div style={{ position:'absolute', bottom:40, left:0, right:0, display:'flex', justifyContent:'center', padding:'0 16px' }}>
-                <div style={{ background:'rgba(0,0,0,0.82)', color:'#fff', padding:'8px 16px', borderRadius:8, fontSize:16, fontWeight:800, textAlign:'center', lineHeight:1.4, maxWidth:'85%', whiteSpace:'pre-line', textShadow:'0 1px 4px rgba(0,0,0,0.8)' }}>
-                  {formatSubtitle(editSubtitles[activeScene])}
+            {/* Subtitle — 2 lines max, centered */}
+            {editSubtitles[activeScene] && (() => {
+              const words = editSubtitles[activeScene].trim().split(' ');
+              const lines = [];
+              let current = '';
+              for (const w of words) {
+                if ((current + ' ' + w).trim().length > 20 && current) {
+                  lines.push(current.trim()); current = w;
+                  if (lines.length >= 2) break;
+                } else { current = (current + ' ' + w).trim(); }
+              }
+              if (current && lines.length < 2) lines.push(current.trim());
+              return (
+                <div style={{ position:'absolute', bottom:40, left:0, right:0, display:'flex', flexDirection:'column', alignItems:'center', gap:4, padding:'0 16px' }}>
+                  {lines.map((line, li) => (
+                    <div key={li} style={{ background:'rgba(0,0,0,0.8)', color:'#fff', padding:'6px 14px', borderRadius:7, fontSize:17, fontWeight:800, textAlign:'center', textShadow:'0 1px 4px rgba(0,0,0,0.8)' }}>
+                      {line}
+                    </div>
+                  ))}
                 </div>
-              </div>
-            )}
+              );
+            })()}
             <div style={{ position:'absolute', top:8, right:8, background:'rgba(0,0,0,0.7)', borderRadius:5, padding:'2px 8px', fontSize:10, color:'#a855f7' }}>
               {klingStatus[activeScene]==='loading'?'🎬 Kling...':klingStatus[activeScene]==='done'?'✅':frameUrls[activeScene]?'🎨 פריים':'⏳'}
             </div>
@@ -354,7 +392,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
           <RightSection title="💬 כתוביות">
             {[0,1,2,3].map(i => (
               <div key={i} style={{ marginBottom:8 }}>
-                <div style={{ fontSize:10, color:'#4b5563', marginBottom:3 }}>{scenes[i]?.type||sceneTypes[i]} {i!==2&&<span style={{ color:'#7c3aed' }}>👄</span>}</div>
+                <div style={{ fontSize:10, color:'#4b5563', marginBottom:3 }}>{scenes[i]?.type||sceneTypes[i]}</div>
                 <input value={editSubtitles[i]||''} onChange={e=>{const n=[...editSubtitles];n[i]=e.target.value;setEditSubtitles(n);}}
                   style={{ width:'100%', padding:'6px 9px', background:'#0d0e14', border:'1px solid #1e2030', borderRadius:7, color:'#e5e7eb', fontSize:12, boxSizing:'border-box', outline:'none' }}
                   placeholder="ערוך כתובית..." />
@@ -362,10 +400,10 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
             ))}
           </RightSection>
           {voiceover && <RightSection title="📝 סקריפט"><p style={{ fontSize:11, color:'#9ca3af', lineHeight:1.7, margin:0 }}>{voiceover}</p></RightSection>}
-          <RightSection title="⬇️ הורדות">
+          <RightSection title="⬇️ סצנות בנפרד">
             {[0,1,2,3].map(i => videoUrls[i]
               ? <a key={i} href={proxyUrl(videoUrls[i])} download={`scene_${i+1}.mp4`} style={{ display:'block', padding:'7px 10px', marginBottom:6, background:'#0f1f0f', border:'1px solid #22c55e', borderRadius:7, color:'#22c55e', textDecoration:'none', fontSize:12, textAlign:'center' }}>⬇️ סצנה {i+1}</a>
-              : <div key={i} style={{ padding:'7px 10px', marginBottom:6, background:'#111318', border:'1px solid #1e2030', borderRadius:7, color:'#374151', fontSize:12, textAlign:'center' }}>{klingStatus[i]==='loading'?`⏳ ${i!==2?'Lipsync':'Kling'} ${i+1}...`:isGenerating?`⏳ סצנה ${i+1}...`:`— סצנה ${i+1}`}</div>
+              : <div key={i} style={{ padding:'7px 10px', marginBottom:6, background:'#111318', border:'1px solid #1e2030', borderRadius:7, color:'#374151', fontSize:12, textAlign:'center' }}>{klingStatus[i]==='loading'?`⏳ סצנה ${i+1}...`:isGenerating?`⏳ סצנה ${i+1}...`:`— סצנה ${i+1}`}</div>
             )}
           </RightSection>
         </div>
@@ -396,12 +434,11 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
           </div>
           <Track label="🎬 וידאו">
             {[0,1,2,3].map(i => (
-              <div key={i} onClick={()=>setActiveScene(i)} style={{ flex:1, height:'100%', borderRadius:5, overflow:'hidden', cursor:'pointer', border:activeScene===i?'2px solid #a855f7':'2px solid transparent', marginLeft:i>0?2:0, background: i!==2?'#1a0a2e':'#150e2a', position:'relative', display:'flex', alignItems:'center', gap:4, padding:'0 5px' }}>
+              <div key={i} onClick={()=>setActiveScene(i)} style={{ flex:1, height:'100%', borderRadius:5, overflow:'hidden', cursor:'pointer', border:activeScene===i?'2px solid #a855f7':'2px solid transparent', marginLeft:i>0?2:0, background:'#150e2a', position:'relative', display:'flex', alignItems:'center', gap:4, padding:'0 5px' }}>
                 {frameUrls[i] && <img src={frameUrls[i]} style={{ height:'80%', aspectRatio:'9/16', objectFit:'cover', borderRadius:3, flexShrink:0 }} />}
                 <span style={{ fontSize:9, color:videoUrls[i]?'#c4b5fd':klingStatus[i]==='loading'?'#f59e0b':'#4b3080', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>
-                  {videoUrls[i]?(scenes[i]?.type||`סצנה ${i+1}`):klingStatus[i]==='loading'?(i!==2?'Lipsync...':'Kling...'):frameUrls[i]?'פריים':'—'}
+                  {videoUrls[i]?(scenes[i]?.type||`סצנה ${i+1}`):klingStatus[i]==='loading'?'Kling...':frameUrls[i]?'פריים':'—'}
                 </span>
-                {i!==2 && <div style={{ position:'absolute', bottom:2, left:3, fontSize:8, color:'#7c3aed' }}>👄</div>}
               </div>
             ))}
           </Track>
