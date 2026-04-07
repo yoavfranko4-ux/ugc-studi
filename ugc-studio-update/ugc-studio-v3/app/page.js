@@ -10,9 +10,9 @@ const AVATARS = [
   { id: 6, url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=600&fit=crop&crop=face', name: 'Adam' },
 ];
 
-const SCENE_DURATIONS = [5, 8, 10, 5];
-const TOTAL_DURATION = 28;
-const SCENE_STARTS = [0, 5, 13, 23];
+const SCENE_DURATIONS = [5, 5, 10, 5];
+const TOTAL_DURATION = 25;
+const SCENE_STARTS = [0, 5, 10, 20];
 
 const MUSIC_TRACKS = [
   { id: 0, name: 'ללא מוזיקה', url: null, emoji: '🔇' },
