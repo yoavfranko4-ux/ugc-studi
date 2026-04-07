@@ -10,8 +10,9 @@ const AVATARS = [
   { id: 6, url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=600&fit=crop&crop=face', name: 'Adam' },
 ];
 
-const SCENE_DURATION = 5;
-const TOTAL_DURATION = 20;
+const SCENE_DURATIONS = [5, 8, 10, 5];
+const TOTAL_DURATION = 28;
+const SCENE_STARTS = [0, 5, 13, 23];
 
 const MUSIC_TRACKS = [
   { id: 0, name: 'ללא מוזיקה', url: null, emoji: '🔇' },
@@ -22,6 +23,20 @@ const MUSIC_TRACKS = [
 ];
 
 const proxyUrl = (url) => url ? `/api/proxy?url=${encodeURIComponent(url)}` : null;
+
+function getSceneFromTime(t) {
+  for (let i = SCENE_STARTS.length - 1; i >= 0; i--) {
+    if (t >= SCENE_STARTS[i]) return i;
+  }
+  return 0;
+}
+
+function splitSubtitle(text) {
+  if (!text) return ['', ''];
+  const words = text.trim().split(' ');
+  const mid = Math.ceil(words.length / 2);
+  return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
+}
 
 export default function Home() {
   const [screen, setScreen] = useState('form');
@@ -65,11 +80,11 @@ export default function Home() {
   const runKling = useCallback(async (frameUrl, klingPrompt, index) => {
     if (!frameUrl) return;
     setKlingStatus(prev => { const n=[...prev]; n[index]='loading'; return n; });
-    addLog(`🎬 Kling — סצנה ${index+1}/4...`);
+    addLog(`🎬 Kling — סצנה ${index+1} (${SCENE_DURATIONS[index]}s)...`);
     try {
       const res = await fetch('/api/kling', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: frameUrl, prompt: klingPrompt, sceneIndex: index })
+        body: JSON.stringify({ imageUrl: frameUrl, prompt: klingPrompt, sceneIndex: index, duration: String(SCENE_DURATIONS[index]) })
       });
       const data = await res.json();
       if (data.videoUrl) {
@@ -83,66 +98,51 @@ export default function Home() {
       }
     } catch (e) {
       setKlingStatus(prev => { const n=[...prev]; n[index]='error'; return n; });
-      addLog(`❌ סרטון ${index+1} שגיאה: ${e.message}`, 'error');
+      addLog(`❌ שגיאה: ${e.message}`, 'error');
     }
   }, []);
 
   const exportFinal = async () => {
-    const validVideos = videoUrls.filter(Boolean);
-    if (validVideos.length === 0) return alert('אין סרטונים לייצוא');
+    if (!videoUrls.some(Boolean)) return alert('אין סרטונים לייצוא');
     setIsExporting(true);
-    addLog('📦 מייצר סרטון סופי עם כתוביות ומוזיקה...', 'start');
+    addLog('📦 מייצר סרטון סופי...', 'start');
     try {
       const musicTrack = MUSIC_TRACKS[selectedMusic];
       const res = await fetch('/api/export', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videoUrls,
-          audioBase64,
-          musicUrl: musicTrack?.url || null,
-          subtitles: editSubtitles,
-          sceneDuration: SCENE_DURATION
-        })
+        body: JSON.stringify({ videoUrls, audioBase64, musicUrl: musicTrack?.url || null, subtitles: editSubtitles, sceneDurations: SCENE_DURATIONS })
       });
       const data = await res.json();
       if (data.videoBase64) {
         const blob = new Blob([Uint8Array.from(atob(data.videoBase64), c => c.charCodeAt(0))], { type: 'video/mp4' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'ugc_final.mp4';
-        a.click();
+        const a = document.createElement('a'); a.href=url; a.download='ugc_final.mp4'; a.click();
         URL.revokeObjectURL(url);
-        addLog('✅ סרטון סופי הורד!', 'success');
+        addLog('✅ סרטון הורד!', 'success');
       } else {
-        addLog(`❌ ייצוא נכשל: ${data.error||'שגיאה לא ידועה'}`, 'error');
+        addLog(`❌ ייצוא נכשל: ${data.error||''}`, 'error');
       }
-    } catch (e) {
-      addLog(`❌ ייצוא שגיאה: ${e.message}`, 'error');
-    }
+    } catch (e) { addLog(`❌ שגיאה: ${e.message}`, 'error'); }
     setIsExporting(false);
   };
 
   const runAgent = async () => {
     if (!productName.trim()) return alert('נא להכניס שם מוצר');
     const avatarUrl = customAvatar || selectedAvatar?.url || null;
-    if (!avatarUrl) return alert('נא לבחור או להעלות אווטאר');
+    if (!avatarUrl) return alert('נא לבחור אווטאר');
     setLogs([]); setProgress(0); setScenes([]); setVoiceover('');
     setAudioBase64(null); setFrameUrls([null,null,null,null]);
     setVideoUrls([null,null,null,null]); setKlingStatus(['idle','idle','idle','idle']);
     setEditSubtitles(['','','','']); setIsGenerating(true); setScreen('editor');
-    addLog('🚀 מתחיל Agent...', 'start');
+    addLog('🚀 מתחיל...', 'start');
     try {
       const res = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productName, productDesc, applicationArea, storyDescription, avatarUrl, productImageUrl: productImage || null })
+        body: JSON.stringify({ productName, productDesc, applicationArea, storyDescription, avatarUrl, productImageUrl: productImage||null, sceneDurations: SCENE_DURATIONS })
       });
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = '';
-      let finalFrameUrls = [null,null,null,null];
-      let finalKlingPrompts = [];
-      let finalScenes = [];
+      let buffer='', finalFrameUrls=[null,null,null,null], finalKlingPrompts=[], finalScenes=[];
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -153,8 +153,8 @@ export default function Home() {
           try {
             const data = JSON.parse(line.slice(6));
             if (data.progress !== undefined) setProgress(data.progress);
-            if (data.message) addLog(data.message, data.step?.includes('fail')?'error':data.step==='done'?'success':'info');
-            if (data.scenes) { setScenes(data.scenes); finalScenes=data.scenes; setEditSubtitles(data.scenes.map(s=>s.subtitle)); }
+            if (data.message) addLog(data.message, data.step?.includes('fail')?'error':'info');
+            if (data.scenes) { setScenes(data.scenes); finalScenes=data.scenes; setEditSubtitles(data.scenes.map(s=>s.subtitle||'')); }
             if (data.voiceover) setVoiceover(data.voiceover);
             if (data.audioBase64) setAudioBase64(data.audioBase64);
             if (data.frameUrl !== undefined && data.frameIndex !== undefined) {
@@ -171,35 +171,16 @@ export default function Home() {
           } catch {}
         }
       }
-    } catch (e) { addLog(`❌ שגיאה: ${e.message}`, 'error'); }
+    } catch (e) { addLog(`❌ ${e.message}`, 'error'); }
     setIsGenerating(false);
   };
 
-  if (screen === 'form') return <FormScreen
-    selectedAvatar={selectedAvatar} setSelectedAvatar={setSelectedAvatar}
-    customAvatar={customAvatar} handleAvatarUpload={handleAvatarUpload}
-    productImage={productImage} handleProductUpload={handleProductUpload}
-    productName={productName} setProductName={setProductName}
-    productDesc={productDesc} setProductDesc={setProductDesc}
-    applicationArea={applicationArea} setApplicationArea={setApplicationArea}
-    storyDescription={storyDescription} setStoryDescription={setStoryDescription}
-    runAgent={runAgent}
-  />;
+  if (screen === 'form') return <FormScreen {...{selectedAvatar,setSelectedAvatar,customAvatar,handleAvatarUpload,productImage,handleProductUpload,productName,setProductName,productDesc,setProductDesc,applicationArea,setApplicationArea,storyDescription,setStoryDescription,runAgent}} />;
 
   const totalDone = videoUrls.filter(Boolean).length;
   const allDone = !isGenerating && klingStatus.every(s => s==='done'||s==='error');
 
-  return <EditorScreen
-    isGenerating={isGenerating} logs={logs} progress={progress}
-    scenes={scenes} voiceover={voiceover} audioBase64={audioBase64}
-    frameUrls={frameUrls} videoUrls={videoUrls} klingStatus={klingStatus}
-    activeScene={activeScene} setActiveScene={setActiveScene}
-    editSubtitles={editSubtitles} setEditSubtitles={setEditSubtitles}
-    allDone={allDone} totalDone={totalDone}
-    selectedMusic={selectedMusic} setSelectedMusic={setSelectedMusic}
-    isExporting={isExporting} exportFinal={exportFinal}
-    onNew={() => setScreen('form')}
-  />;
+  return <EditorScreen {...{isGenerating,logs,progress,scenes,voiceover,audioBase64,frameUrls,videoUrls,klingStatus,activeScene,setActiveScene,editSubtitles,setEditSubtitles,allDone,totalDone,selectedMusic,setSelectedMusic,isExporting,exportFinal,onNew:()=>setScreen('form')}} />;
 }
 
 function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBase64, frameUrls, videoUrls, klingStatus, activeScene, setActiveScene, editSubtitles, setEditSubtitles, allDone, totalDone, selectedMusic, setSelectedMusic, isExporting, exportFinal, onNew }) {
@@ -209,13 +190,22 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
   const [showLogs, setShowLogs] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [subtitleHalf, setSubtitleHalf] = useState(0);
   const logsEndRef = useRef(null);
   const animFrameRef = useRef(null);
   const playStartRef = useRef(null);
   const proxiedUrls = useRef([null,null,null,null]);
 
-  useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
+  useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [logs]);
   useEffect(() => { proxiedUrls.current = videoUrls.map(u => proxyUrl(u)); }, [videoUrls]);
+
+  // Update which subtitle half to show based on time within scene
+  useEffect(() => {
+    const sceneStart = SCENE_STARTS[activeScene];
+    const sceneDur = SCENE_DURATIONS[activeScene];
+    const t = currentTime - sceneStart;
+    setSubtitleHalf(t < sceneDur / 2 ? 0 : 1);
+  }, [currentTime, activeScene]);
 
   const stopAll = useCallback(() => {
     setIsPlaying(false);
@@ -223,7 +213,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
     if (musicRef.current) { musicRef.current.pause(); musicRef.current.currentTime = 0; }
     videoRefs.current.forEach(v => { if (v) { v.pause(); v.currentTime = 0; } });
-    setCurrentTime(0); setActiveScene(0);
+    setCurrentTime(0); setActiveScene(0); setSubtitleHalf(0);
   }, [setActiveScene]);
 
   const playAll = useCallback(() => {
@@ -232,20 +222,20 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
     setTimeout(() => {
       setIsPlaying(true);
       playStartRef.current = performance.now();
-      if (audioRef.current && audioBase64) { audioRef.current.currentTime = 0; audioRef.current.volume = 1.0; audioRef.current.play().catch(()=>{}); }
-      const musicTrack = MUSIC_TRACKS[selectedMusic];
-      if (musicRef.current && musicTrack?.url) { musicRef.current.currentTime = 0; musicRef.current.volume = 0.15; musicRef.current.play().catch(()=>{}); }
-      const firstScene = videoUrls.findIndex(Boolean);
-      if (firstScene >= 0 && videoRefs.current[firstScene]) { setActiveScene(firstScene); videoRefs.current[firstScene].currentTime = 0; videoRefs.current[firstScene].play().catch(()=>{}); }
+      if (audioRef.current && audioBase64) { audioRef.current.currentTime=0; audioRef.current.volume=1.0; audioRef.current.play().catch(()=>{}); }
+      const mt = MUSIC_TRACKS[selectedMusic];
+      if (musicRef.current && mt?.url) { musicRef.current.currentTime=0; musicRef.current.volume=0.15; musicRef.current.play().catch(()=>{}); }
+      let curScene = 0;
+      const first = videoUrls.findIndex(Boolean);
+      if (first >= 0 && videoRefs.current[first]) { setActiveScene(first); videoRefs.current[first].currentTime=0; videoRefs.current[first].play().catch(()=>{}); }
       const tick = () => {
         const elapsed = (performance.now() - playStartRef.current) / 1000;
         setCurrentTime(elapsed);
-        const sceneIdx = Math.min(Math.floor(elapsed / SCENE_DURATION), 3);
-        const prevIdx = Math.min(Math.floor((elapsed - 0.05) / SCENE_DURATION), 3);
-        setActiveScene(sceneIdx);
-        if (sceneIdx !== prevIdx) {
-          if (videoRefs.current[prevIdx]) { videoRefs.current[prevIdx].pause(); videoRefs.current[prevIdx].currentTime = 0; }
-          if (videoUrls[sceneIdx] && videoRefs.current[sceneIdx]) { videoRefs.current[sceneIdx].currentTime = 0; videoRefs.current[sceneIdx].play().catch(()=>{}); }
+        const si = getSceneFromTime(elapsed);
+        if (si !== curScene) {
+          if (videoRefs.current[curScene]) { videoRefs.current[curScene].pause(); videoRefs.current[curScene].currentTime=0; }
+          if (videoUrls[si] && videoRefs.current[si]) { videoRefs.current[si].currentTime=0; videoRefs.current[si].play().catch(()=>{}); }
+          curScene = si; setActiveScene(si);
         }
         if (elapsed >= TOTAL_DURATION) { stopAll(); return; }
         animFrameRef.current = requestAnimationFrame(tick);
@@ -262,21 +252,8 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
   const sceneTypes = ['כאב 😤','גילוי 💡','שימוש ✨','CTA 🚀'];
   const klingIcon = (s) => s==='loading'?'⏳':s==='done'?'🎬':s==='error'?'❌':'—';
 
-  const formatSubtitle = (text) => {
-    if (!text) return '';
-    const words = text.split(' ');
-    const lines = [];
-    let current = '';
-    for (const w of words) {
-      if ((current + ' ' + w).trim().length > 20 && current) {
-        lines.push(current.trim());
-        current = w;
-        if (lines.length >= 2) break;
-      } else { current = (current + ' ' + w).trim(); }
-    }
-    if (current && lines.length < 2) lines.push(current.trim());
-    return lines.join('\n');
-  };
+  const subParts = splitSubtitle(editSubtitles[activeScene]);
+  const currentSub = subParts[subtitleHalf] || subParts[0] || '';
 
   return (
     <div style={{ height:'100vh', background:'#0d0e14', color:'#fff', fontFamily:'system-ui', direction:'rtl', display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -300,11 +277,9 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
           )}
           <button onClick={()=>setShowLogs(!showLogs)} style={{ padding:'5px 10px', background:showLogs?'#a855f720':'#1e2030', border:`1px solid ${showLogs?'#a855f7':'#2a2d40'}`, borderRadius:7, color:showLogs?'#a855f7':'#aaa', cursor:'pointer', fontSize:11 }}>📋 לוג</button>
           {videoUrls.some(Boolean) && (
-            <button
-              onClick={exportFinal}
-              disabled={isExporting}
-              style={{ padding:'5px 14px', background: isExporting ? '#4a1a5e' : 'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', borderRadius:7, color:'#fff', cursor: isExporting ? 'wait' : 'pointer', fontSize:12, fontWeight:700, opacity: isExporting ? 0.7 : 1 }}>
-              {isExporting ? '⏳ מייצר...' : '⬇️ ייצא הכל'}
+            <button onClick={exportFinal} disabled={isExporting}
+              style={{ padding:'5px 14px', background:isExporting?'#4a1a5e':'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', borderRadius:7, color:'#fff', cursor:isExporting?'wait':'pointer', fontSize:12, fontWeight:700, opacity:isExporting?0.7:1 }}>
+              {isExporting?'⏳ מייצר...':'⬇️ ייצא הכל'}
             </button>
           )}
         </div>
@@ -330,7 +305,10 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
               {frameUrls[i] ? <img src={frameUrls[i]} style={{ width:'100%', aspectRatio:'9/16', objectFit:'cover', display:'block' }} />
                 : <div style={{ width:'100%', aspectRatio:'9/16', display:'flex', alignItems:'center', justifyContent:'center', background:'#111318' }}>{isGenerating?<Spinner size={20}/>:<span style={{ color:'#374151', fontSize:20 }}>□</span>}</div>}
               <div style={{ position:'absolute', top:4, left:4, fontSize:12 }}>{klingIcon(klingStatus[i])}</div>
-              <div style={{ padding:'4px 6px', fontSize:10, color:'#9ca3af' }}>{scenes[i]?.type||sceneTypes[i]}</div>
+              <div style={{ padding:'4px 6px', fontSize:10, color:'#9ca3af', display:'flex', justifyContent:'space-between' }}>
+                <span>{scenes[i]?.type||sceneTypes[i]}</span>
+                <span style={{ color:'#4b5563' }}>{SCENE_DURATIONS[i]}s</span>
+              </div>
             </div>
           ))}
         </div>
@@ -349,30 +327,17 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
                     {isGenerating?<><Spinner size={40}/><span style={{ color:'#374151', fontSize:13 }}>מייצר...</span></>:<span style={{ fontSize:48 }}>🎬</span>}
                   </div>
             )}
-            {/* Subtitle — 2 lines max, centered */}
-            {editSubtitles[activeScene] && (() => {
-              const words = editSubtitles[activeScene].trim().split(' ');
-              const lines = [];
-              let current = '';
-              for (const w of words) {
-                if ((current + ' ' + w).trim().length > 20 && current) {
-                  lines.push(current.trim()); current = w;
-                  if (lines.length >= 2) break;
-                } else { current = (current + ' ' + w).trim(); }
-              }
-              if (current && lines.length < 2) lines.push(current.trim());
-              return (
-                <div style={{ position:'absolute', bottom:40, left:0, right:0, display:'flex', flexDirection:'column', alignItems:'center', gap:4, padding:'0 16px' }}>
-                  {lines.map((line, li) => (
-                    <div key={li} style={{ background:'rgba(0,0,0,0.8)', color:'#fff', padding:'6px 14px', borderRadius:7, fontSize:17, fontWeight:800, textAlign:'center', textShadow:'0 1px 4px rgba(0,0,0,0.8)' }}>
-                      {line}
-                    </div>
-                  ))}
+            {/* Alternating subtitle - one box at a time */}
+            {currentSub && (
+              <div style={{ position:'absolute', bottom:40, left:0, right:0, display:'flex', justifyContent:'center', padding:'0 16px' }}>
+                <div key={`${activeScene}-${subtitleHalf}`}
+                  style={{ background:'rgba(0,0,0,0.82)', color:'#fff', padding:'8px 18px', borderRadius:8, fontSize:17, fontWeight:800, textAlign:'center', textShadow:'0 1px 4px rgba(0,0,0,0.9)', maxWidth:'88%', animation:'fadeIn 0.25s ease' }}>
+                  {currentSub}
                 </div>
-              );
-            })()}
+              </div>
+            )}
             <div style={{ position:'absolute', top:8, right:8, background:'rgba(0,0,0,0.7)', borderRadius:5, padding:'2px 8px', fontSize:10, color:'#a855f7' }}>
-              {klingStatus[activeScene]==='loading'?'🎬 Kling...':klingStatus[activeScene]==='done'?'✅':frameUrls[activeScene]?'🎨 פריים':'⏳'}
+              {klingStatus[activeScene]==='loading'?'🎬 Kling...':klingStatus[activeScene]==='done'?'✅':frameUrls[activeScene]?'🎨':'⏳'}
             </div>
           </div>
         </div>
@@ -390,99 +355,125 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
             ))}
           </RightSection>
           <RightSection title="💬 כתוביות">
-            {[0,1,2,3].map(i => (
-              <div key={i} style={{ marginBottom:8 }}>
-                <div style={{ fontSize:10, color:'#4b5563', marginBottom:3 }}>{scenes[i]?.type||sceneTypes[i]}</div>
-                <input value={editSubtitles[i]||''} onChange={e=>{const n=[...editSubtitles];n[i]=e.target.value;setEditSubtitles(n);}}
-                  style={{ width:'100%', padding:'6px 9px', background:'#0d0e14', border:'1px solid #1e2030', borderRadius:7, color:'#e5e7eb', fontSize:12, boxSizing:'border-box', outline:'none' }}
-                  placeholder="ערוך כתובית..." />
-              </div>
-            ))}
+            {[0,1,2,3].map(i => {
+              const parts = splitSubtitle(editSubtitles[i]);
+              return (
+                <div key={i} style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:10, color:'#4b5563', marginBottom:3 }}>{scenes[i]?.type||sceneTypes[i]} <span style={{ color:'#374151' }}>({SCENE_DURATIONS[i]}s)</span></div>
+                  <input value={editSubtitles[i]||''} onChange={e=>{const n=[...editSubtitles];n[i]=e.target.value;setEditSubtitles(n);}}
+                    style={{ width:'100%', padding:'6px 9px', background:'#0d0e14', border:'1px solid #1e2030', borderRadius:7, color:'#e5e7eb', fontSize:12, boxSizing:'border-box', outline:'none', marginBottom:4 }}
+                    placeholder="ערוך כתובית..." />
+                  <div style={{ display:'flex', gap:4, fontSize:10 }}>
+                    <span style={{ flex:1, background:'#1a0f2e', padding:'2px 5px', borderRadius:4, color:'#a78bfa', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>1: {parts[0]||'—'}</span>
+                    <span style={{ flex:1, background:'#130f2e', padding:'2px 5px', borderRadius:4, color:'#7c3aed', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>2: {parts[1]||'—'}</span>
+                  </div>
+                </div>
+              );
+            })}
           </RightSection>
           {voiceover && <RightSection title="📝 סקריפט"><p style={{ fontSize:11, color:'#9ca3af', lineHeight:1.7, margin:0 }}>{voiceover}</p></RightSection>}
           <RightSection title="⬇️ סצנות בנפרד">
             {[0,1,2,3].map(i => videoUrls[i]
-              ? <a key={i} href={proxyUrl(videoUrls[i])} download={`scene_${i+1}.mp4`} style={{ display:'block', padding:'7px 10px', marginBottom:6, background:'#0f1f0f', border:'1px solid #22c55e', borderRadius:7, color:'#22c55e', textDecoration:'none', fontSize:12, textAlign:'center' }}>⬇️ סצנה {i+1}</a>
-              : <div key={i} style={{ padding:'7px 10px', marginBottom:6, background:'#111318', border:'1px solid #1e2030', borderRadius:7, color:'#374151', fontSize:12, textAlign:'center' }}>{klingStatus[i]==='loading'?`⏳ סצנה ${i+1}...`:isGenerating?`⏳ סצנה ${i+1}...`:`— סצנה ${i+1}`}</div>
+              ? <a key={i} href={proxyUrl(videoUrls[i])} download={`scene_${i+1}.mp4`} style={{ display:'block', padding:'7px 10px', marginBottom:6, background:'#0f1f0f', border:'1px solid #22c55e', borderRadius:7, color:'#22c55e', textDecoration:'none', fontSize:12, textAlign:'center' }}>⬇️ סצנה {i+1} ({SCENE_DURATIONS[i]}s)</a>
+              : <div key={i} style={{ padding:'7px 10px', marginBottom:6, background:'#111318', border:'1px solid #1e2030', borderRadius:7, color:'#374151', fontSize:12, textAlign:'center' }}>{klingStatus[i]==='loading'?`⏳ סצנה ${i+1}...`:`— סצנה ${i+1}`}</div>
             )}
           </RightSection>
         </div>
       </div>
 
       {/* Timeline */}
-      <div style={{ height:165, background:'#0a0b0f', borderTop:'2px solid #1e2030', flexShrink:0, display:'flex', flexDirection:'column' }}>
+      <div style={{ height:170, background:'#0a0b0f', borderTop:'2px solid #1e2030', flexShrink:0, display:'flex', flexDirection:'column' }}>
         <div style={{ display:'flex', alignItems:'center', gap:12, padding:'8px 16px', borderBottom:'1px solid #1e2030' }}>
           <button onClick={isPlaying?stopAll:playAll} style={{ width:32, height:32, borderRadius:'50%', background:'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', color:'#fff', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center' }}>{isPlaying?'⏸':'▶'}</button>
           <button onClick={stopAll} style={{ width:28, height:28, borderRadius:'50%', background:'#1e2030', border:'1px solid #2a2d40', color:'#aaa', cursor:'pointer', fontSize:12, display:'flex', alignItems:'center', justifyContent:'center' }}>⏹</button>
-          <span style={{ fontSize:12, color:'#6b7280', minWidth:80 }}>{formatTime(currentTime)} / {formatTime(TOTAL_DURATION)}</span>
+          <span style={{ fontSize:12, color:'#6b7280', minWidth:90 }}>{formatTime(currentTime)} / {formatTime(TOTAL_DURATION)}</span>
           {audioSrc && <audio ref={audioRef} src={audioSrc} style={{ display:'none' }} />}
           {musicSrc && <audio ref={musicRef} src={musicSrc} loop style={{ display:'none' }} />}
           <div style={{ flex:1, height:4, background:'#1e2030', borderRadius:2, position:'relative', cursor:'pointer' }}
-            onClick={e => { const rect=e.currentTarget.getBoundingClientRect(); const t=((e.clientX-rect.left)/rect.width)*TOTAL_DURATION; setCurrentTime(t); setActiveScene(Math.min(Math.floor(t/SCENE_DURATION),3)); }}>
+            onClick={e => { const rect=e.currentTarget.getBoundingClientRect(); const t=((e.clientX-rect.left)/rect.width)*TOTAL_DURATION; setCurrentTime(t); setActiveScene(getSceneFromTime(t)); }}>
             <div style={{ height:'100%', width:`${timePercent}%`, background:'linear-gradient(90deg,#a855f7,#ec4899)', borderRadius:2 }} />
             <div style={{ position:'absolute', top:-4, left:`${timePercent}%`, width:12, height:12, background:'#a855f7', borderRadius:'50%', transform:'translateX(-50%)', border:'2px solid #0a0b0f' }} />
           </div>
           {selectedMusic > 0 && <span style={{ fontSize:11, color:'#a855f7' }}>{MUSIC_TRACKS[selectedMusic].emoji}</span>}
         </div>
-        <div style={{ flex:1, padding:'8px 16px', display:'flex', flexDirection:'column', gap:5, overflow:'hidden' }}>
+
+        <div style={{ flex:1, padding:'8px 16px', display:'flex', flexDirection:'column', gap:4, overflow:'hidden' }}>
+          {/* Ruler */}
           <div style={{ display:'flex', height:14 }}>
             <div style={{ width:70, flexShrink:0 }} />
             <div style={{ flex:1, position:'relative' }}>
-              {[0,5,10,15,20].map(t => <div key={t} style={{ position:'absolute', left:`${(t/TOTAL_DURATION)*100}%`, fontSize:9, color:'#374151', transform:'translateX(-50%)' }}>{t}s</div>)}
-              <div style={{ position:'absolute', top:0, left:`${timePercent}%`, width:1, height:300, background:'#a855f7', zIndex:10, opacity:0.8, pointerEvents:'none' }} />
+              {SCENE_STARTS.map((s,i) => (
+                <div key={i} style={{ position:'absolute', left:`${(s/TOTAL_DURATION)*100}%`, fontSize:9, color:'#4b5563' }}>{s}s</div>
+              ))}
+              <div style={{ position:'absolute', right:0, fontSize:9, color:'#374151' }}>{TOTAL_DURATION}s</div>
+              <div style={{ position:'absolute', top:0, left:`${timePercent}%`, width:1, height:200, background:'#a855f7', zIndex:10, opacity:0.8, pointerEvents:'none' }} />
             </div>
           </div>
-          <Track label="🎬 וידאו">
-            {[0,1,2,3].map(i => (
-              <div key={i} onClick={()=>setActiveScene(i)} style={{ flex:1, height:'100%', borderRadius:5, overflow:'hidden', cursor:'pointer', border:activeScene===i?'2px solid #a855f7':'2px solid transparent', marginLeft:i>0?2:0, background:'#150e2a', position:'relative', display:'flex', alignItems:'center', gap:4, padding:'0 5px' }}>
-                {frameUrls[i] && <img src={frameUrls[i]} style={{ height:'80%', aspectRatio:'9/16', objectFit:'cover', borderRadius:3, flexShrink:0 }} />}
-                <span style={{ fontSize:9, color:videoUrls[i]?'#c4b5fd':klingStatus[i]==='loading'?'#f59e0b':'#4b3080', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>
-                  {videoUrls[i]?(scenes[i]?.type||`סצנה ${i+1}`):klingStatus[i]==='loading'?'Kling...':frameUrls[i]?'פריים':'—'}
-                </span>
-              </div>
-            ))}
-          </Track>
-          <Track label="🎙️ קול">
-            <div style={{ flex:1, height:'100%', borderRadius:5, background:audioBase64?'#0a1f0f':'#0a100c', border:`1px solid ${audioBase64?'#22c55e':'#1e2030'}`, display:'flex', alignItems:'center', padding:'0 10px', gap:6, overflow:'hidden' }}>
+
+          {/* Video track — proportional */}
+          <div style={{ display:'flex', alignItems:'stretch', height:32, gap:6 }}>
+            <div style={{ width:70, flexShrink:0, display:'flex', alignItems:'center', fontSize:10, color:'#4b5563', fontWeight:600 }}>🎬 וידאו</div>
+            <div style={{ flex:1, display:'flex', gap:2 }}>
+              {[0,1,2,3].map(i => (
+                <div key={i} onClick={()=>setActiveScene(i)}
+                  style={{ flex:SCENE_DURATIONS[i], height:'100%', borderRadius:5, overflow:'hidden', cursor:'pointer', border:activeScene===i?'2px solid #a855f7':'2px solid transparent', background:'#150e2a', position:'relative', display:'flex', alignItems:'center', gap:3, padding:'0 4px' }}>
+                  {frameUrls[i] && <img src={frameUrls[i]} style={{ height:'80%', aspectRatio:'9/16', objectFit:'cover', borderRadius:3, flexShrink:0 }} />}
+                  <span style={{ fontSize:8, color:videoUrls[i]?'#c4b5fd':klingStatus[i]==='loading'?'#f59e0b':'#4b3080', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>
+                    {videoUrls[i]?(scenes[i]?.type||`${i+1}`):klingStatus[i]==='loading'?'⏳':frameUrls[i]?'📷':'—'}
+                  </span>
+                  <span style={{ position:'absolute', bottom:1, right:2, fontSize:8, color:'#4b3080' }}>{SCENE_DURATIONS[i]}s</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Audio */}
+          <div style={{ display:'flex', alignItems:'stretch', height:26, gap:6 }}>
+            <div style={{ width:70, flexShrink:0, display:'flex', alignItems:'center', fontSize:10, color:'#4b5563', fontWeight:600 }}>🎙️ קול</div>
+            <div style={{ flex:1, borderRadius:5, background:audioBase64?'#0a1f0f':'#0a100c', border:`1px solid ${audioBase64?'#22c55e':'#1e2030'}`, display:'flex', alignItems:'center', padding:'0 10px', gap:6, overflow:'hidden' }}>
               {audioBase64 ? (
                 <>
-                  <div style={{ display:'flex', alignItems:'center', gap:1, height:'65%' }}>
-                    {Array.from({length:50}).map((_,j) => { const h=20+Math.sin(j*0.6)*18+Math.sin(j*1.4)*10; const active=(j/50)<(currentTime/TOTAL_DURATION); return <div key={j} style={{ width:2, height:`${h}%`, background:active?'#22c55e':'#14532d', borderRadius:1 }} />; })}
+                  <div style={{ display:'flex', alignItems:'center', gap:1, height:'70%' }}>
+                    {Array.from({length:60}).map((_,j) => { const h=20+Math.sin(j*0.6)*18+Math.sin(j*1.4)*10; const active=(j/60)<(currentTime/TOTAL_DURATION); return <div key={j} style={{ width:2, height:`${h}%`, background:active?'#22c55e':'#14532d', borderRadius:1 }} />; })}
                   </div>
-                  <span style={{ fontSize:10, color:'#22c55e', fontWeight:600, whiteSpace:'nowrap' }}>קריינות V3 — 20s</span>
+                  <span style={{ fontSize:10, color:'#22c55e', fontWeight:600, whiteSpace:'nowrap' }}>קריינות V3 — {TOTAL_DURATION}s</span>
                 </>
-              ) : <span style={{ fontSize:11, color:'#374151' }}>{isGenerating?'⏳ מייצר קריינות...':'— אין קריינות'}</span>}
+              ) : <span style={{ fontSize:11, color:'#374151' }}>{isGenerating?'⏳...':'—'}</span>}
             </div>
-          </Track>
+          </div>
+
+          {/* Music */}
           {selectedMusic > 0 && (
-            <Track label="🎵 מוזיקה">
-              <div style={{ flex:1, height:'100%', borderRadius:5, background:'#0a0a1f', border:'1px solid #312e81', display:'flex', alignItems:'center', padding:'0 10px', gap:6 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:1, height:'65%' }}>
-                  {Array.from({length:50}).map((_,j) => { const h=15+Math.sin(j*1.2)*12; const active=(j/50)<(currentTime/TOTAL_DURATION); return <div key={j} style={{ width:2, height:`${h}%`, background:active?'#818cf8':'#1e1b4b', borderRadius:1 }} />; })}
-                </div>
-                <span style={{ fontSize:10, color:'#818cf8', fontWeight:600, whiteSpace:'nowrap' }}>{MUSIC_TRACKS[selectedMusic].name}</span>
+            <div style={{ display:'flex', alignItems:'stretch', height:22, gap:6 }}>
+              <div style={{ width:70, flexShrink:0, display:'flex', alignItems:'center', fontSize:10, color:'#4b5563', fontWeight:600 }}>🎵 מוזיקה</div>
+              <div style={{ flex:1, borderRadius:5, background:'#0a0a1f', border:'1px solid #312e81', display:'flex', alignItems:'center', padding:'0 10px' }}>
+                <span style={{ fontSize:10, color:'#818cf8' }}>{MUSIC_TRACKS[selectedMusic].name} (15%)</span>
               </div>
-            </Track>
+            </div>
           )}
-          <Track label="💬 כתובית">
-            {[0,1,2,3].map(i => (
-              <div key={i} style={{ flex:1, height:'100%', borderRadius:5, background:'#110e00', border:'1px solid #78350f', marginLeft:i>0?2:0, display:'flex', alignItems:'center', padding:'0 5px', overflow:'hidden' }}>
-                <span style={{ fontSize:9, color:'#f59e0b', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>{editSubtitles[i]||'—'}</span>
-              </div>
-            ))}
-          </Track>
+
+          {/* Subtitles — 2 halves per scene */}
+          <div style={{ display:'flex', alignItems:'stretch', height:22, gap:6 }}>
+            <div style={{ width:70, flexShrink:0, display:'flex', alignItems:'center', fontSize:10, color:'#4b5563', fontWeight:600 }}>💬 כתובית</div>
+            <div style={{ flex:1, display:'flex', gap:2 }}>
+              {[0,1,2,3].map(i => {
+                const parts = splitSubtitle(editSubtitles[i]);
+                return (
+                  <div key={i} style={{ flex:SCENE_DURATIONS[i], display:'flex', gap:1 }}>
+                    <div style={{ flex:1, borderRadius:'4px 0 0 4px', background: activeScene===i&&subtitleHalf===0?'#2a1a4e':'#110e00', border:'1px solid #78350f', display:'flex', alignItems:'center', padding:'0 3px', overflow:'hidden' }}>
+                      <span style={{ fontSize:8, color:'#f59e0b', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>{parts[0]||'—'}</span>
+                    </div>
+                    <div style={{ flex:1, borderRadius:'0 4px 4px 0', background: activeScene===i&&subtitleHalf===1?'#2a1a4e':'#0f0b00', border:'1px solid #78350f', borderLeft:'none', display:'flex', alignItems:'center', padding:'0 3px', overflow:'hidden' }}>
+                      <span style={{ fontSize:8, color:'#d97706', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>{parts[1]||'—'}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-    </div>
-  );
-}
-
-function Track({ label, children }) {
-  return (
-    <div style={{ display:'flex', alignItems:'stretch', height:30, gap:6 }}>
-      <div style={{ width:70, flexShrink:0, display:'flex', alignItems:'center', fontSize:10, color:'#4b5563', fontWeight:600, whiteSpace:'nowrap' }}>{label}</div>
-      <div style={{ flex:1, display:'flex', borderRadius:5, overflow:'hidden' }}>{children}</div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}`}</style>
     </div>
   );
 }
@@ -541,7 +532,7 @@ function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAva
         </Section>
         <Section title="🎭 תאר את הסיפור (אופציונלי)">
           <div style={{ fontSize:12, color:'#666', marginBottom:10 }}>תאר אירועים, סגנון — למשל: "מותג בגדים, אישה בחנות מנסה שמלה"</div>
-          <textarea value={storyDescription} onChange={e=>setStoryDescription(e.target.value)} placeholder="כתוב כאן את הסיפור שאתה רוצה..." rows={3}
+          <textarea value={storyDescription} onChange={e=>setStoryDescription(e.target.value)} placeholder="כתוב כאן את הסיפור..." rows={3}
             style={{ width:'100%', padding:'12px 14px', background:'#0a0a0f', border:'1px solid #2a2a3e', borderRadius:10, color:'#fff', fontSize:14, outline:'none', boxSizing:'border-box', resize:'vertical', fontFamily:'system-ui' }} />
         </Section>
         <button onClick={runAgent} style={{ width:'100%', padding:'18px', fontSize:18, fontWeight:700, background:'linear-gradient(135deg,#a855f7,#ec4899)', color:'#fff', border:'none', borderRadius:14, cursor:'pointer', marginTop:8 }}>
