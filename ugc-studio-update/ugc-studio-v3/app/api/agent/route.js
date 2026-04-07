@@ -3,8 +3,8 @@ const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
-// Scene durations: 5, 8, 10, 5 = 28s total
-const SCENE_DURATIONS = [5, 8, 10, 5];
+// Scene durations: 5, 5, 10, 5 = 25s total, voiceover = 24s
+const SCENE_DURATIONS = [5, 5, 10, 5];
 
 async function pollFal(requestId, maxWait = 300000) {
   const start = Date.now();
@@ -73,10 +73,10 @@ async function generateScript(productName, productDesc, applicationArea, storyDe
 Description: ${productDesc}
 How to use: ${applicationArea}${storyContext}
 
-SCENE DURATIONS: Scene 1=5s, Scene 2=8s, Scene 3=10s, Scene 4=5s. Total=28s.
+SCENE DURATIONS: Scene 1=5s, Scene 2=5s, Scene 3=10s, Scene 4=5s. Total=25s, voiceover=24s.
 
 CRITICAL RULES:
-1. Voiceover: 4 parts matching scene durations. Scene 1: ~10 Hebrew words. Scene 2: ~16 Hebrew words. Scene 3: ~20 Hebrew words. Scene 4: ~10 Hebrew words. Natural conversational tone.
+1. Voiceover: 4 parts matching scene durations. Scene 1: ~10 Hebrew words (4.5s). Scene 2: ~10 Hebrew words (4.5s). Scene 3: ~20 Hebrew words (9s). Scene 4: ~10 Hebrew words (4.5s). Total voiceover = 24 seconds. Natural conversational tone.
 2. Each subtitle = exact voiceover text for that scene.
 3. NB prompts: describe person performing action naturally. Product appears naturally in scene — NOT posed commercially, NOT "holding label facing camera like an ad". Show the actual usage action.
 4. Kling prompts: ALWAYS include "person holds product steadily, subtle natural breathing movement, slight head tilt, hand remains stable, no sudden position jumps or shape changes to product, smooth continuous authentic motion, handheld iPhone wobble, no cinematic exaggeration"
@@ -84,14 +84,14 @@ CRITICAL RULES:
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "Hebrew ~10 words frustrated tone",
-  "voiceover_scene2": "Hebrew ~16 words mentions ${productName}",
+  "voiceover_scene1": "Hebrew ~10 words describing THE SPECIFIC PROBLEM this product solves — mention the actual pain (e.g. for teeth whitening: yellow teeth, embarrassed to smile; for acne cream: spots and breakouts; for sleep supplement: can't fall asleep). NOT generic 'I tried everything' — say WHAT the problem is.",
+  "voiceover_scene2": "Hebrew ~10 words mentions ${productName}",
   "voiceover_scene3": "Hebrew ~20 words describes using product and feeling result",
   "voiceover_scene4": "Hebrew ~10 words CTA urgency",
   "scenes": [
     {
       "type": "כאב",
-      "nb_prompt": "woman frustrated in bathroom mirror stressed expression hand on forehead, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference",
+      "nb_prompt": "woman frustrated in bathroom mirror looking at SPECIFIC PROBLEM related to: ${productDesc}, stressed expression examining the problem area closely, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference",
       "kling_prompt": "Person sighs frustrated looking at mirror, person holds product steadily subtle natural breathing movement slight head tilt hand remains stable no sudden position jumps smooth continuous authentic motion, handheld iPhone wobble no cinematic exaggeration",
       "subtitle": "same as voiceover_scene1"
     },
@@ -153,7 +153,7 @@ export async function POST(req) {
       const preparedProduct = productImageUrl || null;
       await send({ step: 'upload_done', progress: 8, message: '✅ מוכן!' });
 
-      await send({ step: 'script', progress: 10, message: '✍️ כותב סקריפט 28 שניות...' });
+      await send({ step: 'script', progress: 10, message: '✍️ כותב סקריפט 24s קריינות...' });
       const script = await generateScript(productName, productDesc, applicationArea, storyDescription);
       const scenes = script?.scenes || getDefaultScenes(productName, applicationArea);
       const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea);
@@ -176,7 +176,7 @@ export async function POST(req) {
           const imageUrls = [];
           if (preparedAvatar) imageUrls.push(preparedAvatar);
           if (prevFrame) imageUrls.push(prevFrame);
-          if (preparedProduct && (i === 1 || i === 2)) imageUrls.push(preparedProduct);
+          if (preparedProduct && (i === 1 || i === 2 || i === 3)) imageUrls.push(preparedProduct);
           const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls);
           frameUrls.push(frameUrl);
           if (frameUrl) prevFrame = frameUrl;
@@ -215,7 +215,7 @@ const STABLE_MOTION = 'person holds product steadily, subtle natural breathing m
 
 function getDefaultScenes(productName, applicationArea) {
   return [
-    { type: 'כאב', nb_prompt: 'woman frustrated in bathroom mirror stressed expression hand on forehead, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference', kling_prompt: `Person sighs frustrated looking at mirror, ${STABLE_MOTION}`, subtitle: 'ממש נמאס לי. ניסיתי הכל ושום דבר לא עבד.' },
+    { type: 'כאב', nb_prompt: `woman frustrated in bathroom mirror looking at specific problem: ${productDesc}, stressed expression examining problem area, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference`, kling_prompt: `Person examines specific problem in mirror frustrated, ${STABLE_MOTION}`, subtitle: `שיניים צהובות ולא יכולה לחייך בתמונות.` },
     { type: 'גילוי', nb_prompt: `same person from reference just discovered ${productName}, holding product naturally genuine curious expression NOT posed like commercial, single frame photo, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person examines ${productName} with curiosity, ${STABLE_MOTION}`, subtitle: `עד שמישהו המליץ לי על ${productName} ולא האמנתי שזה יעזור.` },
     { type: 'שימוש', nb_prompt: `same person from reference performing ${applicationArea} — hands doing PHYSICAL ACTION naturally, product integrated into action NOT as prop, single frame photo not collage, genuine focused expression, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person performs ${applicationArea}, ${STABLE_MOTION}, hands clearly visible, no talking`, subtitle: `התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי.` },
     { type: 'CTA', nb_prompt: `same person from reference genuinely happy smiling naturally at camera, product naturally visible, single frame photo, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person shows genuine happy result natural smile, ${STABLE_MOTION}, pointing casually at camera`, subtitle: `תנסו את ${productName} — יש אחריות מלאה!` }
