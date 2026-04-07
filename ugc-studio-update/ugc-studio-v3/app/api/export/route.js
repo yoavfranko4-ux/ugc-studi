@@ -6,6 +6,17 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
+// Find ffmpeg binary (Railway/Nixpacks puts it in /nix paths)
+async function findFfmpeg() {
+  try {
+    const { stdout } = await execAsync('which ffmpeg 2>/dev/null || find /nix -name ffmpeg -type f 2>/dev/null | head -1');
+    const path = stdout.trim();
+    if (path) { console.log('FFmpeg found:', path); return path; }
+  } catch {}
+  console.log('FFmpeg: using default');
+  return 'ffmpeg';
+}
+
 export async function POST(req) {
   const { videoUrls, audioBase64, musicUrl, subtitles, sceneDurations = [5,5,5,5] } = await req.json();
 
@@ -14,6 +25,8 @@ export async function POST(req) {
   const toDelete = [];
 
   try {
+    const ffmpeg = await findFfmpeg();
+
     // 1. Download videos
     const videoFiles = [];
     for (let i = 0; i < videoUrls.length; i++) {
@@ -53,7 +66,7 @@ export async function POST(req) {
     const outputPath = join(tmp, `output_${ts}.mp4`);
     toDelete.push(outputPath);
 
-    // 5. Build subtitle drawtext — split each subtitle into 2 halves, alternate
+    // 5. Subtitles — split each into 2 halves
     const drawTexts = [];
     let timeOffset = 0;
     videoFiles.forEach((v) => {
@@ -62,11 +75,9 @@ export async function POST(req) {
       if (sub && sub.trim()) {
         const words = sub.trim().split(' ');
         const mid = Math.ceil(words.length / 2);
-        const part1 = words.slice(0, mid).join(' ');
-        const part2 = words.slice(mid).join(' ');
+        const parts = [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
         const halfDur = dur / 2;
-
-        [part1, part2].forEach((part, pi) => {
+        parts.forEach((part, pi) => {
           if (!part) return;
           const startT = timeOffset + pi * halfDur;
           const endT = startT + halfDur - 0.1;
@@ -83,15 +94,15 @@ export async function POST(req) {
     // 6. FFmpeg command
     let cmd;
     if (audioPath && musicPath) {
-      cmd = `ffmpeg -y -f concat -safe 0 -i "${concatPath}" -i "${audioPath}" -i "${musicPath}" ` +
+      cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -i "${audioPath}" -i "${musicPath}" ` +
         `-filter_complex "[0:v]${vfChain}[v];[1:a]volume=1.0[a1];[2:a]volume=0.15,aloop=loop=-1:size=2e+09[a2];[a1][a2]amix=inputs=2:duration=first[a]" ` +
         `-map "[v]" -map "[a]" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -shortest "${outputPath}"`;
     } else if (audioPath) {
-      cmd = `ffmpeg -y -f concat -safe 0 -i "${concatPath}" -i "${audioPath}" ` +
+      cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -i "${audioPath}" ` +
         `-filter_complex "[0:v]${vfChain}[v]" ` +
         `-map "[v]" -map 1:a -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -shortest "${outputPath}"`;
     } else {
-      cmd = `ffmpeg -y -f concat -safe 0 -i "${concatPath}" -vf "${vfChain}" -c:v libx264 -preset fast -crf 23 "${outputPath}"`;
+      cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -vf "${vfChain}" -c:v libx264 -preset fast -crf 23 "${outputPath}"`;
     }
 
     console.log('Running FFmpeg...');
