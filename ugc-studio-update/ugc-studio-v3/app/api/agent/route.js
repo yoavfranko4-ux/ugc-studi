@@ -25,9 +25,7 @@ async function pollFal(requestId, maxWait = 300000) {
 async function generateNBFrame(prompt, imageUrls) {
   const validUrls = imageUrls.filter(Boolean);
   console.log(`NB: ${validUrls.length} images`);
-
-  // Build better prompt with kinetic/dynamic keywords
-  const enhancedPrompt = `${prompt}, kinetic dynamic authentic UGC realism, subtle digital noise, natural softness`;
+  const enhancedPrompt = `${prompt}, kinetic dynamic authentic UGC realism, subtle digital noise, natural softness, imperfect slightly overexposed like real phone footage`;
 
   if (validUrls.length === 0) {
     const res = await fetch('https://queue.fal.run/fal-ai/nano-banana-2', {
@@ -52,7 +50,6 @@ async function generateNBFrame(prompt, imageUrls) {
   return result?.images?.[0]?.url || null;
 }
 
-// Generate voiceover for a single scene text
 async function generateVoice(text) {
   if (!ELEVEN_KEY || !text) return null;
   try {
@@ -83,43 +80,43 @@ Description: ${productDesc}
 How to use: ${applicationArea}${storyContext}
 
 CRITICAL RULES:
-1. Voiceover split into 4 parts — scenes 1, 2, 4 have spoken text (~12-14 Hebrew words each). Scene 3 has NO voiceover (person is demonstrating the product silently).
-2. Each scene subtitle = exact voiceover text for that scene (scene 3 subtitle = short action description).
-3. Scene 3 nb_prompt: ONE single realistic photo, NOT a collage, NOT a grid, NOT split screen.
-4. Kling prompts for scenes 1,2,4: person is TALKING to camera — describe natural head movements, micro-expressions, lips moving, breathing. Use: "lifting her head", "shifting weight", "camera wobbles slightly in sync with movement", "realistic lip sync", "no cinematic exaggeration".
-5. Kling prompt for scene 3: NO talking — person demonstrates product with hands, focused expression, no mouth movement.
+1. Voiceover: 4 parts ~13 Hebrew words each, natural conversational tone.
+2. Each scene subtitle = exact voiceover text.
+3. Scene 3 nb_prompt: ONE single photo, NOT collage/grid/split screen. Show the person DOING the action naturally — not holding the product box/packaging. Describe the physical action with hands (e.g. "applying strip to teeth with fingers" not "holding box").
+4. For scenes 2 and 4 nb_prompt: person interacts naturally with the product IN USE — not posing with packaging. The product should appear naturally in the scene, not "held label facing camera like a commercial". Think authentic UGC.
+5. Kling prompts: natural head movements, micro-expressions, "lifting her head", "shifting weight", "camera wobbles slightly", "no cinematic exaggeration".
 6. STORY INTEGRATION: If story provided, change ALL settings/actions to match it completely.
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "Hebrew ~13 words, frustrated natural tone",
-  "voiceover_scene2": "Hebrew ~13 words, mentions ${productName}",
-  "voiceover_scene3": null,
-  "voiceover_scene4": "Hebrew ~13 words, CTA urgency",
+  "voiceover_scene1": "Hebrew ~13 words frustrated natural tone",
+  "voiceover_scene2": "Hebrew ~13 words mentions ${productName}",
+  "voiceover_scene3": "Hebrew ~13 words describes the action/feeling",
+  "voiceover_scene4": "Hebrew ~13 words CTA urgency",
   "scenes": [
     {
       "type": "כאב",
-      "nb_prompt": "woman frustrated overwhelmed in bathroom mirror stressed expression, morning natural light iPhone selfie vertical, single frame photo, kinetic dynamic, do not change person appearance from reference",
-      "kling_prompt": "Person talking to camera frustrated, lifting her head sighing, shifting weight slightly, camera wobbles in sync with natural movement, realistic lip sync mouth moving naturally, micro-expressions visible, handheld iPhone natural light, no cinematic exaggeration",
-      "subtitle": "exact voiceover_scene1 text"
+      "nb_prompt": "woman frustrated overwhelmed in bathroom mirror stressed expression hand on forehead, morning natural light iPhone selfie vertical, single frame photo, kinetic dynamic, do not change person appearance from reference",
+      "kling_prompt": "Person lifting her head sighing frustrated looking at mirror, shifting weight slightly forward, camera wobbles slightly in sync with movement, micro-expressions visible, handheld iPhone natural light, then settles — no cinematic exaggeration",
+      "subtitle": "same as voiceover_scene1"
     },
     {
       "type": "גילוי",
-      "nb_prompt": "same person from reference photo discovers ${productName} holds it label facing camera curious smile, single frame photo, kinetic dynamic, maintain exact facial features",
-      "kling_prompt": "Continuing from previous scene same person talking to camera excitedly about product, holding it up, eyes wide naturally shifting gaze, head tilting slightly, lips moving conversationally, camera micro-shake authentic, no cinematic exaggeration",
-      "subtitle": "exact voiceover_scene2 text"
+      "nb_prompt": "same person from reference photo in bathroom, just discovered ${productName}, holding the product naturally in hand with genuine curious expression — product appears naturally NOT posed like commercial, single frame photo, kinetic dynamic, maintain exact facial features",
+      "kling_prompt": "Continuing from previous scene same person picks up product curiously, turning it over in hands naturally, eyes wide with interest, shifting weight, head tilting slightly, camera micro-shake authentic, no cinematic exaggeration",
+      "subtitle": "same as voiceover_scene2"
     },
     {
       "type": "שימוש",
-      "nb_prompt": "same person from reference photo actively ${applicationArea}, close up hands and action, single frame photo not collage not grid, genuine focused expression natural light, maintain exact facial features",
-      "kling_prompt": "Continuing from previous scene same person silently demonstrates ${applicationArea} with focused concentration, hands clearly visible performing action step by step, no talking no lip movement, genuine reaction to product texture/feel, authentic handheld iPhone",
-      "subtitle": "מדגימה שימוש במוצר"
+      "nb_prompt": "same person from reference photo actively performing ${applicationArea} — show hands doing the PHYSICAL ACTION naturally close up, product integrated into the action naturally NOT as a prop, single frame photo not collage not grid, genuine focused expression natural light, maintain exact facial features",
+      "kling_prompt": "Continuing from previous scene same person performs ${applicationArea} with focused concentration, hands clearly visible doing the action step by step, genuine tactile reaction to feel/texture, no talking, authentic handheld iPhone slight movement",
+      "subtitle": "same as voiceover_scene3"
     },
     {
       "type": "CTA",
-      "nb_prompt": "same person from reference photo holds ${productName} product confidently points at camera big smile, single frame photo, kinetic dynamic, maintain exact facial features",
-      "kling_prompt": "Continuing from previous scene same person talking directly to camera pointing with finger, excited natural energy, head nodding slightly as she speaks, authentic lip sync movement, shifting weight forward toward camera with enthusiasm, handheld wobble, no cinematic exaggeration",
-      "subtitle": "exact voiceover_scene4 text"
+      "nb_prompt": "same person from reference photo in bathroom, genuinely happy smiling result — person pointing to camera or smiling naturally at result, product naturally visible in scene NOT posed commercially, single frame photo, kinetic dynamic, maintain exact facial features",
+      "kling_prompt": "Continuing from previous scene same person shows genuine happy result, natural smile, pointing casually at camera or showing result area, shifting weight forward enthusiastically, head nodding naturally, handheld wobble, no cinematic exaggeration",
+      "subtitle": "same as voiceover_scene4"
     }
   ]
 }` }]
@@ -131,18 +128,14 @@ Return ONLY valid JSON (no markdown):
     const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
     const v1 = parsed.voiceover_scene1 || '';
     const v2 = parsed.voiceover_scene2 || '';
+    const v3 = parsed.voiceover_scene3 || '';
     const v4 = parsed.voiceover_scene4 || '';
-    parsed.voiceover = `${v1} ${v2} ${v4}`.trim();
+    parsed.voiceover = `${v1} ${v2} ${v3} ${v4}`.trim();
     if (parsed.scenes) {
       parsed.scenes[0].subtitle = v1;
       parsed.scenes[1].subtitle = v2;
-      // scene 3 keeps its subtitle
+      parsed.scenes[2].subtitle = v3;
       parsed.scenes[3].subtitle = v4;
-      // Store per-scene voiceover texts
-      parsed.scenes[0].voiceover_text = v1;
-      parsed.scenes[1].voiceover_text = v2;
-      parsed.scenes[2].voiceover_text = null; // no talking
-      parsed.scenes[3].voiceover_text = v4;
     }
     return parsed;
   } catch { return null; }
@@ -172,26 +165,9 @@ export async function POST(req) {
       const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea);
       await send({ step: 'script_done', progress: 15, message: '✅ סקריפט מוכן!', scenes, voiceover });
 
-      // Generate 4 separate voiceovers (scene 3 = null)
-      await send({ step: 'voice', progress: 16, message: '🎙️ יוצר קריינות לכל סצנה...' });
-      const sceneAudios = [null, null, null, null]; // base64 per scene
-      let fullAudioBase64 = null;
-
-      const voiceTexts = scenes.map(s => s.voiceover_text || null);
-
-      // Generate per-scene audio (scenes 1, 2, 4)
-      for (let i = 0; i < 4; i++) {
-        if (voiceTexts[i]) {
-          await send({ progress: 17 + i, message: `🎙️ קריינות סצנה ${i+1}...` });
-          sceneAudios[i] = await generateVoice(voiceTexts[i]);
-          console.log(`Voice scene ${i+1}: ${sceneAudios[i] ? 'OK' : 'FAIL'}`);
-        }
-      }
-
-      // Also generate full voiceover for the audio track in editor
-      await send({ step: 'voice', progress: 21, message: '🎙️ יוצר קריינות מלאה...' });
-      fullAudioBase64 = await generateVoice(voiceover);
-
+      // Generate full voiceover only
+      await send({ step: 'voice', progress: 18, message: '🎙️ יוצר קריינות V3...' });
+      const fullAudioBase64 = await generateVoice(voiceover);
       if (fullAudioBase64) {
         await send({ step: 'voice_done', progress: 22, message: '✅ קריינות מוכנה!', audioBase64: fullAudioBase64 });
       } else {
@@ -208,7 +184,8 @@ export async function POST(req) {
           const imageUrls = [];
           if (preparedAvatar) imageUrls.push(preparedAvatar);
           if (prevFrame) imageUrls.push(prevFrame);
-          if (preparedProduct) imageUrls.push(preparedProduct);
+          // Only add product image for scenes 2 and 3 (discovery + usage)
+          if (preparedProduct && (i === 1 || i === 2)) imageUrls.push(preparedProduct);
           const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls);
           frameUrls.push(frameUrl);
           if (frameUrl) prevFrame = frameUrl;
@@ -223,10 +200,10 @@ export async function POST(req) {
 
       await send({
         step: 'frames_done', progress: 70,
-        message: '🎬 פריימים מוכנים! מתחיל Kling + Lipsync...',
+        message: '🎬 פריימים מוכנים! מתחיל Kling...',
         frameUrls, scenes, voiceover,
         audioBase64: fullAudioBase64,
-        sceneAudios, // per-scene audio for lipsync
+        sceneAudios: [null, null, null, null],
         klingPrompts: scenes.map(s => s.kling_prompt)
       });
 
@@ -243,15 +220,35 @@ export async function POST(req) {
   });
 }
 
-function getDefaultVoiceover(productName) {
-  return `ממש נמאס לי. ניסיתי כל כך הרבה דברים ושום דבר לא עבד. עד שמישהו המליץ לי על ${productName} ולא האמנתי. תנסו את ${productName} — יש אחריות מלאה, אין לכם מה להפסיד!`;
+function getDefaultVoiceover(productName, applicationArea) {
+  return `ממש נמאס לי. ניסיתי כל כך הרבה דברים ושום דבר לא עבד. עד שמישהו המליץ לי על ${productName} ולא האמנתי. ${applicationArea} — והתוצאות הפתיעו אותי. תנסו את ${productName} יש אחריות מלאה!`;
 }
 
 function getDefaultScenes(productName, applicationArea) {
   return [
-    { type: 'כאב', voiceover_text: `ממש נמאס לי. ניסיתי כל כך הרבה דברים ושום דבר לא עבד.`, nb_prompt: 'woman frustrated overwhelmed in bathroom mirror stressed expression, morning natural light iPhone selfie vertical, single frame photo, kinetic dynamic, do not change person appearance from reference', kling_prompt: 'Person talking to camera frustrated lifting her head sighing, shifting weight slightly, camera wobbles in sync with natural movement, realistic lip sync mouth moving naturally, micro-expressions, handheld iPhone natural light, no cinematic exaggeration', subtitle: `ממש נמאס לי. ניסיתי כל כך הרבה דברים ושום דבר לא עבד.` },
-    { type: 'גילוי', voiceover_text: `עד שמישהו המליץ לי על ${productName} ולא האמנתי שזה יעזור.`, nb_prompt: `same person from reference photo discovers ${productName} holds it label facing camera curious smile, single frame photo, kinetic dynamic, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person talking to camera excitedly about ${productName}, holding it up, eyes wide naturally shifting gaze, head tilting slightly, lips moving conversationally, camera micro-shake authentic, no cinematic exaggeration`, subtitle: `עד שמישהו המליץ לי על ${productName} ולא האמנתי שזה יעזור.` },
-    { type: 'שימוש', voiceover_text: null, nb_prompt: `same person from reference photo actively ${applicationArea}, close up hands and action, single frame photo not collage not grid, genuine focused expression natural light, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person silently demonstrates ${applicationArea}, hands clearly visible performing action step by step, no talking no lip movement, genuine reaction, authentic handheld iPhone`, subtitle: 'מדגימה שימוש במוצר' },
-    { type: 'CTA', voiceover_text: `תנסו את ${productName} — יש אחריות מלאה, אין לכם מה להפסיד!`, nb_prompt: `same person from reference photo holds ${productName} confidently points at camera big smile, single frame photo, kinetic dynamic, maintain exact facial features`, kling_prompt: 'Continuing from previous scene same person talking directly to camera pointing with finger, excited natural energy, head nodding as she speaks, authentic lip sync movement, shifting weight forward toward camera with enthusiasm, handheld wobble, no cinematic exaggeration', subtitle: `תנסו את ${productName} — יש אחריות מלאה, אין לכם מה להפסיד!` }
+    {
+      type: 'כאב',
+      nb_prompt: 'woman frustrated overwhelmed in bathroom mirror stressed expression hand on forehead, morning natural light iPhone selfie vertical, single frame photo, kinetic dynamic, do not change person appearance from reference',
+      kling_prompt: 'Person lifting her head sighing frustrated looking at mirror, shifting weight slightly forward, camera wobbles slightly in sync with movement, micro-expressions visible, handheld iPhone natural light, then settles — no cinematic exaggeration',
+      subtitle: 'ממש נמאס לי. ניסיתי הכל ושום דבר לא עבד.'
+    },
+    {
+      type: 'גילוי',
+      nb_prompt: `same person from reference photo in bathroom, just discovered ${productName}, holding the product naturally with genuine curious expression — product appears naturally NOT posed like commercial, single frame photo, kinetic dynamic, maintain exact facial features`,
+      kling_prompt: `Continuing from previous scene same person picks up ${productName} curiously, turning it over in hands naturally, eyes wide with interest, shifting weight, head tilting slightly, camera micro-shake authentic, no cinematic exaggeration`,
+      subtitle: `עד שמישהו המליץ לי על ${productName} ולא האמנתי שזה יעזור.`
+    },
+    {
+      type: 'שימוש',
+      nb_prompt: `same person from reference photo performing ${applicationArea} — hands doing the PHYSICAL ACTION naturally close up, product integrated naturally NOT as a prop, single frame photo not collage not grid, genuine focused expression, maintain exact facial features`,
+      kling_prompt: `Continuing from previous scene same person performs ${applicationArea} with focused concentration, hands clearly visible doing the action, genuine tactile reaction, no talking, authentic handheld iPhone slight movement`,
+      subtitle: `${applicationArea} — והתוצאות הפתיעו אותי.`
+    },
+    {
+      type: 'CTA',
+      nb_prompt: `same person from reference photo genuinely happy smiling at result in bathroom mirror, product naturally visible in scene, pointing casually at camera, single frame photo, kinetic dynamic, maintain exact facial features`,
+      kling_prompt: 'Continuing from previous scene same person shows genuine happy satisfied result, natural smile, pointing casually at camera, shifting weight forward enthusiastically, head nodding naturally, handheld wobble, no cinematic exaggeration',
+      subtitle: `תנסו את ${productName} — יש אחריות מלאה!`
+    }
   ];
 }
