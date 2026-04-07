@@ -13,6 +13,18 @@ const AVATARS = [
 const SCENE_DURATION = 5;
 const TOTAL_DURATION = 20;
 
+// Royalty-free music tracks
+const MUSIC_TRACKS = [
+  { id: 0, name: 'ללא מוזיקה', url: null, emoji: '🔇' },
+  { id: 1, name: 'Upbeat Pop', url: 'https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3', emoji: '🎵' },
+  { id: 2, name: 'Chill Vibes', url: 'https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0c6ff1bab.mp3', emoji: '🎶' },
+  { id: 3, name: 'Energetic', url: 'https://cdn.pixabay.com/download/audio/2022/03/15/audio_8cb749e7d5.mp3', emoji: '⚡' },
+  { id: 4, name: 'Motivational', url: 'https://cdn.pixabay.com/download/audio/2021/11/25/audio_5b31fd7e64.mp3', emoji: '🔥' },
+];
+
+// Proxy video URL to fix CORS
+const proxyUrl = (url) => url ? `/api/proxy?url=${encodeURIComponent(url)}` : null;
+
 export default function Home() {
   const [screen, setScreen] = useState('form');
   const [selectedAvatar, setSelectedAvatar] = useState(null);
@@ -33,6 +45,7 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [klingStatus, setKlingStatus] = useState(['idle','idle','idle','idle']);
   const [editSubtitles, setEditSubtitles] = useState(['','','','']);
+  const [selectedMusic, setSelectedMusic] = useState(0);
 
   const addLog = (msg, type='info') => setLogs(prev => [...prev.slice(-60), { msg, type, time: new Date().toLocaleTimeString('he-IL') }]);
 
@@ -153,12 +166,14 @@ export default function Home() {
     activeScene={activeScene} setActiveScene={setActiveScene}
     editSubtitles={editSubtitles} setEditSubtitles={setEditSubtitles}
     allDone={allDone} totalDone={totalDone}
+    selectedMusic={selectedMusic} setSelectedMusic={setSelectedMusic}
     onNew={() => setScreen('form')}
   />;
 }
 
-function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBase64, frameUrls, videoUrls, klingStatus, activeScene, setActiveScene, editSubtitles, setEditSubtitles, allDone, totalDone, onNew }) {
+function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBase64, frameUrls, videoUrls, klingStatus, activeScene, setActiveScene, editSubtitles, setEditSubtitles, allDone, totalDone, selectedMusic, setSelectedMusic, onNew }) {
   const audioRef = useRef(null);
+  const musicRef = useRef(null);
   const videoRefs = useRef([null,null,null,null]);
   const [showLogs, setShowLogs] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -166,13 +181,21 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
   const logsEndRef = useRef(null);
   const animFrameRef = useRef(null);
   const playStartRef = useRef(null);
+  // Store proxied URLs
+  const proxiedUrls = useRef([null,null,null,null]);
 
   useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
+
+  // Update proxied URLs when videoUrls change
+  useEffect(() => {
+    proxiedUrls.current = videoUrls.map(u => proxyUrl(u));
+  }, [videoUrls]);
 
   const stopAll = useCallback(() => {
     setIsPlaying(false);
     cancelAnimationFrame(animFrameRef.current);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+    if (musicRef.current) { musicRef.current.pause(); musicRef.current.currentTime = 0; }
     videoRefs.current.forEach(v => { if (v) { v.pause(); v.currentTime = 0; } });
     setCurrentTime(0); setActiveScene(0);
   }, [setActiveScene]);
@@ -183,13 +206,30 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
     setTimeout(() => {
       setIsPlaying(true);
       playStartRef.current = performance.now();
-      if (audioRef.current && audioBase64) { audioRef.current.currentTime = 0; audioRef.current.play().catch(()=>{}); }
+
+      // Play voiceover
+      if (audioRef.current && audioBase64) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.volume = 1.0;
+        audioRef.current.play().catch(()=>{});
+      }
+
+      // Play music at low volume
+      const musicTrack = MUSIC_TRACKS[selectedMusic];
+      if (musicRef.current && musicTrack?.url) {
+        musicRef.current.currentTime = 0;
+        musicRef.current.volume = 0.15;
+        musicRef.current.play().catch(()=>{});
+      }
+
+      // Start first video
       const firstScene = videoUrls.findIndex(Boolean);
       if (firstScene >= 0 && videoRefs.current[firstScene]) {
         setActiveScene(firstScene);
         videoRefs.current[firstScene].currentTime = 0;
         videoRefs.current[firstScene].play().catch(()=>{});
       }
+
       const tick = () => {
         const elapsed = (performance.now() - playStartRef.current) / 1000;
         setCurrentTime(elapsed);
@@ -198,24 +238,49 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
         setActiveScene(sceneIdx);
         if (sceneIdx !== prevIdx) {
           if (videoRefs.current[prevIdx]) { videoRefs.current[prevIdx].pause(); videoRefs.current[prevIdx].currentTime = 0; }
-          if (videoUrls[sceneIdx] && videoRefs.current[sceneIdx]) { videoRefs.current[sceneIdx].currentTime = 0; videoRefs.current[sceneIdx].play().catch(()=>{}); }
+          if (videoUrls[sceneIdx] && videoRefs.current[sceneIdx]) {
+            videoRefs.current[sceneIdx].currentTime = 0;
+            videoRefs.current[sceneIdx].play().catch(()=>{});
+          }
         }
         if (elapsed >= TOTAL_DURATION) { stopAll(); return; }
         animFrameRef.current = requestAnimationFrame(tick);
       };
       animFrameRef.current = requestAnimationFrame(tick);
     }, 50);
-  }, [videoUrls, audioBase64, stopAll, setActiveScene]);
+  }, [videoUrls, audioBase64, selectedMusic, stopAll, setActiveScene]);
 
   useEffect(() => () => cancelAnimationFrame(animFrameRef.current), []);
 
   const audioSrc = audioBase64 ? `data:audio/mpeg;base64,${audioBase64}` : null;
+  const musicSrc = MUSIC_TRACKS[selectedMusic]?.url || null;
   const timePercent = Math.min((currentTime / TOTAL_DURATION) * 100, 100);
   const sceneTypes = ['כאב 😤','גילוי 💡','שימוש ✨','CTA 🚀'];
   const klingIcon = (s) => s==='loading'?'⏳':s==='done'?'🎬':s==='error'?'❌':'—';
 
+  // Subtitle: split to max 2 lines of ~20 chars each
+  const formatSubtitle = (text) => {
+    if (!text) return '';
+    const words = text.split(' ');
+    const lines = [];
+    let current = '';
+    for (const w of words) {
+      if ((current + ' ' + w).trim().length > 22 && current) {
+        lines.push(current.trim());
+        current = w;
+        if (lines.length >= 2) break;
+      } else {
+        current = (current + ' ' + w).trim();
+      }
+    }
+    if (current && lines.length < 2) lines.push(current.trim());
+    return lines.join('\n');
+  };
+
   return (
     <div style={{ height:'100vh', background:'#0d0e14', color:'#fff', fontFamily:'system-ui', direction:'rtl', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+
+      {/* Top Bar */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 16px', background:'#111318', borderBottom:'1px solid #1e2030', flexShrink:0, height:46 }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <button onClick={onNew} style={{ padding:'5px 12px', background:'#1e2030', border:'1px solid #2a2d40', borderRadius:7, color:'#aaa', cursor:'pointer', fontSize:12 }}>← חדש</button>
@@ -234,10 +299,21 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
             </div>
           )}
           <button onClick={()=>setShowLogs(!showLogs)} style={{ padding:'5px 10px', background:showLogs?'#a855f720':'#1e2030', border:`1px solid ${showLogs?'#a855f7':'#2a2d40'}`, borderRadius:7, color:showLogs?'#a855f7':'#aaa', cursor:'pointer', fontSize:11 }}>📋 לוג</button>
-          {videoUrls.some(Boolean) && <button style={{ padding:'5px 14px', background:'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', borderRadius:7, color:'#fff', cursor:'pointer', fontSize:12, fontWeight:700 }}>ייצא ⬇️</button>}
+          {videoUrls.some(Boolean) && (
+            <button onClick={() => {
+              const urls = videoUrls.filter(Boolean);
+              urls.forEach((u, i) => {
+                const a = document.createElement('a');
+                a.href = proxyUrl(u);
+                a.download = `scene_${i+1}.mp4`;
+                a.click();
+              });
+            }} style={{ padding:'5px 14px', background:'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', borderRadius:7, color:'#fff', cursor:'pointer', fontSize:12, fontWeight:700 }}>ייצא ⬇️</button>
+          )}
         </div>
       </div>
 
+      {/* Logs */}
       {showLogs && (
         <div style={{ height:140, background:'#090a0f', borderBottom:'1px solid #1e2030', overflow:'auto', padding:'8px 16px', flexShrink:0 }}>
           {logs.map((log,i) => (
@@ -249,12 +325,16 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
         </div>
       )}
 
+      {/* Main */}
       <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
+
+        {/* Left: scenes */}
         <div style={{ width:155, background:'#111318', borderLeft:'1px solid #1e2030', overflow:'auto', padding:10, flexShrink:0 }}>
           <div style={{ fontSize:10, color:'#374151', fontWeight:700, marginBottom:8, textTransform:'uppercase', letterSpacing:1 }}>מדיה</div>
           {[0,1,2,3].map(i => (
             <div key={i} onClick={()=>setActiveScene(i)} style={{ borderRadius:8, overflow:'hidden', marginBottom:10, cursor:'pointer', border:activeScene===i?'2px solid #a855f7':'2px solid transparent', background:'#0d0e14', position:'relative' }}>
-              {frameUrls[i] ? <img src={frameUrls[i]} style={{ width:'100%', aspectRatio:'9/16', objectFit:'cover', display:'block' }} />
+              {frameUrls[i]
+                ? <img src={frameUrls[i]} style={{ width:'100%', aspectRatio:'9/16', objectFit:'cover', display:'block' }} />
                 : <div style={{ width:'100%', aspectRatio:'9/16', display:'flex', alignItems:'center', justifyContent:'center', background:'#111318' }}>{isGenerating?<Spinner size={20}/>:<span style={{ color:'#374151', fontSize:20 }}>□</span>}</div>}
               <div style={{ position:'absolute', top:4, left:4, fontSize:12 }}>{klingIcon(klingStatus[i])}</div>
               <div style={{ padding:'4px 6px', fontSize:10, color:'#9ca3af' }}>{scenes[i]?.type||sceneTypes[i]}</div>
@@ -262,12 +342,14 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
           ))}
         </div>
 
+        {/* Center: monitor */}
         <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', background:'#0a0b10', padding:16 }}>
           <div style={{ position:'relative', height:'100%', maxHeight:500, aspectRatio:'9/16', background:'#000', borderRadius:12, overflow:'hidden', boxShadow:'0 0 60px rgba(168,85,247,0.15)' }}>
             {[0,1,2,3].map(i => (
-              <video key={i} ref={el=>videoRefs.current[i]=el} src={videoUrls[i]||undefined}
+              <video key={i} ref={el=>videoRefs.current[i]=el}
+                src={proxiedUrls.current[i] || undefined}
                 style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover', display:activeScene===i&&videoUrls[i]?'block':'none' }}
-                playsInline />
+                playsInline crossOrigin="anonymous" />
             ))}
             {!videoUrls[activeScene] && (
               frameUrls[activeScene]
@@ -276,19 +358,38 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
                     {isGenerating?<><Spinner size={40}/><span style={{ color:'#374151', fontSize:13 }}>מייצר...</span></>:<span style={{ fontSize:48 }}>🎬</span>}
                   </div>
             )}
+
+            {/* Subtitle — centered, max 2 lines */}
             {editSubtitles[activeScene] && (
-              <div style={{ position:'absolute', bottom:32, left:0, right:0, textAlign:'center', padding:'0 12px' }}>
-                <span style={{ background:'rgba(0,0,0,0.8)', color:'#fff', padding:'5px 12px', borderRadius:6, fontSize:14, fontWeight:700 }}>{editSubtitles[activeScene]}</span>
+              <div style={{ position:'absolute', bottom:40, left:0, right:0, display:'flex', justifyContent:'center', padding:'0 16px' }}>
+                <div style={{ background:'rgba(0,0,0,0.82)', color:'#fff', padding:'8px 16px', borderRadius:8, fontSize:16, fontWeight:800, textAlign:'center', lineHeight:1.4, maxWidth:'85%', whiteSpace:'pre-line', textShadow:'0 1px 4px rgba(0,0,0,0.8)' }}>
+                  {formatSubtitle(editSubtitles[activeScene])}
+                </div>
               </div>
             )}
+
             <div style={{ position:'absolute', top:8, right:8, background:'rgba(0,0,0,0.7)', borderRadius:5, padding:'2px 8px', fontSize:10, color:'#a855f7' }}>
               {klingStatus[activeScene]==='loading'?'🎬 Kling...':klingStatus[activeScene]==='done'?'✅':frameUrls[activeScene]?'🎨 פריים':'⏳'}
             </div>
           </div>
         </div>
 
+        {/* Right: controls */}
         <div style={{ width:255, background:'#111318', borderRight:'1px solid #1e2030', overflow:'auto', padding:14, flexShrink:0 }}>
           <div style={{ fontSize:10, color:'#374151', fontWeight:700, marginBottom:12, textTransform:'uppercase', letterSpacing:1 }}>עריכה</div>
+
+          {/* Music selector */}
+          <RightSection title="🎵 מוזיקת רקע">
+            {MUSIC_TRACKS.map(t => (
+              <div key={t.id} onClick={()=>setSelectedMusic(t.id)} style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', marginBottom:5, borderRadius:7, cursor:'pointer', background:selectedMusic===t.id?'#1a0a2e':'#0d0e14', border:`1px solid ${selectedMusic===t.id?'#a855f7':'#1e2030'}` }}>
+                <span style={{ fontSize:14 }}>{t.emoji}</span>
+                <span style={{ fontSize:12, color:selectedMusic===t.id?'#c4b5fd':'#9ca3af' }}>{t.name}</span>
+                {selectedMusic===t.id && <span style={{ marginRight:'auto', fontSize:10, color:'#a855f7' }}>✓</span>}
+              </div>
+            ))}
+          </RightSection>
+
+          {/* Subtitles */}
           <RightSection title="💬 כתוביות">
             {[0,1,2,3].map(i => (
               <div key={i} style={{ marginBottom:8 }}>
@@ -299,16 +400,20 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
               </div>
             ))}
           </RightSection>
+
           {voiceover && <RightSection title="📝 סקריפט"><p style={{ fontSize:11, color:'#9ca3af', lineHeight:1.7, margin:0 }}>{voiceover}</p></RightSection>}
+
+          {/* Downloads */}
           <RightSection title="⬇️ הורדות">
             {[0,1,2,3].map(i => videoUrls[i]
-              ? <a key={i} href={videoUrls[i]} download target="_blank" style={{ display:'block', padding:'7px 10px', marginBottom:6, background:'#0f1f0f', border:'1px solid #22c55e', borderRadius:7, color:'#22c55e', textDecoration:'none', fontSize:12, textAlign:'center' }}>⬇️ סצנה {i+1}</a>
+              ? <a key={i} href={proxyUrl(videoUrls[i])} download={`scene_${i+1}.mp4`} style={{ display:'block', padding:'7px 10px', marginBottom:6, background:'#0f1f0f', border:'1px solid #22c55e', borderRadius:7, color:'#22c55e', textDecoration:'none', fontSize:12, textAlign:'center' }}>⬇️ סצנה {i+1}</a>
               : <div key={i} style={{ padding:'7px 10px', marginBottom:6, background:'#111318', border:'1px solid #1e2030', borderRadius:7, color:'#374151', fontSize:12, textAlign:'center' }}>{klingStatus[i]==='loading'?`⏳ סצנה ${i+1} Kling...`:isGenerating?`⏳ סצנה ${i+1}...`:`— סצנה ${i+1}`}</div>
             )}
           </RightSection>
         </div>
       </div>
 
+      {/* TIMELINE */}
       <div style={{ height:165, background:'#0a0b0f', borderTop:'2px solid #1e2030', flexShrink:0, display:'flex', flexDirection:'column' }}>
         <div style={{ display:'flex', alignItems:'center', gap:12, padding:'8px 16px', borderBottom:'1px solid #1e2030' }}>
           <button onClick={isPlaying?stopAll:playAll} style={{ width:32, height:32, borderRadius:'50%', background:'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', color:'#fff', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -317,6 +422,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
           <button onClick={stopAll} style={{ width:28, height:28, borderRadius:'50%', background:'#1e2030', border:'1px solid #2a2d40', color:'#aaa', cursor:'pointer', fontSize:12, display:'flex', alignItems:'center', justifyContent:'center' }}>⏹</button>
           <span style={{ fontSize:12, color:'#6b7280', minWidth:80 }}>{formatTime(currentTime)} / {formatTime(TOTAL_DURATION)}</span>
           {audioSrc && <audio ref={audioRef} src={audioSrc} style={{ display:'none' }} />}
+          {musicSrc && <audio ref={musicRef} src={musicSrc} loop style={{ display:'none' }} />}
           <div style={{ flex:1, height:4, background:'#1e2030', borderRadius:2, position:'relative', cursor:'pointer' }}
             onClick={e => {
               const rect = e.currentTarget.getBoundingClientRect();
@@ -326,7 +432,9 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
             <div style={{ height:'100%', width:`${timePercent}%`, background:'linear-gradient(90deg,#a855f7,#ec4899)', borderRadius:2 }} />
             <div style={{ position:'absolute', top:-4, left:`${timePercent}%`, width:12, height:12, background:'#a855f7', borderRadius:'50%', transform:'translateX(-50%)', border:'2px solid #0a0b0f' }} />
           </div>
+          {selectedMusic > 0 && <span style={{ fontSize:11, color:'#a855f7' }}>{MUSIC_TRACKS[selectedMusic].emoji} {MUSIC_TRACKS[selectedMusic].name}</span>}
         </div>
+
         <div style={{ flex:1, padding:'8px 16px', display:'flex', flexDirection:'column', gap:5, overflow:'hidden' }}>
           <div style={{ display:'flex', height:14 }}>
             <div style={{ width:70, flexShrink:0 }} />
@@ -337,6 +445,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
               <div style={{ position:'absolute', top:0, left:`${timePercent}%`, width:1, height:300, background:'#a855f7', zIndex:10, opacity:0.8, pointerEvents:'none' }} />
             </div>
           </div>
+
           <Track label="🎬 וידאו">
             {[0,1,2,3].map(i => (
               <div key={i} onClick={()=>setActiveScene(i)} style={{ flex:1, height:'100%', borderRadius:5, overflow:'hidden', cursor:'pointer', border:activeScene===i?'2px solid #a855f7':'2px solid transparent', marginLeft:i>0?2:0, background:'#150e2a', position:'relative', display:'flex', alignItems:'center', gap:4, padding:'0 5px' }}>
@@ -348,6 +457,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
               </div>
             ))}
           </Track>
+
           <Track label="🎙️ קול">
             <div style={{ flex:1, height:'100%', borderRadius:5, background:audioBase64?'#0a1f0f':'#0a100c', border:`1px solid ${audioBase64?'#22c55e':'#1e2030'}`, display:'flex', alignItems:'center', padding:'0 10px', gap:6, overflow:'hidden' }}>
               {audioBase64 ? (
@@ -364,6 +474,22 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
               ) : <span style={{ fontSize:11, color:'#374151' }}>{isGenerating?'⏳ מייצר קריינות...':'— אין קריינות'}</span>}
             </div>
           </Track>
+
+          {selectedMusic > 0 && (
+            <Track label="🎵 מוזיקה">
+              <div style={{ flex:1, height:'100%', borderRadius:5, background:'#0a0a1f', border:'1px solid #312e81', display:'flex', alignItems:'center', padding:'0 10px', gap:6 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:1, height:'65%' }}>
+                  {Array.from({length:50}).map((_,j) => {
+                    const h = 15+Math.sin(j*1.2)*12;
+                    const active = (j/50) < (currentTime/TOTAL_DURATION);
+                    return <div key={j} style={{ width:2, height:`${h}%`, background:active?'#818cf8':'#1e1b4b', borderRadius:1 }} />;
+                  })}
+                </div>
+                <span style={{ fontSize:10, color:'#818cf8', fontWeight:600, whiteSpace:'nowrap' }}>{MUSIC_TRACKS[selectedMusic].name} (vol 15%)</span>
+              </div>
+            </Track>
+          )}
+
           <Track label="💬 כתובית">
             {[0,1,2,3].map(i => (
               <div key={i} style={{ flex:1, height:'100%', borderRadius:5, background:'#110e00', border:'1px solid #78350f', marginLeft:i>0?2:0, display:'flex', alignItems:'center', padding:'0 5px', overflow:'hidden' }}>
@@ -373,6 +499,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
           </Track>
         </div>
       </div>
+
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
@@ -380,7 +507,7 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
 
 function Track({ label, children }) {
   return (
-    <div style={{ display:'flex', alignItems:'stretch', height:32, gap:6 }}>
+    <div style={{ display:'flex', alignItems:'stretch', height:30, gap:6 }}>
       <div style={{ width:70, flexShrink:0, display:'flex', alignItems:'center', fontSize:10, color:'#4b5563', fontWeight:600, whiteSpace:'nowrap' }}>{label}</div>
       <div style={{ flex:1, display:'flex', borderRadius:5, overflow:'hidden' }}>{children}</div>
     </div>
@@ -413,7 +540,6 @@ function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAva
           <h1 style={{ fontSize:36, fontWeight:800, background:'linear-gradient(135deg,#a855f7,#ec4899)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', margin:0 }}>🎬 UGC Studio</h1>
           <p style={{ color:'#888', marginTop:8 }}>צור סרטוני UGC ויראליים עם AI</p>
         </div>
-
         <Section title="👤 בחר אווטאר">
           <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:8, marginBottom:12 }}>
             {AVATARS.map(a => (
@@ -428,7 +554,6 @@ function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAva
             <span style={{ color:'#aaa', fontSize:14 }}>{customAvatar?'✅ אווטאר אישי הועלה':'העלה אווטאר אישי'}</span>
           </label>
         </Section>
-
         <Section title="📦 תמונת מוצר">
           <label style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer', padding:'12px 16px', background:'#1a1a2e', borderRadius:10, border:productImage?'2px solid #a855f7':'2px dashed #333' }}>
             <input type="file" accept="image/*" onChange={handleProductUpload} style={{ display:'none' }} />
@@ -436,26 +561,19 @@ function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAva
             <span style={{ color:'#aaa', fontSize:14 }}>{productImage?'✅ תמונת מוצר הועלתה':'העלה תמונת מוצר'}</span>
           </label>
         </Section>
-
         <Section title="✍️ פרטי המוצר">
           <Input label="שם המוצר *" value={productName} onChange={e=>setProductName(e.target.value)} placeholder="מדבקות הלבנת שיניים FRAKO" />
           <Input label="מה המוצר פותר" value={productDesc} onChange={e=>setProductDesc(e.target.value)} placeholder="מלבין שיניים תוך 7 ימים, ללא רגישות" />
           <Input label="איך משתמשים" value={applicationArea} onChange={e=>setApplicationArea(e.target.value)} placeholder="מניחים על השיניים 30 דקות, מסירים ושוטפים" />
         </Section>
-
         <Section title="🎭 תאר את הסיפור (אופציונלי)">
           <div style={{ fontSize:12, color:'#666', marginBottom:10 }}>
-            תאר אירועים, סגנון, או רעיון ספציפי שאתה רוצה — למשל: "מותג בגדים, אישה בחנות מנסה שמלה ומתאהבת בה" או "גבר בחדר כושר מגלה כמסי כוח חדש לאחר נטילת התוסף"
+            תאר אירועים, סגנון, או רעיון ספציפי — למשל: "מותג בגדים, אישה בחנות מנסה שמלה" או "גבר בחדר כושר מגלה כוח חדש"
           </div>
-          <textarea
-            value={storyDescription}
-            onChange={e=>setStoryDescription(e.target.value)}
-            placeholder="כתוב כאן את הסיפור שאתה רוצה..."
-            rows={3}
-            style={{ width:'100%', padding:'12px 14px', background:'#0a0a0f', border:'1px solid #2a2a3e', borderRadius:10, color:'#fff', fontSize:14, outline:'none', boxSizing:'border-box', resize:'vertical', fontFamily:'system-ui' }}
-          />
+          <textarea value={storyDescription} onChange={e=>setStoryDescription(e.target.value)}
+            placeholder="כתוב כאן את הסיפור שאתה רוצה..." rows={3}
+            style={{ width:'100%', padding:'12px 14px', background:'#0a0a0f', border:'1px solid #2a2a3e', borderRadius:10, color:'#fff', fontSize:14, outline:'none', boxSizing:'border-box', resize:'vertical', fontFamily:'system-ui' }} />
         </Section>
-
         <button onClick={runAgent} style={{ width:'100%', padding:'18px', fontSize:18, fontWeight:700, background:'linear-gradient(135deg,#a855f7,#ec4899)', color:'#fff', border:'none', borderRadius:14, cursor:'pointer', marginTop:8 }}>
           🎬 צור 4 סצנות UGC עכשיו
         </button>
