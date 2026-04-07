@@ -155,7 +155,7 @@ export async function POST(req) {
 
       await send({ step: 'script', progress: 10, message: '✍️ כותב סקריפט 24s קריינות...' });
       const script = await generateScript(productName, productDesc, applicationArea, storyDescription);
-      const scenes = script?.scenes || getDefaultScenes(productName, applicationArea);
+      const scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
       const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea);
       await send({ step: 'script_done', progress: 15, message: '✅ סקריפט מוכן!', scenes, voiceover });
 
@@ -213,7 +213,7 @@ function getDefaultVoiceover(productName, applicationArea) {
 
 const STABLE_MOTION = 'person holds product steadily, subtle natural breathing movement, slight head tilt, hand remains stable, no sudden position jumps or shape changes to product, smooth continuous authentic motion, handheld iPhone wobble, no cinematic exaggeration';
 
-function getDefaultScenes(productName, applicationArea) {
+function getDefaultScenes(productName, applicationArea, productDesc) {
   return [
     { type: 'כאב', nb_prompt: `woman frustrated in bathroom mirror looking at specific problem: ${productDesc}, stressed expression examining problem area, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference`, kling_prompt: `Person examines specific problem in mirror frustrated, ${STABLE_MOTION}`, subtitle: `שיניים צהובות ולא יכולה לחייך בתמונות.` },
     { type: 'גילוי', nb_prompt: `same person from reference just discovered ${productName}, holding product naturally genuine curious expression NOT posed like commercial, single frame photo, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person examines ${productName} with curiosity, ${STABLE_MOTION}`, subtitle: `עד שמישהו המליץ לי על ${productName} ולא האמנתי שזה יעזור.` },
