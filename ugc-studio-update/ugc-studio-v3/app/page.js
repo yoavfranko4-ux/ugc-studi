@@ -41,7 +41,11 @@ async function uploadToFal(blob, filename) {
 // Returns a Blob (video/webm) with the subtitle baked in.
 async function burnSubtitlesIntoVideo(videoUrl, subtitle, duration) {
   return new Promise((resolve, reject) => {
-    const deadline = setTimeout(() => reject(new Error('Subtitle burn timeout')), (duration + 15) * 1000);
+    // setInterval keeps running in background tabs; rAF freezes → timeout
+    const deadline = setTimeout(() => {
+      if (intervalId) clearInterval(intervalId);
+      reject(new Error('Subtitle burn timeout'));
+    }, (duration + 30) * 1000);
 
     const video = document.createElement('video');
     video.crossOrigin = 'anonymous';
@@ -52,10 +56,22 @@ async function burnSubtitlesIntoVideo(videoUrl, subtitle, duration) {
     const ctx = canvas.getContext('2d');
     const chunks = [];
     let recorder = null;
-    let animId = null;
+    let intervalId = null;
+    let stopped = false;
 
-    const done = (blob) => { clearTimeout(deadline); if (animId) cancelAnimationFrame(animId); resolve(blob); };
-    const fail = (e)  => { clearTimeout(deadline); if (animId) cancelAnimationFrame(animId); reject(e); };
+    const stopAll = () => {
+      if (stopped) return;
+      stopped = true;
+      clearTimeout(deadline);
+      if (intervalId) { clearInterval(intervalId); intervalId = null; }
+    };
+    const done = (blob) => { stopAll(); resolve(blob); };
+    const fail = (e)  => { stopAll(); reject(e); };
+
+    const stopRecording = () => {
+      stopAll();
+      if (recorder && recorder.state === 'recording') recorder.stop();
+    };
 
     video.onloadedmetadata = () => {
       canvas.width  = video.videoWidth  || 1080;
@@ -69,7 +85,7 @@ async function burnSubtitlesIntoVideo(videoUrl, subtitle, duration) {
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
       recorder.onstop = () => done(new Blob(chunks, { type: mimeType }));
 
-      // Split subtitle into two halves shown at first/second half of scene
+      // Split subtitle into two halves
       const words = subtitle ? subtitle.trim().split(' ') : [];
       const mid = Math.ceil(words.length / 2);
       const parts = [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
@@ -87,7 +103,6 @@ async function burnSubtitlesIntoVideo(videoUrl, subtitle, duration) {
         const textY = h - 100;
         const metrics = ctx.measureText(text);
         const pad = 20;
-        // background box
         ctx.fillStyle = 'rgba(0,0,0,0.8)';
         const bx = textX - metrics.width / 2 - pad;
         const by = textY - fontSize - 8;
@@ -95,30 +110,30 @@ async function burnSubtitlesIntoVideo(videoUrl, subtitle, duration) {
         const bh = fontSize + 24;
         if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); }
         else ctx.fillRect(bx, by, bw, bh);
-        // text
         ctx.fillStyle = '#ffffff';
         ctx.fillText(text, textX, textY);
         ctx.restore();
       };
 
+      // video.ended fires reliably even in background tabs
+      video.addEventListener('ended', stopRecording);
+
       recorder.start(100);
       video.currentTime = 0;
       video.play().catch(fail);
 
-      const drawFrame = () => {
-        if (!recorder || recorder.state !== 'recording') return;
-        if (video.ended || video.currentTime >= duration + 0.15) {
-          recorder.stop(); return;
-        }
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      // setInterval instead of requestAnimationFrame — works in background tabs
+      intervalId = setInterval(() => {
+        if (!recorder || recorder.state !== 'recording') { clearInterval(intervalId); return; }
+        if (video.ended || video.currentTime >= duration + 0.15) { stopRecording(); return; }
+        try { ctx.drawImage(video, 0, 0, canvas.width, canvas.height); } catch {}
         const half = video.currentTime < duration / 2 ? 0 : 1;
         drawSubtitle(parts[half] || '');
-        animId = requestAnimationFrame(drawFrame);
-      };
-      animId = requestAnimationFrame(drawFrame);
+      }, 33); // ~30fps
     };
 
-    video.onerror = () => fail(new Error('Video load error'));
+    video.onerror = () => fail(new Error('Video load error for ' + videoUrl));
+    // crossOrigin must be set BEFORE src
     video.src = `/api/proxy?url=${encodeURIComponent(videoUrl)}`;
   });
 }

@@ -6,28 +6,36 @@ export async function POST(req) {
     const file = formData.get('file');
     if (!file) return Response.json({ error: 'No file provided' }, { status: 400 });
 
-    const buffer = await file.arrayBuffer();
+    const arrayBuffer = await file.arrayBuffer();
+    // Node.js fetch requires a Buffer (not ArrayBuffer) for binary body
+    const body = Buffer.from(arrayBuffer);
     const contentType = file.type || 'application/octet-stream';
 
-    // Upload to fal.ai storage — returns a publicly accessible CDN URL
+    console.log(`Uploading to fal.ai storage: ${body.length} bytes, type=${contentType}`);
+
     const res = await fetch('https://storage.fal.run/', {
       method: 'POST',
       headers: {
         Authorization: `Key ${FAL_KEY}`,
         'Content-Type': contentType,
+        'Content-Length': String(body.length),
       },
-      body: buffer,
+      body,
     });
 
+    const rawText = await res.text();
+    console.log(`fal storage response (${res.status}):`, rawText.slice(0, 200));
+
     if (!res.ok) {
-      const text = await res.text();
-      console.error('Fal storage upload failed:', text);
-      return Response.json({ error: `Fal storage error: ${text}` }, { status: 500 });
+      return Response.json({ error: `Fal storage ${res.status}: ${rawText}` }, { status: 500 });
     }
 
-    const data = await res.json();
+    let data;
+    try { data = JSON.parse(rawText); }
+    catch { return Response.json({ error: `Non-JSON from fal storage: ${rawText}` }, { status: 500 }); }
+
     const url = data.url || data.access_url;
-    if (!url) return Response.json({ error: 'No URL in fal storage response: ' + JSON.stringify(data) }, { status: 500 });
+    if (!url) return Response.json({ error: 'No URL in fal storage response: ' + rawText }, { status: 500 });
 
     return Response.json({ url });
   } catch (e) {
