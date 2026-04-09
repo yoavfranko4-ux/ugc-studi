@@ -26,7 +26,7 @@ async function pollFal(requestId, maxWait = 300000) {
 
 async function generateNBFrame(prompt, imageUrls) {
   const validUrls = imageUrls.filter(Boolean);
-  const enhancedPrompt = `${prompt}, kinetic dynamic authentic UGC realism, subtle digital noise, natural softness`;
+  const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real person not model`;
   if (validUrls.length === 0) {
     const res = await fetch('https://queue.fal.run/fal-ai/nano-banana-2', {
       method: 'POST', headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
@@ -53,7 +53,7 @@ async function generateVoice(text) {
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, model_id: 'eleven_v3', voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.3, use_speaker_boost: true } })
+      body: JSON.stringify({ text, model_id: 'eleven_v3', voice_settings: { stability: 0.55, similarity_boost: 0.75, style: 0.55, use_speaker_boost: true } })
     });
     if (!res.ok) { console.error('ElevenLabs failed:', await res.text()); return null; }
     return Buffer.from(await res.arrayBuffer()).toString('base64');
@@ -113,11 +113,8 @@ Identify the exact pain from productDesc and write it explicitly:
 - Hair → "same person applying product directly INTO hair, running fingers through hair with product"
 - Supplement → "same person at kitchen table/counter actually taking/drinking/eating the supplement"
 
-5. PRODUCT PRESERVATION — add to ALL Kling prompts:
-"preserve exact product appearance from reference — exact colors, exact shape, exact design, product does NOT change or morph"
-
-6. STABLE MOTION — add to ALL Kling prompts:
-"person holds product steadily, subtle breathing, hand remains stable, no sudden position jumps, smooth continuous motion, handheld iPhone wobble, no cinematic exaggeration"
+5. END every Kling prompt with exactly this phrase (no more, no less):
+"natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference"
 
 Return ONLY valid JSON (no markdown):
 {
@@ -129,26 +126,26 @@ Return ONLY valid JSON (no markdown):
   "scenes": [
     {
       "type": "כאב",
-      "nb_prompt": "woman in [LOGICAL SETTING] showing SPECIFIC PROBLEM of ${productDesc} — e.g. examining yellow teeth in bathroom mirror / frustrated with clothes not fitting in bedroom / checking old watch at dressing table. Natural morning light, iPhone vertical, single frame photo, do not change person appearance from reference",
-      "kling_prompt": "Person in [setting] visibly frustrated with [specific problem], preserve exact product appearance from reference exact colors exact shape product does NOT change, person holds product steadily subtle breathing hand remains stable no sudden position jumps smooth continuous motion handheld iPhone wobble no cinematic exaggeration",
+      "nb_prompt": "woman in [LOGICAL SETTING] showing SPECIFIC PROBLEM of ${productDesc} — e.g. examining yellow teeth in bathroom mirror / frustrated with clothes not fitting in bedroom / checking old watch at dressing table. Natural window light, iPhone vertical selfie angle, visible skin texture no retouching, candid unposed, single frame photo, do not change person appearance from reference",
+      "kling_prompt": "Person in [setting] visibly frustrated with [specific problem], natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene1"
     },
     {
       "type": "גילוי",
-      "nb_prompt": "same person from reference in same [setting], just found ${productName} — holding it naturally with curious surprised expression, preserve exact product appearance exact colors exact shape from reference image, single frame photo, maintain exact facial features",
-      "kling_prompt": "Continuing in same setting same person discovers ${productName} curiously turning it over, preserve exact product appearance from reference exact colors exact shape product does NOT change or morph, person holds product steadily subtle breathing slight head tilt hand remains stable no sudden jumps smooth continuous motion handheld iPhone wobble no cinematic exaggeration",
+      "nb_prompt": "same person from reference in same [setting], just found ${productName} — holding it naturally with curious surprised expression, product colors and shape exact from reference, iPhone vertical selfie angle, visible skin texture no retouching, candid feel, single frame photo, maintain exact facial features",
+      "kling_prompt": "Continuing same setting same person discovers ${productName} curiously, slight head tilt, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene2"
     },
     {
       "type": "שימוש",
-      "nb_prompt": "same person from reference in same [setting] — product is ON or IN the person: [for clothing: wearing the item standing in front of full-length mirror admiring fit] [for watch: wearing on wrist holding arm up] [for teeth: applying to teeth close-up] [for skincare: applying to face with fingers] — preserve exact product appearance from reference, single frame photo not collage, genuine focused or satisfied expression, maintain exact facial features",
-      "kling_prompt": "Continuing in same setting same person uses product ON/IN themselves naturally, preserve exact product appearance from reference exact colors shape unchanged, smooth continuous motion hands clearly visible, no talking, authentic handheld iPhone gentle movement, no sudden position jumps no cinematic exaggeration",
+      "nb_prompt": "same person from reference in same [setting] — product is ON or IN the person: [for clothing: wearing the item in front of full-length mirror] [for watch: wearing on wrist holding arm up] [for teeth: strip/gel applied ON teeth close-up] [for skincare: cream being massaged into face] — product colors and shape exact from reference, iPhone close-up angle, visible skin texture no retouching, genuine focused expression, single frame photo not collage, maintain exact facial features",
+      "kling_prompt": "Continuing same setting same person uses product on themselves naturally, hands clearly visible doing the action, no talking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene3"
     },
     {
       "type": "CTA",
-      "nb_prompt": "same person from reference in same [setting] showing the RESULT — happy smile showing [whiter teeth / wearing the outfit confidently / skin glowing / wearing watch proudly], product naturally visible preserve exact appearance from reference, single frame photo, maintain exact facial features",
-      "kling_prompt": "Continuing in same setting same person shows genuine happy result naturally, preserve exact product appearance from reference unchanged, hand remains stable smooth continuous authentic motion, pointing at camera shifting weight forward handheld wobble no cinematic exaggeration",
+      "nb_prompt": "same person from reference in same [setting] showing the RESULT — genuine happy smile [whiter teeth / wearing outfit confidently / skin glowing / watch on wrist], product naturally visible colors and shape exact from reference, iPhone selfie angle, real skin texture no retouching, single frame photo, maintain exact facial features",
+      "kling_prompt": "Continuing same setting same person shows genuine happy result, casual smile shifting weight forward pointing at camera, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene4"
     }
   ]
@@ -249,7 +246,7 @@ function getDefaultVoiceover(productName, applicationArea) {
   return `הבעיה הזאת הציקה לי כבר הרבה זמן ולא ידעתי מה לעשות. גיליתי את ${productName} ולא האמנתי שיעזור לי. התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
 }
 
-const STABLE = 'preserve exact product appearance from reference exact colors exact shape product does NOT change, person holds product steadily subtle breathing hand remains stable no sudden position jumps smooth continuous motion handheld iPhone wobble no cinematic exaggeration';
+const STABLE = 'natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference';
 
 function getDefaultScenes(productName, applicationArea, productDesc) {
   return [

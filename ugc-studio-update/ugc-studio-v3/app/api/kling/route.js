@@ -29,7 +29,16 @@ export async function POST(req) {
     const res = await fetch('https://queue.fal.run/fal-ai/kling-video/v3/pro/image-to-video', {
       method: 'POST',
       headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_url: imageUrl, prompt, duration: klingDuration, aspect_ratio: '9:16' })
+      body: JSON.stringify({
+        image_url: imageUrl,
+        prompt,
+        duration: klingDuration,
+        aspect_ratio: '9:16',
+        // Lower cfg_scale → freer, more organic motion (less mechanical following of prompt)
+        cfg_scale: 0.45,
+        // Prevent cinematic/ad look — force amateur handheld feel
+        negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
+      })
     });
     const json = await res.json();
     console.log(`Kling ${sceneIndex} submit:`, JSON.stringify(json).slice(0, 150));
