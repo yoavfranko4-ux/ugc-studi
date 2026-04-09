@@ -1,4 +1,4 @@
-import { writeFile, unlink, readFile, chmod } from 'fs/promises';
+import { writeFile, unlink, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { exec } from 'child_process';
@@ -6,47 +6,19 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-async function getFfmpegPath() {
-  // Try ffmpeg-static first
-  try {
-    const ffmpegStatic = (await import('ffmpeg-static')).default;
-    if (ffmpegStatic && !ffmpegStatic.includes('api/export')) {
-      console.log('Using ffmpeg-static:', ffmpegStatic);
-      // Make sure it's executable
-      try { await chmod(ffmpegStatic, 0o755); } catch {}
-      return ffmpegStatic;
-    }
-  } catch(e) { console.log('ffmpeg-static import failed:', e.message); }
+// FFmpeg is at this fixed path in Railway (from debug endpoint)
+const FFMPEG_PATH = '/app/node_modules/ffmpeg-static/ffmpeg';
 
-  // Try system paths
-  const paths = [
-    '/usr/bin/ffmpeg',
-    '/usr/local/bin/ffmpeg',
-    '/nix/var/nix/profiles/default/bin/ffmpeg',
-  ];
-  for (const p of paths) {
-    try {
-      await execAsync(`test -f "${p}"`);
-      console.log('Found ffmpeg at:', p);
-      return p;
-    } catch {}
+async function getFfmpeg() {
+  try {
+    await execAsync(`chmod +x "${FFMPEG_PATH}"`);
+    const { stdout } = await execAsync(`"${FFMPEG_PATH}" -version 2>&1 | head -1`);
+    console.log('FFmpeg OK:', stdout.trim());
+    return FFMPEG_PATH;
+  } catch(e) {
+    console.error('FFmpeg at fixed path failed:', e.message);
+    throw new Error('FFmpeg not available: ' + e.message);
   }
-
-  // Try which
-  try {
-    const { stdout } = await execAsync('which ffmpeg');
-    const p = stdout.trim();
-    if (p) { console.log('which ffmpeg:', p); return p; }
-  } catch {}
-
-  // Find in nix store
-  try {
-    const { stdout } = await execAsync('find /nix -name "ffmpeg" -type f 2>/dev/null | head -1');
-    const p = stdout.trim();
-    if (p) { console.log('Found in nix:', p); return p; }
-  } catch {}
-
-  throw new Error('FFmpeg not found on this system');
 }
 
 export async function POST(req) {
@@ -57,7 +29,7 @@ export async function POST(req) {
   const toDelete = [];
 
   try {
-    const ffmpeg = await getFfmpegPath();
+    const ffmpeg = await getFfmpeg();
 
     const videoFiles = [];
     for (let i = 0; i < videoUrls.length; i++) {
@@ -94,7 +66,6 @@ export async function POST(req) {
     const outputPath = join(tmp, `output_${ts}.mp4`);
     toDelete.push(outputPath);
 
-    // Build subtitle filters — 2 halves per scene
     const drawTexts = [];
     let timeOffset = 0;
     videoFiles.forEach((v) => {
@@ -109,12 +80,7 @@ export async function POST(req) {
           if (!part) return;
           const startT = timeOffset + pi * halfDur;
           const endT = startT + halfDur - 0.1;
-          const escaped = part
-            .replace(/\\/g, '\\\\')
-            .replace(/'/g, '\u2019')
-            .replace(/:/g, '\\:')
-            .replace(/\[/g, '\\[')
-            .replace(/\]/g, '\\]');
+          const escaped = part.replace(/'/g,'\u2019').replace(/:/g,'\\:').replace(/\[/g,'\\[').replace(/\]/g,'\\]');
           drawTexts.push(`drawtext=text='${escaped}':fontsize=32:fontcolor=white:x=(w-text_w)/2:y=h-110:box=1:boxcolor=black@0.75:boxborderw=12:enable='between(t,${startT},${endT})'`);
         });
       }
@@ -134,8 +100,7 @@ export async function POST(req) {
     }
 
     console.log('Running FFmpeg...');
-    const { stderr } = await execAsync(cmd, { timeout: 300000 });
-    if (stderr) console.log('FFmpeg stderr:', stderr.slice(-500));
+    await execAsync(cmd, { timeout: 300000 });
 
     const outputBuf = await readFile(outputPath);
     return new Response(JSON.stringify({ videoBase64: outputBuf.toString('base64') }), {
