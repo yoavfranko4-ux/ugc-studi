@@ -24,6 +24,177 @@ const MUSIC_TRACKS = [
 
 const proxyUrl = (url) => url ? `/api/proxy?url=${encodeURIComponent(url)}` : null;
 
+// ─── Client-side helpers ──────────────────────────────────────────────────────
+
+// Upload a Blob to fal.ai storage via the server-side /api/upload route
+async function uploadToFal(blob, filename) {
+  const fd = new FormData();
+  fd.append('file', blob, filename || (blob.type.startsWith('audio') ? 'audio.wav' : 'video.webm'));
+  const res = await fetch('/api/upload', { method: 'POST', body: fd });
+  if (!res.ok) throw new Error('Upload failed: ' + (await res.text()));
+  const data = await res.json();
+  if (!data.url) throw new Error('No URL from upload: ' + JSON.stringify(data));
+  return data.url;
+}
+
+// Burn subtitle text onto video frames using Canvas + MediaRecorder.
+// Returns a Blob (video/webm) with the subtitle baked in.
+async function burnSubtitlesIntoVideo(videoUrl, subtitle, duration) {
+  return new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => reject(new Error('Subtitle burn timeout')), (duration + 15) * 1000);
+
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.muted = true;
+    video.playsInline = true;
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const chunks = [];
+    let recorder = null;
+    let animId = null;
+
+    const done = (blob) => { clearTimeout(deadline); if (animId) cancelAnimationFrame(animId); resolve(blob); };
+    const fail = (e)  => { clearTimeout(deadline); if (animId) cancelAnimationFrame(animId); reject(e); };
+
+    video.onloadedmetadata = () => {
+      canvas.width  = video.videoWidth  || 1080;
+      canvas.height = video.videoHeight || 1920;
+
+      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+        .find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+
+      const stream = canvas.captureStream(30);
+      recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 6_000_000 });
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => done(new Blob(chunks, { type: mimeType }));
+
+      // Split subtitle into two halves shown at first/second half of scene
+      const words = subtitle ? subtitle.trim().split(' ') : [];
+      const mid = Math.ceil(words.length / 2);
+      const parts = [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
+
+      const drawSubtitle = (text) => {
+        if (!text) return;
+        const w = canvas.width, h = canvas.height;
+        const fontSize = Math.round(h * 0.028);
+        ctx.save();
+        ctx.direction = 'rtl';
+        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        const textX = w / 2;
+        const textY = h - 100;
+        const metrics = ctx.measureText(text);
+        const pad = 20;
+        // background box
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        const bx = textX - metrics.width / 2 - pad;
+        const by = textY - fontSize - 8;
+        const bw = metrics.width + pad * 2;
+        const bh = fontSize + 24;
+        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); }
+        else ctx.fillRect(bx, by, bw, bh);
+        // text
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(text, textX, textY);
+        ctx.restore();
+      };
+
+      recorder.start(100);
+      video.currentTime = 0;
+      video.play().catch(fail);
+
+      const drawFrame = () => {
+        if (!recorder || recorder.state !== 'recording') return;
+        if (video.ended || video.currentTime >= duration + 0.15) {
+          recorder.stop(); return;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const half = video.currentTime < duration / 2 ? 0 : 1;
+        drawSubtitle(parts[half] || '');
+        animId = requestAnimationFrame(drawFrame);
+      };
+      animId = requestAnimationFrame(drawFrame);
+    };
+
+    video.onerror = () => fail(new Error('Video load error'));
+    video.src = `/api/proxy?url=${encodeURIComponent(videoUrl)}`;
+  });
+}
+
+// Encode an AudioBuffer as a WAV Blob
+function audioBufferToWav(buffer) {
+  const ch = Math.min(buffer.numberOfChannels, 2);
+  const sr = buffer.sampleRate;
+  const len = buffer.length;
+  const ab = new ArrayBuffer(44 + len * ch * 2);
+  const v = new DataView(ab);
+  const w4 = (o, s) => { for (let i = 0; i < 4; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w4(0, 'RIFF'); v.setUint32(4, 36 + len * ch * 2, true);
+  w4(8, 'WAVE'); w4(12, 'fmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, ch, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * ch * 2, true);
+  v.setUint16(32, ch * 2, true); v.setUint16(34, 16, true);
+  w4(36, 'data'); v.setUint32(40, len * ch * 2, true);
+  let off = 44;
+  for (let i = 0; i < len; i++) {
+    for (let c = 0; c < ch; c++) {
+      const s = Math.max(-1, Math.min(1, buffer.getChannelData(c)[i]));
+      v.setInt16(off, s < 0 ? s * 32768 : s * 32767, true); off += 2;
+    }
+  }
+  return new Blob([ab], { type: 'audio/wav' });
+}
+
+// Mix voiceover (base64 mp3) + background music (URL) into a single WAV Blob
+// using the Web Audio OfflineAudioContext — no server RAM required.
+async function mixAudioTracks(audioBase64, musicUrl) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  let voiceBuf = null, musicBuf = null;
+
+  if (audioBase64) {
+    try {
+      const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+      const tmp = new AC(); voiceBuf = await tmp.decodeAudioData(bytes.buffer.slice(0)); tmp.close();
+    } catch (e) { console.warn('Voice decode failed:', e.message); }
+  }
+  if (musicUrl) {
+    try {
+      const buf = await (await fetch(musicUrl)).arrayBuffer();
+      const tmp = new AC(); musicBuf = await tmp.decodeAudioData(buf); tmp.close();
+    } catch (e) { console.warn('Music decode failed:', e.message); }
+  }
+
+  if (!voiceBuf && !musicBuf) return null;
+
+  // Only voiceover — skip mixing, return original bytes
+  if (voiceBuf && !musicBuf) {
+    const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+    return new Blob([bytes], { type: 'audio/mpeg' });
+  }
+
+  const sampleRate = 44100;
+  const totalSamples = sampleRate * 25; // 25s video
+  const offCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
+
+  if (voiceBuf) {
+    const src = offCtx.createBufferSource(); src.buffer = voiceBuf;
+    const gain = offCtx.createGain(); gain.gain.value = 1.0;
+    src.connect(gain); gain.connect(offCtx.destination); src.start(0);
+  }
+  if (musicBuf) {
+    const src = offCtx.createBufferSource(); src.buffer = musicBuf; src.loop = true;
+    const gain = offCtx.createGain(); gain.gain.value = voiceBuf ? 0.15 : 1.0;
+    src.connect(gain); gain.connect(offCtx.destination); src.start(0);
+  }
+
+  const mixed = await offCtx.startRendering();
+  return audioBufferToWav(mixed);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function getSceneFromTime(t) {
   for (let i = SCENE_STARTS.length - 1; i >= 0; i--) {
     if (t >= SCENE_STARTS[i]) return i;
@@ -105,24 +276,74 @@ export default function Home() {
   const exportFinal = async () => {
     if (!videoUrls.some(Boolean)) return alert('אין סרטונים לייצוא');
     setIsExporting(true);
-    addLog('📦 מייצר סרטון סופי...', 'start');
+    addLog('📦 מתחיל ייצוא סרטון סופי...', 'start');
     try {
+      // ── Step 1: Burn subtitles into each scene video (Canvas API, client-side) ──
+      const burnedUrls = [...videoUrls];
+      for (let i = 0; i < 4; i++) {
+        if (!videoUrls[i]) continue;
+        const sub = editSubtitles[i]?.trim();
+        if (!sub) continue; // no subtitle for this scene
+        try {
+          addLog(`🎨 צורב כתוביות סצנה ${i + 1}...`);
+          const blob = await burnSubtitlesIntoVideo(videoUrls[i], sub, SCENE_DURATIONS[i]);
+          addLog(`⬆️ מעלה סצנה ${i + 1} ל-fal.ai...`);
+          burnedUrls[i] = await uploadToFal(blob, `scene_${i + 1}.webm`);
+          addLog(`✅ סצנה ${i + 1} מוכנה`, 'success');
+        } catch (e) {
+          addLog(`⚠️ כתוביות סצנה ${i + 1} נכשלו (${e.message}) — ממשיך ללא`, 'error');
+          // fall back to original Kling URL
+        }
+      }
+
+      // ── Step 2: Mix audio (Web Audio API, client-side) ──────────────────────
+      let audioUrl = null;
       const musicTrack = MUSIC_TRACKS[selectedMusic];
+      if (audioBase64 || musicTrack?.url) {
+        try {
+          addLog('🎵 מערבב קריינות + מוזיקה...');
+          const blob = await mixAudioTracks(audioBase64, musicTrack?.url || null);
+          if (blob) {
+            addLog('⬆️ מעלה אודיו ל-fal.ai...');
+            audioUrl = await uploadToFal(blob, 'audio.wav');
+            addLog('✅ אודיו מוכן', 'success');
+          }
+        } catch (e) {
+          addLog(`⚠️ ערבוב אודיו נכשל: ${e.message}`, 'error');
+        }
+      }
+
+      // ── Step 3: Merge via fal.ai FFmpeg API ─────────────────────────────────
+      addLog('🎬 ממזג סרטונים ב-fal.ai FFmpeg...');
       const res = await fetch('/api/export', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoUrls, audioBase64, musicUrl: musicTrack?.url || null, subtitles: editSubtitles, sceneDurations: SCENE_DURATIONS })
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoUrls: burnedUrls.filter(Boolean), audioUrl })
       });
       const data = await res.json();
-      if (data.videoBase64) {
+
+      if (data.videoUrl) {
+        // Direct download from fal.ai CDN
+        const a = document.createElement('a');
+        a.href = data.videoUrl;
+        a.download = 'ugc_final.mp4';
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        addLog('✅ סרטון הורד בהצלחה!', 'success');
+      } else if (data.videoBase64) {
         const blob = new Blob([Uint8Array.from(atob(data.videoBase64), c => c.charCodeAt(0))], { type: 'video/mp4' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href=url; a.download='ugc_final.mp4'; a.click();
+        const a = document.createElement('a'); a.href = url; a.download = 'ugc_final.mp4'; a.click();
         URL.revokeObjectURL(url);
         addLog('✅ סרטון הורד!', 'success');
       } else {
-        addLog(`❌ ייצוא נכשל: ${data.error||''}`, 'error');
+        addLog(`❌ ייצוא נכשל: ${data.error || ''}`, 'error');
       }
-    } catch (e) { addLog(`❌ שגיאה: ${e.message}`, 'error'); }
+    } catch (e) {
+      addLog(`❌ שגיאה: ${e.message}`, 'error');
+    }
     setIsExporting(false);
   };
 

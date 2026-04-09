@@ -1,120 +1,86 @@
-import { writeFile, unlink, readFile } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+const FAL_KEY = process.env.FAL_API_KEY;
 
-const execAsync = promisify(exec);
+async function pollFal(requestId, endpoint, maxWait = 300000) {
+  const base = `https://queue.fal.run/${endpoint}`;
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    const res = await fetch(`${base}/requests/${requestId}/status`, {
+      headers: { Authorization: `Key ${FAL_KEY}` }
+    });
+    const data = await res.json();
+    if (data.status === 'COMPLETED') {
+      const result = await fetch(`${base}/requests/${requestId}`, {
+        headers: { Authorization: `Key ${FAL_KEY}` }
+      });
+      return await result.json();
+    }
+    if (data.status === 'FAILED') throw new Error(`fal job failed: ${JSON.stringify(data)}`);
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  throw new Error('Timeout waiting for fal.ai FFmpeg');
+}
 
-// Find ffmpeg binary (Railway/Nixpacks puts it in /nix paths)
-async function findFfmpeg() {
-  try {
-    const { stdout } = await execAsync('which ffmpeg 2>/dev/null || find /nix -name ffmpeg -type f 2>/dev/null | head -1');
-    const path = stdout.trim();
-    if (path) { console.log('FFmpeg found:', path); return path; }
-  } catch {}
-  console.log('FFmpeg: using default');
-  return 'ffmpeg';
+async function falMergeVideos(videoUrls) {
+  const endpoint = 'fal-ai/ffmpeg-api/merge-videos';
+  console.log('merge-videos:', videoUrls);
+  const res = await fetch(`https://queue.fal.run/${endpoint}`, {
+    method: 'POST',
+    headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ video_urls: videoUrls })
+  });
+  const json = await res.json();
+  if (!json.request_id) throw new Error('merge-videos: no request_id — ' + JSON.stringify(json));
+  const result = await pollFal(json.request_id, endpoint);
+  const url = result?.video?.url || result?.output?.url || result?.url;
+  if (!url) throw new Error('merge-videos: no URL in result — ' + JSON.stringify(result));
+  return url;
+}
+
+async function falMergeAudioVideo(videoUrl, audioUrl) {
+  const endpoint = 'fal-ai/ffmpeg-api/merge-audio-video';
+  console.log('merge-audio-video:', { videoUrl, audioUrl });
+  const res = await fetch(`https://queue.fal.run/${endpoint}`, {
+    method: 'POST',
+    headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ video_url: videoUrl, audio_url: audioUrl })
+  });
+  const json = await res.json();
+  if (!json.request_id) throw new Error('merge-audio-video: no request_id — ' + JSON.stringify(json));
+  const result = await pollFal(json.request_id, endpoint);
+  const url = result?.video?.url || result?.output?.url || result?.url;
+  if (!url) throw new Error('merge-audio-video: no URL in result — ' + JSON.stringify(result));
+  return url;
 }
 
 export async function POST(req) {
-  const { videoUrls, audioBase64, musicUrl, subtitles, sceneDurations = [5,5,5,5] } = await req.json();
-
-  const tmp = tmpdir();
-  const ts = Date.now();
-  const toDelete = [];
+  // videoUrls: array of public URLs (subtitles already burned client-side via Canvas API)
+  // audioUrl:  public URL of mixed audio (voiceover + music, mixed client-side via Web Audio API)
+  const { videoUrls, audioUrl } = await req.json();
 
   try {
-    const ffmpeg = await findFfmpeg();
+    const validUrls = videoUrls.filter(Boolean);
+    if (validUrls.length === 0) return Response.json({ error: 'No videos' }, { status: 400 });
 
-    // 1. Download videos
-    const videoFiles = [];
-    for (let i = 0; i < videoUrls.length; i++) {
-      if (!videoUrls[i]) continue;
-      const p = join(tmp, `vid_${ts}_${i}.mp4`);
-      const buf = await (await fetch(videoUrls[i])).arrayBuffer();
-      await writeFile(p, Buffer.from(buf));
-      toDelete.push(p);
-      videoFiles.push({ path: p, index: i, duration: sceneDurations[i] || 5 });
-    }
-    if (videoFiles.length === 0) return Response.json({ error: 'No videos' }, { status: 400 });
-
-    // 2. Audio
-    let audioPath = null;
-    if (audioBase64) {
-      audioPath = join(tmp, `audio_${ts}.mp3`);
-      await writeFile(audioPath, Buffer.from(audioBase64, 'base64'));
-      toDelete.push(audioPath);
-    }
-
-    // 3. Music
-    let musicPath = null;
-    if (musicUrl) {
-      try {
-        const buf = await (await fetch(musicUrl)).arrayBuffer();
-        musicPath = join(tmp, `music_${ts}.mp3`);
-        await writeFile(musicPath, Buffer.from(buf));
-        toDelete.push(musicPath);
-      } catch(e) { console.log('Music download failed:', e.message); }
-    }
-
-    // 4. Concat list
-    const concatPath = join(tmp, `concat_${ts}.txt`);
-    await writeFile(concatPath, videoFiles.map(v => `file '${v.path}'`).join('\n'));
-    toDelete.push(concatPath);
-
-    const outputPath = join(tmp, `output_${ts}.mp4`);
-    toDelete.push(outputPath);
-
-    // 5. Subtitles — split each into 2 halves
-    const drawTexts = [];
-    let timeOffset = 0;
-    videoFiles.forEach((v) => {
-      const sub = subtitles?.[v.index];
-      const dur = v.duration;
-      if (sub && sub.trim()) {
-        const words = sub.trim().split(' ');
-        const mid = Math.ceil(words.length / 2);
-        const parts = [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
-        const halfDur = dur / 2;
-        parts.forEach((part, pi) => {
-          if (!part) return;
-          const startT = timeOffset + pi * halfDur;
-          const endT = startT + halfDur - 0.1;
-          const escaped = part.replace(/\\/g,'\\\\').replace(/'/g,'\u2019').replace(/:/g,'\\:').replace(/\[/g,'\\[').replace(/\]/g,'\\]');
-          drawTexts.push(`drawtext=text='${escaped}':fontsize=32:fontcolor=white:x=(w-text_w)/2:y=h-110:box=1:boxcolor=black@0.75:boxborderw=12:enable='between(t,${startT},${endT})'`);
-        });
-      }
-      timeOffset += dur;
-    });
-
-    const vfBase = `scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2`;
-    const vfChain = drawTexts.length > 0 ? `${vfBase},${drawTexts.join(',')}` : vfBase;
-
-    // 6. FFmpeg command
-    let cmd;
-    if (audioPath && musicPath) {
-      cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -i "${audioPath}" -i "${musicPath}" ` +
-        `-filter_complex "[0:v]${vfChain}[v];[1:a]volume=1.0[a1];[2:a]volume=0.15,aloop=loop=-1:size=2e+09[a2];[a1][a2]amix=inputs=2:duration=first[a]" ` +
-        `-map "[v]" -map "[a]" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -shortest "${outputPath}"`;
-    } else if (audioPath) {
-      cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -i "${audioPath}" ` +
-        `-filter_complex "[0:v]${vfChain}[v]" ` +
-        `-map "[v]" -map 1:a -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -shortest "${outputPath}"`;
+    // 1. Merge all clips into one video
+    let finalUrl;
+    if (validUrls.length === 1) {
+      finalUrl = validUrls[0];
     } else {
-      cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -vf "${vfChain}" -c:v libx264 -preset fast -crf 23 "${outputPath}"`;
+      console.log(`Merging ${validUrls.length} videos via fal.ai...`);
+      finalUrl = await falMergeVideos(validUrls);
     }
 
-    console.log('Running FFmpeg...');
-    await execAsync(cmd, { timeout: 300000 });
+    // 2. Lay audio track over video
+    if (audioUrl) {
+      console.log('Adding audio via fal.ai...');
+      finalUrl = await falMergeAudioVideo(finalUrl, audioUrl);
+    }
 
-    const outputBuf = await readFile(outputPath);
-    return new Response(JSON.stringify({ videoBase64: outputBuf.toString('base64') }), { headers: { 'Content-Type': 'application/json' } });
+    console.log('Final video URL:', finalUrl);
+    return Response.json({ videoUrl: finalUrl });
 
   } catch (e) {
     console.error('Export error:', e.message);
     return Response.json({ error: e.message }, { status: 500 });
-  } finally {
-    for (const f of toDelete) unlink(f).catch(()=>{});
   }
 }
