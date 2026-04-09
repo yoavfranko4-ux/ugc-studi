@@ -93,25 +93,25 @@ Identify the exact pain from productDesc and write it explicitly:
 - Sleep → "שוכבת בלילה שעות ולא יכולה להירדם בכלל"
 - NEVER use "נמאס לי" alone — always describe THE SPECIFIC VISIBLE PROBLEM
 
-3. SETTING — pick ONE logical setting and keep ALL 4 scenes there:
-- Clothing/fashion/dress → bedroom with full-length mirror and closet
-- Watch/jewelry/accessories → dressing table with mirror, getting ready
-- Teeth/dental/oral → bathroom, close to mirror
-- Skincare/face cream/acne → bathroom vanity or bedroom mirror
-- Hair products → bathroom or bedroom, mirror visible
-- Food/supplement/vitamin → kitchen table or living room
-- Fitness/sport → gym or outdoor
-- Tech/gadget → desk or living room
-- Car product → inside car
+3. SETTING — HARD RULES, no exceptions:
+- Clothing/dress/fashion → ALWAYS: "bedroom with full-length mirror and open closet/wardrobe in background"
+- Watch/bracelet/jewelry → ALWAYS: "dressing table with mirror, jewellery and accessories visible"
+- Teeth/dental/strips/whitening → ALWAYS: "bathroom, standing close to mirror, sink visible"
+- Skincare/face cream/serum/acne → ALWAYS: "bathroom vanity with mirror, skincare products on counter"
+- Hair products → ALWAYS: "bathroom with mirror, hair tools visible"
+- Food/supplement/vitamin/protein → ALWAYS: "kitchen or dining table"
+- Fitness/sport/gym → ALWAYS: "gym with equipment visible or outdoor"
+- Tech/gadget/device → ALWAYS: "desk or living room couch"
+- Car accessories → ALWAYS: "inside car, steering wheel visible"
+- NEVER put clothing/fashion scenes in a car. NEVER put dental scenes in a bedroom.
 
-4. SCENE 3 (שימוש) — show the PRODUCT IN USE on the person:
-- Clothing → person WEARING the item, looking in full-length mirror, admiring the fit
-- Watch/jewelry → person WEARING it on wrist/neck, holding arm up to admire
-- Teeth → person applying strip/gel TO TEETH, close-up mouth
-- Skincare → person APPLYING cream/serum TO FACE with fingers
-- Hair → person APPLYING product to hair strands
-- Supplement → person TAKING it (swallowing pill or drinking)
-- NEVER just "holding the product" in scene 3 — it must be ON or IN the person
+4. SCENE 3 (שימוש) nb_prompt — MUST describe product ON the person, not held:
+- Clothing/dress → "same person WEARING the [exact item] standing in front of full-length bedroom mirror, dress/item ON her body, she is admiring the fit and looking at herself, NOT holding it — it is ON her"
+- Watch/jewelry → "same person WEARING the watch/jewelry on wrist/neck, holding arm up to admire it in mirror at dressing table"
+- Teeth/dental → "same person in bathroom close-up of mouth, applying the strip/gel directly ON teeth with fingers, dental product ON teeth visible"
+- Skincare → "same person in bathroom applying cream/serum directly ON face with fingertips, product ON skin being massaged in"
+- Hair → "same person applying product directly INTO hair, running fingers through hair with product"
+- Supplement → "same person at kitchen table/counter actually taking/drinking/eating the supplement"
 
 5. PRODUCT PRESERVATION — add to ALL Kling prompts:
 "preserve exact product appearance from reference — exact colors, exact shape, exact design, product does NOT change or morph"
