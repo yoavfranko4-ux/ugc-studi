@@ -1,6 +1,8 @@
+export const maxDuration = 300; // 5 minutes
+
 const FAL_KEY = process.env.FAL_API_KEY;
 
-async function pollKling(requestId, maxWait = 300000) {
+async function pollKling(requestId, maxWait = 280000) {
   const start = Date.now();
   while (Date.now() - start < maxWait) {
     const res = await fetch(`https://queue.fal.run/fal-ai/kling-video/requests/${requestId}/status`, {
@@ -21,9 +23,8 @@ async function pollKling(requestId, maxWait = 300000) {
 
 export async function POST(req) {
   const { imageUrl, prompt, sceneIndex, duration } = await req.json();
-  // Kling supports 5 or 10 seconds — map 8s to 10s (closest supported)
   const klingDuration = duration === '10' ? '10' : '5';
-  console.log(`Kling scene ${sceneIndex}: starting, requested ${duration}s → using ${klingDuration}s`);
+  console.log(`Kling scene ${sceneIndex}: starting, duration=${klingDuration}s`);
   try {
     const res = await fetch('https://queue.fal.run/fal-ai/kling-video/v3/pro/image-to-video', {
       method: 'POST',
