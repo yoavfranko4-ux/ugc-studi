@@ -3,19 +3,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import ffmpegStatic from 'ffmpeg-static';
 
 const execAsync = promisify(exec);
-
-// Find ffmpeg binary (Railway/Nixpacks puts it in /nix paths)
-async function findFfmpeg() {
-  try {
-    const { stdout } = await execAsync('which ffmpeg 2>/dev/null || find /nix -name ffmpeg -type f 2>/dev/null | head -1');
-    const path = stdout.trim();
-    if (path) { console.log('FFmpeg found:', path); return path; }
-  } catch {}
-  console.log('FFmpeg: using default');
-  return 'ffmpeg';
-}
 
 export async function POST(req) {
   const { videoUrls, audioBase64, musicUrl, subtitles, sceneDurations = [5,5,5,5] } = await req.json();
@@ -24,9 +14,11 @@ export async function POST(req) {
   const ts = Date.now();
   const toDelete = [];
 
-  try {
-    const ffmpeg = await findFfmpeg();
+  // Use ffmpeg-static binary path
+  const ffmpeg = ffmpegStatic;
+  console.log('FFmpeg path:', ffmpeg);
 
+  try {
     // 1. Download videos
     const videoFiles = [];
     for (let i = 0; i < videoUrls.length; i++) {
@@ -109,7 +101,9 @@ export async function POST(req) {
     await execAsync(cmd, { timeout: 300000 });
 
     const outputBuf = await readFile(outputPath);
-    return new Response(JSON.stringify({ videoBase64: outputBuf.toString('base64') }), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ videoBase64: outputBuf.toString('base64') }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
 
   } catch (e) {
     console.error('Export error:', e.message);
