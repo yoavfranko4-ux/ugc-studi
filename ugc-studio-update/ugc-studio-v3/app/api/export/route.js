@@ -1,11 +1,53 @@
-import { writeFile, unlink, readFile } from 'fs/promises';
+import { writeFile, unlink, readFile, chmod } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import ffmpegStatic from 'ffmpeg-static';
 
 const execAsync = promisify(exec);
+
+async function getFfmpegPath() {
+  // Try ffmpeg-static first
+  try {
+    const ffmpegStatic = (await import('ffmpeg-static')).default;
+    if (ffmpegStatic && !ffmpegStatic.includes('api/export')) {
+      console.log('Using ffmpeg-static:', ffmpegStatic);
+      // Make sure it's executable
+      try { await chmod(ffmpegStatic, 0o755); } catch {}
+      return ffmpegStatic;
+    }
+  } catch(e) { console.log('ffmpeg-static import failed:', e.message); }
+
+  // Try system paths
+  const paths = [
+    '/usr/bin/ffmpeg',
+    '/usr/local/bin/ffmpeg',
+    '/nix/var/nix/profiles/default/bin/ffmpeg',
+  ];
+  for (const p of paths) {
+    try {
+      await execAsync(`test -f "${p}"`);
+      console.log('Found ffmpeg at:', p);
+      return p;
+    } catch {}
+  }
+
+  // Try which
+  try {
+    const { stdout } = await execAsync('which ffmpeg');
+    const p = stdout.trim();
+    if (p) { console.log('which ffmpeg:', p); return p; }
+  } catch {}
+
+  // Find in nix store
+  try {
+    const { stdout } = await execAsync('find /nix -name "ffmpeg" -type f 2>/dev/null | head -1');
+    const p = stdout.trim();
+    if (p) { console.log('Found in nix:', p); return p; }
+  } catch {}
+
+  throw new Error('FFmpeg not found on this system');
+}
 
 export async function POST(req) {
   const { videoUrls, audioBase64, musicUrl, subtitles, sceneDurations = [5,5,5,5] } = await req.json();
@@ -14,12 +56,9 @@ export async function POST(req) {
   const ts = Date.now();
   const toDelete = [];
 
-  // Use ffmpeg-static binary path
-  const ffmpeg = ffmpegStatic;
-  console.log('FFmpeg path:', ffmpeg);
-
   try {
-    // 1. Download videos
+    const ffmpeg = await getFfmpegPath();
+
     const videoFiles = [];
     for (let i = 0; i < videoUrls.length; i++) {
       if (!videoUrls[i]) continue;
@@ -31,7 +70,6 @@ export async function POST(req) {
     }
     if (videoFiles.length === 0) return Response.json({ error: 'No videos' }, { status: 400 });
 
-    // 2. Audio
     let audioPath = null;
     if (audioBase64) {
       audioPath = join(tmp, `audio_${ts}.mp3`);
@@ -39,7 +77,6 @@ export async function POST(req) {
       toDelete.push(audioPath);
     }
 
-    // 3. Music
     let musicPath = null;
     if (musicUrl) {
       try {
@@ -47,10 +84,9 @@ export async function POST(req) {
         musicPath = join(tmp, `music_${ts}.mp3`);
         await writeFile(musicPath, Buffer.from(buf));
         toDelete.push(musicPath);
-      } catch(e) { console.log('Music download failed:', e.message); }
+      } catch(e) { console.log('Music failed:', e.message); }
     }
 
-    // 4. Concat list
     const concatPath = join(tmp, `concat_${ts}.txt`);
     await writeFile(concatPath, videoFiles.map(v => `file '${v.path}'`).join('\n'));
     toDelete.push(concatPath);
@@ -58,7 +94,7 @@ export async function POST(req) {
     const outputPath = join(tmp, `output_${ts}.mp4`);
     toDelete.push(outputPath);
 
-    // 5. Subtitles — split each into 2 halves
+    // Build subtitle filters — 2 halves per scene
     const drawTexts = [];
     let timeOffset = 0;
     videoFiles.forEach((v) => {
@@ -73,7 +109,12 @@ export async function POST(req) {
           if (!part) return;
           const startT = timeOffset + pi * halfDur;
           const endT = startT + halfDur - 0.1;
-          const escaped = part.replace(/\\/g,'\\\\').replace(/'/g,'\u2019').replace(/:/g,'\\:').replace(/\[/g,'\\[').replace(/\]/g,'\\]');
+          const escaped = part
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, '\u2019')
+            .replace(/:/g, '\\:')
+            .replace(/\[/g, '\\[')
+            .replace(/\]/g, '\\]');
           drawTexts.push(`drawtext=text='${escaped}':fontsize=32:fontcolor=white:x=(w-text_w)/2:y=h-110:box=1:boxcolor=black@0.75:boxborderw=12:enable='between(t,${startT},${endT})'`);
         });
       }
@@ -83,22 +124,18 @@ export async function POST(req) {
     const vfBase = `scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2`;
     const vfChain = drawTexts.length > 0 ? `${vfBase},${drawTexts.join(',')}` : vfBase;
 
-    // 6. FFmpeg command
     let cmd;
     if (audioPath && musicPath) {
-      cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -i "${audioPath}" -i "${musicPath}" ` +
-        `-filter_complex "[0:v]${vfChain}[v];[1:a]volume=1.0[a1];[2:a]volume=0.15,aloop=loop=-1:size=2e+09[a2];[a1][a2]amix=inputs=2:duration=first[a]" ` +
-        `-map "[v]" -map "[a]" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -shortest "${outputPath}"`;
+      cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -i "${audioPath}" -i "${musicPath}" -filter_complex "[0:v]${vfChain}[v];[1:a]volume=1.0[a1];[2:a]volume=0.15,aloop=loop=-1:size=2e+09[a2];[a1][a2]amix=inputs=2:duration=first[a]" -map "[v]" -map "[a]" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -shortest "${outputPath}"`;
     } else if (audioPath) {
-      cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -i "${audioPath}" ` +
-        `-filter_complex "[0:v]${vfChain}[v]" ` +
-        `-map "[v]" -map 1:a -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -shortest "${outputPath}"`;
+      cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -i "${audioPath}" -filter_complex "[0:v]${vfChain}[v]" -map "[v]" -map 1:a -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -shortest "${outputPath}"`;
     } else {
       cmd = `"${ffmpeg}" -y -f concat -safe 0 -i "${concatPath}" -vf "${vfChain}" -c:v libx264 -preset fast -crf 23 "${outputPath}"`;
     }
 
     console.log('Running FFmpeg...');
-    await execAsync(cmd, { timeout: 300000 });
+    const { stderr } = await execAsync(cmd, { timeout: 300000 });
+    if (stderr) console.log('FFmpeg stderr:', stderr.slice(-500));
 
     const outputBuf = await readFile(outputPath);
     return new Response(JSON.stringify({ videoBase64: outputBuf.toString('base64') }), {
