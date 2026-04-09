@@ -3,7 +3,6 @@ const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
-// Scene durations: 5, 5, 10, 5 = 25s total, voiceover = 24s
 const SCENE_DURATIONS = [5, 5, 10, 5];
 
 async function pollFal(requestId, maxWait = 300000) {
@@ -68,49 +67,88 @@ async function generateScript(productName, productDesc, applicationArea, storyDe
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514', max_tokens: 2000,
+      model: 'claude-sonnet-4-20250514', max_tokens: 2500,
       messages: [{ role: 'user', content: `You are a UGC ad expert. Create a viral 4-scene ad for: "${productName}".
 Description: ${productDesc}
 How to use: ${applicationArea}${storyContext}
 
-SCENE DURATIONS: Scene 1=5s, Scene 2=5s, Scene 3=10s, Scene 4=5s. Total=25s, voiceover=24s.
+SCENE DURATIONS: Scene 1=5s, Scene 2=5s, Scene 3=10s, Scene 4=5s. Total=25s.
 
 CRITICAL RULES:
-1. Voiceover: 4 parts matching scene durations. Scene 1: ~10 Hebrew words (4.5s). Scene 2: ~10 Hebrew words (4.5s). Scene 3: ~20 Hebrew words (9s). Scene 4: ~10 Hebrew words (4.5s). Total voiceover = 24 seconds. Natural conversational tone.
-2. Each subtitle = exact voiceover text for that scene.
-3. NB prompts: describe person performing action naturally. Product appears naturally in scene — NOT posed commercially, NOT "holding label facing camera like an ad". Show the actual usage action.
-4. Kling prompts: ALWAYS include "person holds product steadily, subtle natural breathing movement, slight head tilt, hand remains stable, no sudden position jumps or shape changes to product, smooth continuous authentic motion, handheld iPhone wobble, no cinematic exaggeration"
-5. STORY INTEGRATION: If story provided, change ALL settings/actions to match it completely.
+
+1. VOICEOVER TIMING — STRICT:
+- Scene 1: 10-12 Hebrew words (fills 5s naturally)
+- Scene 2: 10-12 Hebrew words (fills 5s naturally)
+- Scene 3: 20-24 Hebrew words (fills 10s naturally)
+- Scene 4: 10-12 Hebrew words (fills 5s naturally)
+- Write at NATURAL SPEAKING PACE — not too fast, not too slow. Each scene must feel complete.
+
+2. HOOK (voiceover_scene1) — MANDATORY SPECIFIC:
+Identify the exact pain from productDesc and write it explicitly:
+- Teeth whitening → "שיניים צהובות שמביכות אותי בכל תמונה ולא יכולה לחייך"
+- Dress/clothing → "לא מוצאת בגד שמחמיא לדמות שלי ומרגישה לא בטוחה"
+- Watch/jewelry → "השעון הישן שלי לא מתאים לסגנון שלי ומוריד ממני"
+- Acne/skincare → "כתמים ואקנה שלא נעלמים ומביכים אותי כל יום"
+- Hair → "שיער שנשבר ונושר ולא יכולה לעשות כלום איתו"
+- Sleep → "שוכבת בלילה שעות ולא יכולה להירדם בכלל"
+- NEVER use "נמאס לי" alone — always describe THE SPECIFIC VISIBLE PROBLEM
+
+3. SETTING — HARD RULES, no exceptions:
+- Clothing/dress/fashion → ALWAYS: "bedroom with full-length mirror and open closet/wardrobe in background"
+- Watch/bracelet/jewelry → ALWAYS: "dressing table with mirror, jewellery and accessories visible"
+- Teeth/dental/strips/whitening → ALWAYS: "bathroom, standing close to mirror, sink visible"
+- Skincare/face cream/serum/acne → ALWAYS: "bathroom vanity with mirror, skincare products on counter"
+- Hair products → ALWAYS: "bathroom with mirror, hair tools visible"
+- Food/supplement/vitamin/protein → ALWAYS: "kitchen or dining table"
+- Fitness/sport/gym → ALWAYS: "gym with equipment visible or outdoor"
+- Tech/gadget/device → ALWAYS: "desk or living room couch"
+- Car accessories → ALWAYS: "inside car, steering wheel visible"
+- NEVER put clothing/fashion scenes in a car. NEVER put dental scenes in a bedroom.
+
+4. SCENE 3 (שימוש) nb_prompt — MUST describe product ON the person, not held:
+- Clothing/dress → "same person WEARING the [exact item] standing in front of full-length bedroom mirror, dress/item ON her body, she is admiring the fit and looking at herself, NOT holding it — it is ON her"
+- Watch/jewelry → "same person WEARING the watch/jewelry on wrist/neck, holding arm up to admire it in mirror at dressing table"
+- Teeth/dental → "same person in bathroom close-up of mouth, applying the strip/gel directly ON teeth with fingers, dental product ON teeth visible"
+- Skincare → "same person in bathroom applying cream/serum directly ON face with fingertips, product ON skin being massaged in"
+- Hair → "same person applying product directly INTO hair, running fingers through hair with product"
+- Supplement → "same person at kitchen table/counter actually taking/drinking/eating the supplement"
+
+5. PRODUCT PRESERVATION — add to ALL Kling prompts:
+"preserve exact product appearance from reference — exact colors, exact shape, exact design, product does NOT change or morph"
+
+6. STABLE MOTION — add to ALL Kling prompts:
+"person holds product steadily, subtle breathing, hand remains stable, no sudden position jumps, smooth continuous motion, handheld iPhone wobble, no cinematic exaggeration"
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "Hebrew ~10 words describing THE SPECIFIC PROBLEM this product solves — mention the actual pain (e.g. for teeth whitening: yellow teeth, embarrassed to smile; for acne cream: spots and breakouts; for sleep supplement: can't fall asleep). NOT generic 'I tried everything' — say WHAT the problem is.",
-  "voiceover_scene2": "Hebrew ~10 words mentions ${productName}",
-  "voiceover_scene3": "Hebrew ~20 words describes using product and feeling result",
-  "voiceover_scene4": "Hebrew ~10 words CTA urgency",
+  "voiceover_scene1": "10-12 Hebrew words — SPECIFIC visible problem",
+  "voiceover_scene2": "10-12 Hebrew words — discovery of ${productName}",
+  "voiceover_scene3": "20-24 Hebrew words — using product ON/IN person and feeling result",
+  "voiceover_scene4": "10-12 Hebrew words — CTA with urgency",
+  "setting": "one-line description of the setting",
   "scenes": [
     {
       "type": "כאב",
-      "nb_prompt": "woman frustrated in bathroom mirror looking at SPECIFIC PROBLEM related to: ${productDesc}, stressed expression examining the problem area closely, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference",
-      "kling_prompt": "Person sighs frustrated looking at mirror, person holds product steadily subtle natural breathing movement slight head tilt hand remains stable no sudden position jumps smooth continuous authentic motion, handheld iPhone wobble no cinematic exaggeration",
+      "nb_prompt": "woman in [LOGICAL SETTING] showing SPECIFIC PROBLEM of ${productDesc} — e.g. examining yellow teeth in bathroom mirror / frustrated with clothes not fitting in bedroom / checking old watch at dressing table. Natural morning light, iPhone vertical, single frame photo, do not change person appearance from reference",
+      "kling_prompt": "Person in [setting] visibly frustrated with [specific problem], preserve exact product appearance from reference exact colors exact shape product does NOT change, person holds product steadily subtle breathing hand remains stable no sudden position jumps smooth continuous motion handheld iPhone wobble no cinematic exaggeration",
       "subtitle": "same as voiceover_scene1"
     },
     {
       "type": "גילוי",
-      "nb_prompt": "same person from reference just discovered ${productName}, holding product naturally with genuine curious expression — NOT posed like commercial, single frame photo, maintain exact facial features",
-      "kling_prompt": "Continuing from previous scene same person examines product with curiosity, person holds product steadily subtle natural breathing movement slight head tilt hand remains stable no sudden position jumps or shape changes to product smooth continuous authentic motion, camera micro-shake authentic no cinematic exaggeration",
+      "nb_prompt": "same person from reference in same [setting], just found ${productName} — holding it naturally with curious surprised expression, preserve exact product appearance exact colors exact shape from reference image, single frame photo, maintain exact facial features",
+      "kling_prompt": "Continuing in same setting same person discovers ${productName} curiously turning it over, preserve exact product appearance from reference exact colors exact shape product does NOT change or morph, person holds product steadily subtle breathing slight head tilt hand remains stable no sudden jumps smooth continuous motion handheld iPhone wobble no cinematic exaggeration",
       "subtitle": "same as voiceover_scene2"
     },
     {
       "type": "שימוש",
-      "nb_prompt": "same person from reference actively performing ${applicationArea} — hands doing the PHYSICAL ACTION naturally close up, product integrated into the action NOT as a prop, single frame photo not collage, genuine focused expression, maintain exact facial features",
-      "kling_prompt": "Continuing from previous scene same person performs ${applicationArea} with focused concentration, person holds product steadily hand remains stable no sudden position jumps or shape changes to product smooth continuous motion, hands clearly visible doing action, no talking, authentic handheld iPhone gentle movement",
+      "nb_prompt": "same person from reference in same [setting] — product is ON or IN the person: [for clothing: wearing the item standing in front of full-length mirror admiring fit] [for watch: wearing on wrist holding arm up] [for teeth: applying to teeth close-up] [for skincare: applying to face with fingers] — preserve exact product appearance from reference, single frame photo not collage, genuine focused or satisfied expression, maintain exact facial features",
+      "kling_prompt": "Continuing in same setting same person uses product ON/IN themselves naturally, preserve exact product appearance from reference exact colors shape unchanged, smooth continuous motion hands clearly visible, no talking, authentic handheld iPhone gentle movement, no sudden position jumps no cinematic exaggeration",
       "subtitle": "same as voiceover_scene3"
     },
     {
       "type": "CTA",
-      "nb_prompt": "same person from reference genuinely happy with result smiling naturally at camera, product naturally visible in scene, single frame photo, maintain exact facial features",
-      "kling_prompt": "Continuing from previous scene same person shows genuine happy result natural smile, person holds product steadily hand remains stable no sudden position jumps smooth continuous authentic motion, pointing casually at camera shifting weight forward, handheld wobble no cinematic exaggeration",
+      "nb_prompt": "same person from reference in same [setting] showing the RESULT — happy smile showing [whiter teeth / wearing the outfit confidently / skin glowing / wearing watch proudly], product naturally visible preserve exact appearance from reference, single frame photo, maintain exact facial features",
+      "kling_prompt": "Continuing in same setting same person shows genuine happy result naturally, preserve exact product appearance from reference unchanged, hand remains stable smooth continuous authentic motion, pointing at camera shifting weight forward handheld wobble no cinematic exaggeration",
       "subtitle": "same as voiceover_scene4"
     }
   ]
@@ -153,13 +191,13 @@ export async function POST(req) {
       const preparedProduct = productImageUrl || null;
       await send({ step: 'upload_done', progress: 8, message: '✅ מוכן!' });
 
-      await send({ step: 'script', progress: 10, message: '✍️ כותב סקריפט 24s קריינות...' });
+      await send({ step: 'script', progress: 10, message: '✍️ כותב סקריפט...' });
       const script = await generateScript(productName, productDesc, applicationArea, storyDescription);
       const scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
       const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea);
       await send({ step: 'script_done', progress: 15, message: '✅ סקריפט מוכן!', scenes, voiceover });
 
-      await send({ step: 'voice', progress: 18, message: '🎙️ יוצר קריינות 28s V3...' });
+      await send({ step: 'voice', progress: 18, message: '🎙️ יוצר קריינות V3...' });
       const fullAudioBase64 = await generateVoice(voiceover);
       if (fullAudioBase64) {
         await send({ step: 'voice_done', progress: 22, message: '✅ קריינות מוכנה!', audioBase64: fullAudioBase64 });
@@ -171,7 +209,7 @@ export async function POST(req) {
       const frameProgresses = [25, 38, 51, 64];
       let prevFrame = null;
       for (let i = 0; i < 4; i++) {
-        await send({ step: `nb_${i+1}`, progress: frameProgresses[i], message: `🎨 Nano Banana — סצנה ${i+1} (${SCENE_DURATIONS[i]}s)...` });
+        await send({ step: `nb_${i+1}`, progress: frameProgresses[i], message: `🎨 Nano Banana — סצנה ${i+1}...` });
         try {
           const imageUrls = [];
           if (preparedAvatar) imageUrls.push(preparedAvatar);
@@ -208,16 +246,36 @@ export async function POST(req) {
 }
 
 function getDefaultVoiceover(productName, applicationArea) {
-  return `ממש נמאס לי. ניסיתי הכל ושום דבר לא עבד. עד שמישהו המליץ לי על ${productName} ולא האמנתי שזה יעזור. התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי. שבוע אחד ואני לגמרי מרוצה. תנסו את ${productName} יש אחריות מלאה!`;
+  return `הבעיה הזאת הציקה לי כבר הרבה זמן ולא ידעתי מה לעשות. גיליתי את ${productName} ולא האמנתי שיעזור לי. התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
 }
 
-const STABLE_MOTION = 'person holds product steadily, subtle natural breathing movement, slight head tilt, hand remains stable, no sudden position jumps or shape changes to product, smooth continuous authentic motion, handheld iPhone wobble, no cinematic exaggeration';
+const STABLE = 'preserve exact product appearance from reference exact colors exact shape product does NOT change, person holds product steadily subtle breathing hand remains stable no sudden position jumps smooth continuous motion handheld iPhone wobble no cinematic exaggeration';
 
 function getDefaultScenes(productName, applicationArea, productDesc) {
   return [
-    { type: 'כאב', nb_prompt: `woman frustrated in bathroom mirror looking at specific problem: ${productDesc}, stressed expression examining problem area, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference`, kling_prompt: `Person examines specific problem in mirror frustrated, ${STABLE_MOTION}`, subtitle: `שיניים צהובות ולא יכולה לחייך בתמונות.` },
-    { type: 'גילוי', nb_prompt: `same person from reference just discovered ${productName}, holding product naturally genuine curious expression NOT posed like commercial, single frame photo, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person examines ${productName} with curiosity, ${STABLE_MOTION}`, subtitle: `עד שמישהו המליץ לי על ${productName} ולא האמנתי שזה יעזור.` },
-    { type: 'שימוש', nb_prompt: `same person from reference performing ${applicationArea} — hands doing PHYSICAL ACTION naturally, product integrated into action NOT as prop, single frame photo not collage, genuine focused expression, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person performs ${applicationArea}, ${STABLE_MOTION}, hands clearly visible, no talking`, subtitle: `התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי.` },
-    { type: 'CTA', nb_prompt: `same person from reference genuinely happy smiling naturally at camera, product naturally visible, single frame photo, maintain exact facial features`, kling_prompt: `Continuing from previous scene same person shows genuine happy result natural smile, ${STABLE_MOTION}, pointing casually at camera`, subtitle: `תנסו את ${productName} — יש אחריות מלאה!` }
+    {
+      type: 'כאב',
+      nb_prompt: `woman frustrated in appropriate setting examining specific problem: ${productDesc}, stressed natural expression, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference`,
+      kling_prompt: `Person shows specific problem frustrated in setting, ${STABLE}`,
+      subtitle: 'הבעיה הזאת הציקה לי כבר הרבה זמן ולא ידעתי מה לעשות.'
+    },
+    {
+      type: 'גילוי',
+      nb_prompt: `same person from reference in same setting just discovered ${productName}, holding product naturally with curious surprised expression, preserve exact product appearance from reference, single frame photo, maintain exact facial features`,
+      kling_prompt: `Continuing same person discovers ${productName} curiously, ${STABLE}`,
+      subtitle: `גיליתי את ${productName} ולא האמנתי שיעזור לי.`
+    },
+    {
+      type: 'שימוש',
+      nb_prompt: `same person from reference in same setting with product ON or IN them — wearing/applying/using ${productName} naturally as part of ${applicationArea}, product integrated on person not just held, preserve exact product appearance, single frame photo not collage, genuine focused expression, maintain exact facial features`,
+      kling_prompt: `Continuing same person uses ${productName} on themselves naturally during ${applicationArea}, ${STABLE}, hands clearly visible, no talking`,
+      subtitle: `התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי.`
+    },
+    {
+      type: 'CTA',
+      nb_prompt: `same person from reference in same setting showing happy result after using ${productName}, genuine smile showing the change, product naturally visible preserve exact appearance, single frame photo, maintain exact facial features`,
+      kling_prompt: `Continuing same person shows genuine happy result, ${STABLE}, pointing at camera`,
+      subtitle: `תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`
+    }
   ];
 }
