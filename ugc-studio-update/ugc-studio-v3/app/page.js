@@ -26,115 +26,116 @@ const proxyUrl = (url) => url ? `/api/proxy?url=${encodeURIComponent(url)}` : nu
 
 // ─── Client-side helpers ──────────────────────────────────────────────────────
 
-// Upload a Blob to fal.ai storage via the server-side /api/upload route
-async function uploadToFal(blob, filename) {
-  const fd = new FormData();
-  fd.append('file', blob, filename || (blob.type.startsWith('audio') ? 'audio.wav' : 'video.webm'));
-  const res = await fetch('/api/upload', { method: 'POST', body: fd });
-  if (!res.ok) throw new Error('Upload failed: ' + (await res.text()));
-  const data = await res.json();
-  if (!data.url) throw new Error('No URL from upload: ' + JSON.stringify(data));
-  return data.url;
-}
-
-// Burn subtitle text onto video frames using Canvas + MediaRecorder.
-// Returns a Blob (video/webm) with the subtitle baked in.
-async function burnSubtitlesIntoVideo(videoUrl, subtitle, duration) {
-  return new Promise((resolve, reject) => {
-    // setInterval keeps running in background tabs; rAF freezes → timeout
-    const deadline = setTimeout(() => {
-      if (intervalId) clearInterval(intervalId);
-      reject(new Error('Subtitle burn timeout'));
-    }, (duration + 30) * 1000);
-
-    const video = document.createElement('video');
-    video.crossOrigin = 'anonymous';
-    video.muted = true;
-    video.playsInline = true;
-
+// Full client-side export: plays all scenes sequentially on a Canvas,
+// burns subtitles via drawImage, mixes audio via Web Audio API → MediaRecorder → Blob.
+// Zero server calls — no FFmpeg, no fal.ai merge.
+async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase64, musicUrl, onProgress) {
+  return new Promise(async (resolve, reject) => {
+    const W = 1080, H = 1920;
     const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
+
+    // ── Audio setup ─────────────────────────────────────────────────────────
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AC();
+    const dest = audioCtx.createMediaStreamDestination();
+    let voiceBuf = null, musicBuf = null;
+
+    if (audioBase64) {
+      try {
+        const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+        voiceBuf = await audioCtx.decodeAudioData(bytes.buffer.slice(0));
+      } catch(e) { console.warn('Voice decode:', e.message); }
+    }
+    if (musicUrl) {
+      try {
+        const buf = await (await fetch(musicUrl)).arrayBuffer();
+        musicBuf = await audioCtx.decodeAudioData(buf);
+      } catch(e) { console.warn('Music decode:', e.message); }
+    }
+
+    // ── MediaRecorder on canvas + audio stream ───────────────────────────────
+    const canvasStream = canvas.captureStream(30);
+    dest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
+
+    const mimeType = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
+      .find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+
     const chunks = [];
-    let recorder = null;
-    let intervalId = null;
-    let stopped = false;
+    const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = () => { audioCtx.close(); resolve(new Blob(chunks, { type: mimeType })); };
 
-    const stopAll = () => {
-      if (stopped) return;
-      stopped = true;
-      clearTimeout(deadline);
-      if (intervalId) { clearInterval(intervalId); intervalId = null; }
+    // ── Subtitle drawing ─────────────────────────────────────────────────────
+    const drawSubtitle = (text) => {
+      if (!text) return;
+      const fontSize = Math.round(H * 0.028);
+      ctx.save();
+      ctx.direction = 'rtl';
+      ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      const textX = W / 2, textY = H - 100;
+      const m = ctx.measureText(text), pad = 20;
+      ctx.fillStyle = 'rgba(0,0,0,0.8)';
+      const bx = textX - m.width/2 - pad, by = textY - fontSize - 8;
+      const bw = m.width + pad*2, bh = fontSize + 24;
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,8); ctx.fill(); }
+      else ctx.fillRect(bx,by,bw,bh);
+      ctx.fillStyle = '#fff'; ctx.fillText(text, textX, textY);
+      ctx.restore();
     };
-    const done = (blob) => { stopAll(); resolve(blob); };
-    const fail = (e)  => { stopAll(); reject(e); };
 
-    const stopRecording = () => {
-      stopAll();
-      if (recorder && recorder.state === 'recording') recorder.stop();
-    };
+    // ── Scene queue ──────────────────────────────────────────────────────────
+    const scenes = videoUrls
+      .map((url, i) => ({ url, sub: subtitles[i]||'', dur: durations[i]||5, idx: i }))
+      .filter(s => s.url);
 
-    video.onloadedmetadata = () => {
-      canvas.width  = video.videoWidth  || 1080;
-      canvas.height = video.videoHeight || 1920;
+    const playScene = (si) => {
+      if (si >= scenes.length) { recorder.stop(); return; }
+      const sc = scenes[si];
+      onProgress && onProgress(`🎬 מייצא סצנה ${sc.idx+1}/${scenes.length}...`);
 
-      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
-        .find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
-
-      const stream = canvas.captureStream(30);
-      recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 6_000_000 });
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onstop = () => done(new Blob(chunks, { type: mimeType }));
-
-      // Split subtitle into two halves
-      const words = subtitle ? subtitle.trim().split(' ') : [];
+      const words = sc.sub.trim().split(' ').filter(Boolean);
       const mid = Math.ceil(words.length / 2);
-      const parts = [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
+      const parts = [words.slice(0,mid).join(' '), words.slice(mid).join(' ')];
 
-      const drawSubtitle = (text) => {
-        if (!text) return;
-        const w = canvas.width, h = canvas.height;
-        const fontSize = Math.round(h * 0.028);
-        ctx.save();
-        ctx.direction = 'rtl';
-        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'alphabetic';
-        const textX = w / 2;
-        const textY = h - 100;
-        const metrics = ctx.measureText(text);
-        const pad = 20;
-        ctx.fillStyle = 'rgba(0,0,0,0.8)';
-        const bx = textX - metrics.width / 2 - pad;
-        const by = textY - fontSize - 8;
-        const bw = metrics.width + pad * 2;
-        const bh = fontSize + 24;
-        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); }
-        else ctx.fillRect(bx, by, bw, bh);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(text, textX, textY);
-        ctx.restore();
+      const vid = document.createElement('video');
+      vid.muted = true; vid.crossOrigin = 'anonymous'; vid.playsInline = true;
+      let ivId = null;
+
+      const next = () => { if (ivId) clearInterval(ivId); playScene(si+1); };
+      vid.addEventListener('ended', next);
+      vid.onerror = () => next();
+
+      vid.onloadedmetadata = () => {
+        vid.currentTime = 0;
+        vid.play().catch(() => next());
+        ivId = setInterval(() => {
+          if (vid.readyState < 2) return;
+          if (vid.ended || vid.currentTime >= sc.dur + 0.15) { next(); return; }
+          ctx.drawImage(vid, 0, 0, W, H);
+          drawSubtitle(parts[vid.currentTime < sc.dur/2 ? 0 : 1] || '');
+        }, 33);
       };
-
-      // video.ended fires reliably even in background tabs
-      video.addEventListener('ended', stopRecording);
-
-      recorder.start(100);
-      video.currentTime = 0;
-      video.play().catch(fail);
-
-      // setInterval instead of requestAnimationFrame — works in background tabs
-      intervalId = setInterval(() => {
-        if (!recorder || recorder.state !== 'recording') { clearInterval(intervalId); return; }
-        if (video.ended || video.currentTime >= duration + 0.15) { stopRecording(); return; }
-        try { ctx.drawImage(video, 0, 0, canvas.width, canvas.height); } catch {}
-        const half = video.currentTime < duration / 2 ? 0 : 1;
-        drawSubtitle(parts[half] || '');
-      }, 33); // ~30fps
+      vid.src = `/api/proxy?url=${encodeURIComponent(sc.url)}`;
     };
 
-    video.onerror = () => fail(new Error('Video load error for ' + videoUrl));
-    // crossOrigin must be set BEFORE src
-    video.src = `/api/proxy?url=${encodeURIComponent(videoUrl)}`;
+    try {
+      // Start audio sources just before recording begins
+      recorder.start(100);
+      if (voiceBuf) {
+        const src = audioCtx.createBufferSource(); src.buffer = voiceBuf;
+        const g = audioCtx.createGain(); g.gain.value = 1.0;
+        src.connect(g); g.connect(dest); src.start(0);
+      }
+      if (musicBuf) {
+        const src = audioCtx.createBufferSource(); src.buffer = musicBuf; src.loop = true;
+        const g = audioCtx.createGain(); g.gain.value = voiceBuf ? 0.15 : 1.0;
+        src.connect(g); g.connect(dest); src.start(0);
+      }
+      playScene(0);
+    } catch(e) { reject(e); }
   });
 }
 
@@ -224,6 +225,11 @@ function splitSubtitle(text) {
   return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
 }
 
+const PROJECTS_KEY = 'ugc_saved_projects';
+function loadProjectsFromStorage() {
+  try { return JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]'); } catch { return []; }
+}
+
 export default function Home() {
   const [screen, setScreen] = useState('form');
   const [selectedAvatar, setSelectedAvatar] = useState(null);
@@ -246,6 +252,52 @@ export default function Home() {
   const [editSubtitles, setEditSubtitles] = useState(['','','','']);
   const [selectedMusic, setSelectedMusic] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
+  const [savedProjects, setSavedProjects] = useState([]);
+
+  useEffect(() => { setSavedProjects(loadProjectsFromStorage()); }, []);
+
+  const saveProject = () => {
+    if (!videoUrls.some(Boolean)) return alert('אין סרטונים לשמירה');
+    const project = {
+      id: Date.now(),
+      productName: productName || 'פרויקט ללא שם',
+      timestamp: new Date().toISOString(),
+      videoUrls,
+      audioBase64,
+      editSubtitles,
+      scenes,
+      voiceover,
+      selectedMusic,
+      frameUrls,
+      thumbnail: frameUrls.find(Boolean) || null,
+    };
+    const existing = loadProjectsFromStorage();
+    const updated = [project, ...existing].slice(0, 10); // max 10
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(updated));
+    setSavedProjects(updated);
+    alert(`✅ הפרויקט "${project.productName}" נשמר!`);
+  };
+
+  const loadProject = (project) => {
+    setProductName(project.productName || '');
+    setVideoUrls(project.videoUrls || [null,null,null,null]);
+    setAudioBase64(project.audioBase64 || null);
+    setEditSubtitles(project.editSubtitles || ['','','','']);
+    setScenes(project.scenes || []);
+    setVoiceover(project.voiceover || '');
+    setSelectedMusic(project.selectedMusic || 0);
+    setFrameUrls(project.frameUrls || [null,null,null,null]);
+    setKlingStatus(project.videoUrls.map(u => u ? 'done' : 'idle'));
+    setLogs([{ msg: `📂 פרויקט "${project.productName}" נטען`, type: 'success', time: new Date().toLocaleTimeString('he-IL') }]);
+    setProgress(100);
+    setScreen('editor');
+  };
+
+  const deleteProject = (id) => {
+    const updated = loadProjectsFromStorage().filter(p => p.id !== id);
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(updated));
+    setSavedProjects(updated);
+  };
 
   const addLog = (msg, type='info') => setLogs(prev => [...prev.slice(-60), { msg, type, time: new Date().toLocaleTimeString('he-IL') }]);
 
@@ -291,73 +343,24 @@ export default function Home() {
   const exportFinal = async () => {
     if (!videoUrls.some(Boolean)) return alert('אין סרטונים לייצוא');
     setIsExporting(true);
-    addLog('📦 מתחיל ייצוא סרטון סופי...', 'start');
+    addLog('📦 מייצא סרטון — עובד בדפדפן, אין צורך בשרת...', 'start');
     try {
-      // ── Step 1: Burn subtitles into each scene video (Canvas API, client-side) ──
-      const burnedUrls = [...videoUrls];
-      for (let i = 0; i < 4; i++) {
-        if (!videoUrls[i]) continue;
-        const sub = editSubtitles[i]?.trim();
-        if (!sub) continue; // no subtitle for this scene
-        try {
-          addLog(`🎨 צורב כתוביות סצנה ${i + 1}...`);
-          const blob = await burnSubtitlesIntoVideo(videoUrls[i], sub, SCENE_DURATIONS[i]);
-          addLog(`⬆️ מעלה סצנה ${i + 1} ל-fal.ai...`);
-          burnedUrls[i] = await uploadToFal(blob, `scene_${i + 1}.webm`);
-          addLog(`✅ סצנה ${i + 1} מוכנה`, 'success');
-        } catch (e) {
-          addLog(`⚠️ כתוביות סצנה ${i + 1} נכשלו (${e.message}) — ממשיך ללא`, 'error');
-          // fall back to original Kling URL
-        }
-      }
-
-      // ── Step 2: Mix audio (Web Audio API, client-side) ──────────────────────
-      let audioUrl = null;
       const musicTrack = MUSIC_TRACKS[selectedMusic];
-      if (audioBase64 || musicTrack?.url) {
-        try {
-          addLog('🎵 מערבב קריינות + מוזיקה...');
-          const blob = await mixAudioTracks(audioBase64, musicTrack?.url || null);
-          if (blob) {
-            addLog('⬆️ מעלה אודיו ל-fal.ai...');
-            audioUrl = await uploadToFal(blob, 'audio.wav');
-            addLog('✅ אודיו מוכן', 'success');
-          }
-        } catch (e) {
-          addLog(`⚠️ ערבוב אודיו נכשל: ${e.message}`, 'error');
-        }
-      }
-
-      // ── Step 3: Merge via fal.ai FFmpeg API ─────────────────────────────────
-      addLog('🎬 ממזג סרטונים ב-fal.ai FFmpeg...');
-      const res = await fetch('/api/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoUrls: burnedUrls.filter(Boolean), audioUrl })
-      });
-      const data = await res.json();
-
-      if (data.videoUrl) {
-        // Direct download from fal.ai CDN
-        const a = document.createElement('a');
-        a.href = data.videoUrl;
-        a.download = 'ugc_final.mp4';
-        a.target = '_blank';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        addLog('✅ סרטון הורד בהצלחה!', 'success');
-      } else if (data.videoBase64) {
-        const blob = new Blob([Uint8Array.from(atob(data.videoBase64), c => c.charCodeAt(0))], { type: 'video/mp4' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'ugc_final.mp4'; a.click();
-        URL.revokeObjectURL(url);
-        addLog('✅ סרטון הורד!', 'success');
-      } else {
-        addLog(`❌ ייצוא נכשל: ${data.error || ''}`, 'error');
-      }
+      const blob = await exportVideoClientSide(
+        videoUrls,
+        editSubtitles,
+        SCENE_DURATIONS,
+        audioBase64,
+        musicTrack?.url || null,
+        (msg) => addLog(msg)
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'ugc_final.webm'; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      addLog('✅ סרטון הורד בהצלחה!', 'success');
     } catch (e) {
-      addLog(`❌ שגיאה: ${e.message}`, 'error');
+      addLog(`❌ ייצוא נכשל: ${e.message}`, 'error');
     }
     setIsExporting(false);
   };
@@ -411,15 +414,15 @@ export default function Home() {
     setIsGenerating(false);
   };
 
-  if (screen === 'form') return <FormScreen {...{selectedAvatar,setSelectedAvatar,customAvatar,handleAvatarUpload,productImage,handleProductUpload,productName,setProductName,productDesc,setProductDesc,applicationArea,setApplicationArea,storyDescription,setStoryDescription,runAgent}} />;
+  if (screen === 'form') return <FormScreen {...{selectedAvatar,setSelectedAvatar,customAvatar,handleAvatarUpload,productImage,handleProductUpload,productName,setProductName,productDesc,setProductDesc,applicationArea,setApplicationArea,storyDescription,setStoryDescription,runAgent,savedProjects,loadProject,deleteProject}} />;
 
   const totalDone = videoUrls.filter(Boolean).length;
   const allDone = !isGenerating && klingStatus.every(s => s==='done'||s==='error');
 
-  return <EditorScreen {...{isGenerating,logs,progress,scenes,voiceover,audioBase64,frameUrls,videoUrls,klingStatus,activeScene,setActiveScene,editSubtitles,setEditSubtitles,allDone,totalDone,selectedMusic,setSelectedMusic,isExporting,exportFinal,onNew:()=>setScreen('form')}} />;
+  return <EditorScreen {...{isGenerating,logs,progress,scenes,voiceover,audioBase64,frameUrls,videoUrls,klingStatus,activeScene,setActiveScene,editSubtitles,setEditSubtitles,allDone,totalDone,selectedMusic,setSelectedMusic,isExporting,exportFinal,saveProject,onNew:()=>setScreen('form')}} />;
 }
 
-function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBase64, frameUrls, videoUrls, klingStatus, activeScene, setActiveScene, editSubtitles, setEditSubtitles, allDone, totalDone, selectedMusic, setSelectedMusic, isExporting, exportFinal, onNew }) {
+function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBase64, frameUrls, videoUrls, klingStatus, activeScene, setActiveScene, editSubtitles, setEditSubtitles, allDone, totalDone, selectedMusic, setSelectedMusic, isExporting, exportFinal, saveProject, onNew }) {
   const audioRef = useRef(null);
   const musicRef = useRef(null);
   const videoRefs = useRef([null,null,null,null]);
@@ -513,10 +516,16 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
           )}
           <button onClick={()=>setShowLogs(!showLogs)} style={{ padding:'5px 10px', background:showLogs?'#a855f720':'#1e2030', border:`1px solid ${showLogs?'#a855f7':'#2a2d40'}`, borderRadius:7, color:showLogs?'#a855f7':'#aaa', cursor:'pointer', fontSize:11 }}>📋 לוג</button>
           {videoUrls.some(Boolean) && (
-            <button onClick={exportFinal} disabled={isExporting}
-              style={{ padding:'5px 14px', background:isExporting?'#4a1a5e':'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', borderRadius:7, color:'#fff', cursor:isExporting?'wait':'pointer', fontSize:12, fontWeight:700, opacity:isExporting?0.7:1 }}>
-              {isExporting?'⏳ מייצר...':'⬇️ ייצא הכל'}
-            </button>
+            <>
+              <button onClick={saveProject}
+                style={{ padding:'5px 12px', background:'#0f2a1a', border:'1px solid #22c55e', borderRadius:7, color:'#22c55e', cursor:'pointer', fontSize:12, fontWeight:700 }}>
+                💾 שמור
+              </button>
+              <button onClick={exportFinal} disabled={isExporting}
+                style={{ padding:'5px 14px', background:isExporting?'#4a1a5e':'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', borderRadius:7, color:'#fff', cursor:isExporting?'wait':'pointer', fontSize:12, fontWeight:700, opacity:isExporting?0.7:1 }}>
+                {isExporting?'⏳ מייצר...':'⬇️ ייצא הכל'}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -732,7 +741,7 @@ function formatTime(s) {
   return `${m}:${sec.toString().padStart(2,'0')}`;
 }
 
-function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAvatarUpload, productImage, handleProductUpload, productName, setProductName, productDesc, setProductDesc, applicationArea, setApplicationArea, storyDescription, setStoryDescription, runAgent }) {
+function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAvatarUpload, productImage, handleProductUpload, productName, setProductName, productDesc, setProductDesc, applicationArea, setApplicationArea, storyDescription, setStoryDescription, runAgent, savedProjects, loadProject, deleteProject }) {
   return (
     <div style={{ minHeight:'100vh', background:'#0a0a0f', color:'#fff', fontFamily:'system-ui', direction:'rtl' }}>
       <div style={{ maxWidth:680, margin:'0 auto', padding:'40px 20px' }}>
@@ -740,6 +749,37 @@ function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAva
           <h1 style={{ fontSize:36, fontWeight:800, background:'linear-gradient(135deg,#a855f7,#ec4899)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', margin:0 }}>🎬 UGC Studio</h1>
           <p style={{ color:'#888', marginTop:8 }}>צור סרטוני UGC ויראליים עם AI</p>
         </div>
+
+        {savedProjects.length > 0 && (
+          <div style={{ marginBottom:28 }}>
+            <div style={{ fontWeight:700, fontSize:15, marginBottom:12, color:'#fff' }}>📂 פרויקטים שמורים</div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))', gap:10 }}>
+              {savedProjects.map(p => (
+                <div key={p.id} style={{ background:'#111', border:'1px solid #1e2030', borderRadius:12, overflow:'hidden', position:'relative' }}>
+                  {p.thumbnail
+                    ? <img src={p.thumbnail} style={{ width:'100%', aspectRatio:'9/16', objectFit:'cover', display:'block' }} />
+                    : <div style={{ width:'100%', aspectRatio:'9/16', background:'#1a1a2e', display:'flex', alignItems:'center', justifyContent:'center', fontSize:28 }}>🎬</div>}
+                  <div style={{ padding:'8px 10px' }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:'#e5e7eb', marginBottom:2, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>{p.productName}</div>
+                    <div style={{ fontSize:10, color:'#6b7280', marginBottom:8 }}>
+                      {new Date(p.timestamp).toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit',year:'2-digit'})}
+                    </div>
+                    <div style={{ display:'flex', gap:5 }}>
+                      <button onClick={() => loadProject(p)}
+                        style={{ flex:1, padding:'5px 0', background:'linear-gradient(135deg,#a855f7,#ec4899)', border:'none', borderRadius:6, color:'#fff', cursor:'pointer', fontSize:11, fontWeight:700 }}>
+                        ▶ המשך
+                      </button>
+                      <button onClick={() => deleteProject(p.id)}
+                        style={{ padding:'5px 8px', background:'#1a0a0a', border:'1px solid #7f1d1d', borderRadius:6, color:'#f87171', cursor:'pointer', fontSize:11 }}>
+                        🗑
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <Section title="👤 בחר אווטאר">
           <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:8, marginBottom:12 }}>
             {AVATARS.map(a => (
