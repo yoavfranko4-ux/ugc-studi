@@ -40,6 +40,7 @@ export default function Home() {
   const [result, setResult] = useState(null)
   const [currentScene, setCurrentScene] = useState(0)
   const [logs, setLogs] = useState([])
+  const [exporting, setExporting] = useState(false)
   const videoRef = useRef(null)
   const audioRef = useRef(null)
   const canvasRef = useRef(null)
@@ -61,11 +62,11 @@ export default function Home() {
     // Break subtitle into lines of max 4-5 words
     const words = subtitle.split(/\s+/)
     const lines = []
-    for (let i = 0; i < words.length; i += 4) {
-      lines.push(words.slice(i, i + 4).join(' '))
+    for (let i = 0; i < words.length; i += 3) {
+      lines.push(words.slice(i, i + 3).join(' '))
     }
 
-    ctx.font = 'bold 32px Heebo, sans-serif'
+    ctx.font = 'bold 48px Heebo, sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
 
@@ -76,7 +77,7 @@ export default function Home() {
     lines.forEach((line, i) => {
       const y = startY + i * lineHeight
       ctx.strokeStyle = 'black'
-      ctx.lineWidth = 8
+      ctx.lineWidth = 12
       ctx.lineJoin = 'round'
       ctx.miterLimit = 2
       ctx.strokeText(line, x, y)
@@ -231,6 +232,116 @@ export default function Home() {
     if (url && videoRef.current) { videoRef.current.src = url; videoRef.current.load() }
   }
 
+  const exportMp4 = async () => {
+    if (!result?.videos?.length) return
+    setExporting(true)
+    try {
+      const offCanvas = document.createElement('canvas')
+      offCanvas.width = 1080
+      offCanvas.height = 1920
+      const ctx = offCanvas.getContext('2d')
+
+      // Choose best mimeType
+      let mimeType = 'video/mp4'
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'video/webm;codecs=h264'
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = 'video/webm;codecs=vp9'
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'video/webm'
+          }
+        }
+      }
+
+      const stream = offCanvas.captureStream(30)
+
+      // Add audio if available
+      if (audioRef.current?.src) {
+        try {
+          const audioCtx = new AudioContext()
+          const source = audioCtx.createMediaElementSource(audioRef.current)
+          const dest = audioCtx.createMediaStreamDestination()
+          source.connect(dest)
+          source.connect(audioCtx.destination)
+          dest.stream.getAudioTracks().forEach(t => stream.addTrack(t))
+        } catch {}
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType })
+      const chunks = []
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
+
+      const donePromise = new Promise(resolve => { mediaRecorder.onstop = resolve })
+      mediaRecorder.start()
+
+      // Play each scene sequentially onto canvas with subtitles
+      for (let i = 0; i < result.videos.length; i++) {
+        const url = result.videos[i]
+        if (!url) continue
+
+        await new Promise((resolve, reject) => {
+          const vid = document.createElement('video')
+          vid.crossOrigin = 'anonymous'
+          vid.src = url
+          vid.muted = true
+          vid.playsInline = true
+
+          vid.onloadeddata = async () => {
+            try { await vid.play() } catch { resolve(); return }
+
+            const subtitle = result.story?.scenes?.[i]?.subtitle || ''
+            const words = subtitle.split(/\s+/)
+            const lines = []
+            for (let w = 0; w < words.length; w += 3) {
+              lines.push(words.slice(w, w + 3).join(' '))
+            }
+
+            const drawFrame = () => {
+              if (vid.paused || vid.ended) { resolve(); return }
+              ctx.drawImage(vid, 0, 0, offCanvas.width, offCanvas.height)
+
+              // Draw CapCut subtitles
+              ctx.font = 'bold 48px Heebo, sans-serif'
+              ctx.textAlign = 'center'
+              ctx.textBaseline = 'middle'
+              const lineHeight = 40
+              const startY = offCanvas.height * 0.75 - ((lines.length - 1) * lineHeight) / 2
+              const x = offCanvas.width / 2
+              lines.forEach((line, li) => {
+                const y = startY + li * lineHeight
+                ctx.strokeStyle = 'black'
+                ctx.lineWidth = 12
+                ctx.lineJoin = 'round'
+                ctx.miterLimit = 2
+                ctx.strokeText(line, x, y)
+                ctx.fillStyle = 'white'
+                ctx.fillText(line, x, y)
+              })
+
+              requestAnimationFrame(drawFrame)
+            }
+            requestAnimationFrame(drawFrame)
+          }
+          vid.onerror = () => resolve()
+        })
+      }
+
+      mediaRecorder.stop()
+      await donePromise
+
+      const blob = new Blob(chunks, { type: mimeType })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `ugc-video-${Date.now()}.mp4`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      alert('שגיאה בייצוא: ' + e.message)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (step === 'form') return (
     <div style={pageStyle}>
       <div style={{textAlign:'center',marginBottom:50}}>
@@ -356,6 +467,11 @@ export default function Home() {
               <video ref={videoRef} controls playsInline preload="auto" style={{width:'100%',height:'100%',objectFit:'contain',display:'block'}}/>
               <canvas ref={canvasRef} style={{position:'absolute',top:0,left:0,width:'100%',height:'100%',pointerEvents:'none'}}/>
             </div>
+          </div>
+          <div style={{marginBottom:12}}>
+            <button onClick={exportMp4} disabled={exporting} style={{...bigBtn,fontSize:15,padding:14,opacity:exporting?0.6:1}}>
+              {exporting ? '⏳ מייצא...' : '📥 ייצוא MP4 עם כתוביות'}
+            </button>
           </div>
           <div style={cardS}>
             <div style={secTitle}>הורד סצנות</div>
