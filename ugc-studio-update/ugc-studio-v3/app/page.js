@@ -464,7 +464,7 @@ export default function Home() {
       );
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'ugc_final.webm'; a.click();
+      a.href = url; a.download = 'ugc-video.mp4'; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       addLog('✅ סרטון הורד בהצלחה!', 'success');
     } catch (e) {
