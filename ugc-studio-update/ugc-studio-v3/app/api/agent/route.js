@@ -26,7 +26,7 @@ async function pollFal(requestId, maxWait = 300000) {
 
 async function generateNBFrame(prompt, imageUrls) {
   const validUrls = imageUrls.filter(Boolean);
-  const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real person not model, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`;
+  const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real avatar not model, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`;
   if (validUrls.length === 0) {
     const res = await fetch('https://queue.fal.run/fal-ai/nano-banana-2', {
       method: 'POST', headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
@@ -116,13 +116,19 @@ HOOK RULE (CRITICAL): voiceover_scene1 MUST name the EXACT visible problem of TH
 
 6. EVERY nb_prompt MUST end with: "correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle"
 
-4. SCENE 3 (שימוש) nb_prompt — MUST describe product ON the person, not held:
-- Clothing/dress → "same person WEARING the [exact item] standing in front of full-length bedroom mirror, dress/item ON her body, she is admiring the fit and looking at herself, NOT holding it — it is ON her"
-- Watch/jewelry → "same person WEARING the watch/jewelry on wrist/neck, holding arm up to admire it in mirror at dressing table"
-- Teeth/dental → "same person in bathroom close-up of mouth, applying the strip/gel directly ON teeth with fingers, dental product ON teeth visible"
-- Skincare → "same person in bathroom applying cream/serum directly ON face with fingertips, product ON skin being massaged in"
-- Hair → "same person applying product directly INTO hair, running fingers through hair with product"
-- Supplement → "same person at kitchen table/counter actually taking/drinking/eating the supplement"
+4. SCENE STRUCTURE:
+- Scene 1 (כאב): Avatar ALONE showing the specific problem — NO product visible yet
+- Scene 2 (מוצר): Close-up beauty shot of the PRODUCT — no avatar, or hand only. Product is the hero.
+- Scene 3 (שימוש): Avatar actively USING the product — product ON the avatar not just held
+- Scene 4 (תוצאה): Avatar genuinely happy with the RESULT — product naturally visible
+
+5. SCENE 3 (שימוש) — product must be ON the avatar:
+- Clothing/dress → "avatar WEARING the [exact item], item ON body, admiring the fit"
+- Watch/jewelry → "avatar WEARING the watch/jewelry on wrist/neck, holding arm up to admire"
+- Teeth/dental → "avatar applying the strip/gel directly ON teeth, dental product ON teeth visible"
+- Skincare → "avatar applying cream/serum directly ON face with fingertips, product ON skin"
+- Hair → "avatar applying product directly INTO hair, running fingers through hair"
+- Supplement → "avatar at kitchen table actually taking/drinking/eating the supplement"
 
 5. END every Kling prompt with exactly this phrase (no more, no less):
 "natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference"
@@ -137,26 +143,26 @@ Return ONLY valid JSON (no markdown):
   "scenes": [
     {
       "type": "כאב",
-      "nb_prompt": "woman in [LOGICAL SETTING] showing SPECIFIC PROBLEM of ${productDesc} — e.g. examining yellow teeth in bathroom mirror / frustrated with clothes not fitting in bedroom / checking old watch at dressing table. Natural window light, iPhone vertical selfie angle, visible skin texture no retouching, candid unposed, single frame photo, do not change person appearance from reference, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Person in [setting] visibly frustrated with [specific problem], natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
+      "nb_prompt": "avatar showing specific problem related to ${productDesc}, frustrated expression, no product visible yet, correct human anatomy, exactly two arms, no extra limbs, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar in [setting] visibly frustrated with [specific problem], no product visible, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps",
       "subtitle": "same as voiceover_scene1"
     },
     {
-      "type": "גילוי",
-      "nb_prompt": "same person from reference in same [setting], just found ${productName} — holding it naturally with curious surprised expression, product colors and shape exact from reference, iPhone vertical selfie angle, visible skin texture no retouching, candid feel, single frame photo, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Continuing same setting same person discovers ${productName} curiously, slight head tilt, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
+      "type": "מוצר",
+      "nb_prompt": "close-up beauty shot of ${productName}, beautiful natural lighting, product is the hero of the shot, clean background, preserve exact product appearance from reference — exact colors exact shape",
+      "kling_prompt": "Cinematic close-up of ${productName} rotating slowly or being revealed, beautiful lighting, clean background, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene2"
     },
     {
       "type": "שימוש",
-      "nb_prompt": "same person from reference in same [setting] — product is ON or IN the person: [for clothing: wearing the item in front of full-length mirror] [for watch: wearing on wrist holding arm up] [for teeth: strip/gel applied ON teeth close-up] [for skincare: cream being massaged into face] — product colors and shape exact from reference, iPhone close-up angle, visible skin texture no retouching, genuine focused expression, single frame photo not collage, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Continuing same setting same person uses product on themselves naturally, hands clearly visible doing the action, no talking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
+      "nb_prompt": "avatar actively using ${productName} — wearing/applying/consuming based on product type, product ON the avatar not just held, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar actively using ${productName} on themselves — product ON the avatar, hands clearly visible doing the action, no talking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene3"
     },
     {
-      "type": "CTA",
-      "nb_prompt": "same person from reference in same [setting] showing the RESULT — genuine happy smile [whiter teeth / wearing outfit confidently / skin glowing / watch on wrist], product naturally visible colors and shape exact from reference, iPhone selfie angle, real skin texture no retouching, single frame photo, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Continuing same setting same person shows genuine happy result, casual smile shifting weight forward pointing at camera, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
+      "type": "תוצאה",
+      "nb_prompt": "avatar genuinely happy with result of using ${productName}, natural smile showing positive outcome, product naturally visible, correct human anatomy, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar genuinely happy showing positive result after using ${productName}, natural smile, product naturally visible, casual pointing at camera, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene4"
     }
   ]
@@ -263,26 +269,26 @@ function getDefaultScenes(productName, applicationArea, productDesc) {
   return [
     {
       type: 'כאב',
-      nb_prompt: `woman frustrated in appropriate setting examining specific problem: ${productDesc}, stressed natural expression, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Person shows specific problem frustrated in setting, ${STABLE}`,
+      nb_prompt: `avatar showing specific problem related to ${productDesc}, frustrated expression, no product visible yet, correct human anatomy, exactly two arms, no extra limbs, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar visibly frustrated with specific problem related to ${productDesc}, no product visible, ${STABLE}`,
       subtitle: 'הבעיה הזאת הציקה לי כבר הרבה זמן ולא ידעתי מה לעשות.'
     },
     {
-      type: 'גילוי',
-      nb_prompt: `same person from reference in same setting just discovered ${productName}, holding product naturally with curious surprised expression, preserve exact product appearance from reference, single frame photo, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Continuing same person discovers ${productName} curiously, ${STABLE}`,
+      type: 'מוצר',
+      nb_prompt: `close-up beauty shot of ${productName}, beautiful natural lighting, product is the hero of the shot, clean background, preserve exact product appearance from reference — exact colors exact shape`,
+      kling_prompt: `Cinematic close-up of ${productName} rotating slowly or being revealed, beautiful lighting, clean background, ${STABLE}`,
       subtitle: `גיליתי את ${productName} ולא האמנתי שיעזור לי.`
     },
     {
       type: 'שימוש',
-      nb_prompt: `same person from reference in same setting with product ON or IN them — wearing/applying/using ${productName} naturally as part of ${applicationArea}, product integrated on person not just held, preserve exact product appearance, single frame photo not collage, genuine focused expression, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Continuing same person uses ${productName} on themselves naturally during ${applicationArea}, ${STABLE}, hands clearly visible, no talking`,
+      nb_prompt: `avatar actively using ${productName} — wearing/applying/consuming based on product type, product ON the avatar not just held, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar actively using ${productName} on themselves during ${applicationArea}, product ON the avatar, hands clearly visible, no talking, ${STABLE}`,
       subtitle: `התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי.`
     },
     {
-      type: 'CTA',
-      nb_prompt: `same person from reference in same setting showing happy result after using ${productName}, genuine smile showing the change, product naturally visible preserve exact appearance, single frame photo, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Continuing same person shows genuine happy result, ${STABLE}, pointing at camera`,
+      type: 'תוצאה',
+      nb_prompt: `avatar genuinely happy with result of using ${productName}, natural smile showing positive outcome, product naturally visible, correct human anatomy, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar genuinely happy showing positive result after using ${productName}, natural smile, product visible, pointing at camera, ${STABLE}`,
       subtitle: `תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`
     }
   ];
