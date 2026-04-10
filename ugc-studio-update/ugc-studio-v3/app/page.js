@@ -58,10 +58,14 @@ async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase6
 
     // ── MediaRecorder on canvas + audio stream ───────────────────────────────
     const canvasStream = canvas.captureStream(30);
-    dest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
+    const audioTracks = dest.stream.getAudioTracks();
+    audioTracks.forEach(track => canvasStream.addTrack(track));
 
-    const mimeType = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
-      .find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+      ? 'video/webm;codecs=vp9,opus'
+      : MediaRecorder.isTypeSupported('video/webm')
+      ? 'video/webm'
+      : 'video/mp4';
 
     const chunks = [];
     const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
@@ -71,40 +75,41 @@ async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase6
     // ── Subtitle drawing ─────────────────────────────────────────────────────
     const drawSubtitle = (text) => {
       if (!text) return;
-      const fontSize = 28;
-      const maxLineWidth = W - 60;
-      const lineHeight = fontSize + 10;
-      const pad = 20;
+      const fontSize = 52;
+      const lineHeight = fontSize + 16;
+      const pad = 24;
       ctx.save();
       ctx.direction = 'rtl';
       ctx.font = `bold ${fontSize}px Arial, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      // Word-wrap into lines
+      // Split into lines of max 3 words each
       const words = text.split(' ');
       const lines = [];
-      let cur = '';
-      for (const w of words) {
-        const test = cur ? cur + ' ' + w : w;
-        if (ctx.measureText(test).width > maxLineWidth && cur) { lines.push(cur); cur = w; }
-        else cur = test;
+      for (let i = 0; i < words.length; i += 3) {
+        lines.push(words.slice(i, i + 3).join(' '));
       }
-      if (cur) lines.push(cur);
       // Measure widest line for box width
       let widest = 0;
       for (const l of lines) widest = Math.max(widest, ctx.measureText(l).width);
       const textX = W / 2;
+      const textBaseY = Math.round(H * 0.78); // 78% of video height
       const boxH = lines.length * lineHeight + pad;
-      const boxW = widest + pad * 2;
-      const boxY = H - 100 - boxH + pad / 2;
+      const boxW = Math.min(widest + pad * 2, W - 60);
+      const boxY = textBaseY - fontSize - (pad / 2) - (lines.length - 1) * lineHeight;
       const boxX = textX - boxW / 2;
       ctx.fillStyle = 'rgba(0,0,0,0.8)';
-      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, boxY, boxW, boxH, 8); ctx.fill(); }
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, boxY, boxW, boxH, 10); ctx.fill(); }
       else ctx.fillRect(boxX, boxY, boxW, boxH);
-      // Draw each line
-      ctx.fillStyle = '#fff';
+      // Draw each line with stroke + fill
       const firstLineY = boxY + fontSize + (pad / 2 - 2);
       for (let i = 0; i < lines.length; i++) {
-        ctx.fillText(lines[i], textX, firstLineY + i * lineHeight);
+        const ly = firstLineY + i * lineHeight;
+        ctx.lineWidth = 14;
+        ctx.strokeStyle = '#000';
+        ctx.lineJoin = 'round';
+        ctx.strokeText(lines[i], textX, ly);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(lines[i], textX, ly);
       }
       ctx.restore();
     };
