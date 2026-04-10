@@ -501,10 +501,10 @@ export default function Home() {
   const totalDone = videoUrls.filter(Boolean).length;
   const allDone = !isGenerating && klingStatus.every(s => s==='done'||s==='error');
 
-  return <EditorScreen {...{isGenerating,logs,progress,scenes,voiceover,audioBase64,frameUrls,videoUrls,klingStatus,activeScene,setActiveScene,editSubtitles,setEditSubtitles,allDone,totalDone,selectedMusic,setSelectedMusic,isExporting,exportFinal,saveProject,onNew:()=>setScreen('form')}} />;
+  return <EditorScreen {...{isGenerating,logs,progress,scenes,voiceover,audioBase64,frameUrls,videoUrls,klingStatus,activeScene,setActiveScene,editSubtitles,setEditSubtitles,allDone,totalDone,selectedMusic,setSelectedMusic,isExporting,exportFinal,saveProject,voiceoverDuration,onNew:()=>setScreen('form')}} />;
 }
 
-function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBase64, frameUrls, videoUrls, klingStatus, activeScene, setActiveScene, editSubtitles, setEditSubtitles, allDone, totalDone, selectedMusic, setSelectedMusic, isExporting, exportFinal, saveProject, onNew }) {
+function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBase64, frameUrls, videoUrls, klingStatus, activeScene, setActiveScene, editSubtitles, setEditSubtitles, allDone, totalDone, selectedMusic, setSelectedMusic, isExporting, exportFinal, saveProject, voiceoverDuration, onNew }) {
   const audioRef = useRef(null);
   const musicRef = useRef(null);
   const videoRefs = useRef([null,null,null,null]);
