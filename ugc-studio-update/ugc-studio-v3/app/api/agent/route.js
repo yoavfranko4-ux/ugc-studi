@@ -3,7 +3,7 @@ const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
-const SCENE_DURATIONS = [5, 5, 10, 5];
+const SCENE_DURATIONS = [5, 5, 5, 5];
 
 async function pollFal(requestId, maxWait = 300000) {
   const start = Date.now();
@@ -26,7 +26,7 @@ async function pollFal(requestId, maxWait = 300000) {
 
 async function generateNBFrame(prompt, imageUrls) {
   const validUrls = imageUrls.filter(Boolean);
-  const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real person not model, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated`;
+  const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real person not model, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`;
   if (validUrls.length === 0) {
     const res = await fetch('https://queue.fal.run/fal-ai/nano-banana-2', {
       method: 'POST', headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
@@ -62,7 +62,7 @@ async function generateVoice(text) {
 
 async function generateScript(productName, productDesc, applicationArea, storyDescription) {
   if (!ANTHROPIC_KEY) return null;
-  const storyContext = storyDescription ? `\nStory: ${storyDescription}` : '';
+  const storyContext = storyDescription ? `\nSTORY OVERRIDE (MANDATORY): ${storyDescription} — You MUST change ALL scenes to match. If story mentions restaurant — nb_prompt must describe restaurant. If story mentions specific action — all prompts must match. This overrides ALL default settings absolutely.` : '';
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
@@ -72,18 +72,19 @@ async function generateScript(productName, productDesc, applicationArea, storyDe
 Description: ${productDesc}
 How to use: ${applicationArea}${storyContext}
 
-SCENE DURATIONS: Scene 1=5s, Scene 2=5s, Scene 3=10s, Scene 4=5s. Total=25s.
+SCENE DURATIONS = [5, 5, 5, 5] = 20 seconds total. Scene 1: ~8 Hebrew words. Scene 2: ~8 Hebrew words. Scene 3: ~16 Hebrew words. Scene 4: ~8 Hebrew words.
 
-CRITICAL: if a Story is provided above, you MUST OVERRIDE all scene settings, nb_prompt descriptions, kling_prompt descriptions, and actions to match the story EXACTLY. Change the "setting" field, every nb_prompt, every kling_prompt, and voiceover lines so they reflect the story the user described. For example if the story says "last scene in a restaurant with a dress" — the setting must be a restaurant, the scenes must show the person in a restaurant, and the product interaction must match. The story takes PRIORITY over the default setting rules below. Only fall back to the default setting rules if NO story is provided.
+CRITICAL: if a STORY OVERRIDE is provided above, you MUST OVERRIDE all scene settings, nb_prompt descriptions, kling_prompt descriptions, and actions to match the story EXACTLY. Change the "setting" field, every nb_prompt, every kling_prompt, and voiceover lines so they reflect the story the user described. For example if the story says "last scene in a restaurant with a dress" — the setting must be a restaurant, the scenes must show the person in a restaurant, and the product interaction must match. The story takes PRIORITY over the default setting rules below. Only fall back to the default setting rules if NO story is provided.
 
 CRITICAL RULES:
 
 1. VOICEOVER TIMING — STRICT:
-- Scene 1: 10-12 Hebrew words (fills 5s naturally)
-- Scene 2: 10-12 Hebrew words (fills 5s naturally)
-- Scene 3: 20-24 Hebrew words (fills 10s naturally)
-- Scene 4: 10-12 Hebrew words (fills 5s naturally)
+- Scene 1: ~8 Hebrew words (fills 5s naturally)
+- Scene 2: ~8 Hebrew words (fills 5s naturally)
+- Scene 3: ~16 Hebrew words (fills 5s naturally)
+- Scene 4: ~8 Hebrew words (fills 5s naturally)
 - Write at NATURAL SPEAKING PACE — not too fast, not too slow. Each scene must feel complete.
+- voiceover MUST fill the full duration naturally — write enough words to fill each scene, do not leave silence gaps
 
 2. HOOK (voiceover_scene1) — MANDATORY SPECIFIC:
 Identify the exact pain from productDesc and write it explicitly:
@@ -94,6 +95,8 @@ Identify the exact pain from productDesc and write it explicitly:
 - Hair → "שיער שנשבר ונושר ולא יכולה לעשות כלום איתו"
 - Sleep → "שוכבת בלילה שעות ולא יכולה להירדם בכלל"
 - NEVER use "נמאס לי" alone — always describe THE SPECIFIC VISIBLE PROBLEM
+
+HOOK RULE (CRITICAL): voiceover_scene1 MUST name the EXACT visible problem of THIS specific product. Examples: teeth whitening → 'שיניים צהובות שמביכות אותי בכל תמונה'; dress → 'לא מוצאת שמלה שמחמיאה לדמות שלי'; face cream → 'כתמים ואקנה שמופיעים כל בוקר'. NEVER say הבעיה הזאת alone.
 
 3. SETTING — HARD RULES, no exceptions:
 - Clothing/dress/fashion → ALWAYS: "bedroom with full-length mirror and open closet/wardrobe in background"
@@ -111,7 +114,7 @@ Identify the exact pain from productDesc and write it explicitly:
 - NEVER put clothing/fashion scenes in a car. NEVER put dental scenes in a bedroom.
 - NEVER put ANY product in a car scene UNLESS it is explicitly a car accessory. Cars are ONLY for car accessories.
 
-6. EVERY nb_prompt MUST end with: "NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated"
+6. EVERY nb_prompt MUST end with: "correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle"
 
 4. SCENE 3 (שימוש) nb_prompt — MUST describe product ON the person, not held:
 - Clothing/dress → "same person WEARING the [exact item] standing in front of full-length bedroom mirror, dress/item ON her body, she is admiring the fit and looking at herself, NOT holding it — it is ON her"
@@ -126,33 +129,33 @@ Identify the exact pain from productDesc and write it explicitly:
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "10-12 Hebrew words — SPECIFIC visible problem",
-  "voiceover_scene2": "10-12 Hebrew words — discovery of ${productName}",
-  "voiceover_scene3": "20-24 Hebrew words — using product ON/IN person and feeling result",
-  "voiceover_scene4": "10-12 Hebrew words — CTA with urgency",
+  "voiceover_scene1": "~8 Hebrew words — SPECIFIC visible problem",
+  "voiceover_scene2": "~8 Hebrew words — discovery of ${productName}",
+  "voiceover_scene3": "~16 Hebrew words — using product ON/IN person and feeling result",
+  "voiceover_scene4": "~8 Hebrew words — CTA with urgency",
   "setting": "one-line description of the setting",
   "scenes": [
     {
       "type": "כאב",
-      "nb_prompt": "woman in [LOGICAL SETTING] showing SPECIFIC PROBLEM of ${productDesc} — e.g. examining yellow teeth in bathroom mirror / frustrated with clothes not fitting in bedroom / checking old watch at dressing table. Natural window light, iPhone vertical selfie angle, visible skin texture no retouching, candid unposed, single frame photo, do not change person appearance from reference, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated",
+      "nb_prompt": "woman in [LOGICAL SETTING] showing SPECIFIC PROBLEM of ${productDesc} — e.g. examining yellow teeth in bathroom mirror / frustrated with clothes not fitting in bedroom / checking old watch at dressing table. Natural window light, iPhone vertical selfie angle, visible skin texture no retouching, candid unposed, single frame photo, do not change person appearance from reference, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
       "kling_prompt": "Person in [setting] visibly frustrated with [specific problem], natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene1"
     },
     {
       "type": "גילוי",
-      "nb_prompt": "same person from reference in same [setting], just found ${productName} — holding it naturally with curious surprised expression, product colors and shape exact from reference, iPhone vertical selfie angle, visible skin texture no retouching, candid feel, single frame photo, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated",
+      "nb_prompt": "same person from reference in same [setting], just found ${productName} — holding it naturally with curious surprised expression, product colors and shape exact from reference, iPhone vertical selfie angle, visible skin texture no retouching, candid feel, single frame photo, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
       "kling_prompt": "Continuing same setting same person discovers ${productName} curiously, slight head tilt, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene2"
     },
     {
       "type": "שימוש",
-      "nb_prompt": "same person from reference in same [setting] — product is ON or IN the person: [for clothing: wearing the item in front of full-length mirror] [for watch: wearing on wrist holding arm up] [for teeth: strip/gel applied ON teeth close-up] [for skincare: cream being massaged into face] — product colors and shape exact from reference, iPhone close-up angle, visible skin texture no retouching, genuine focused expression, single frame photo not collage, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated",
+      "nb_prompt": "same person from reference in same [setting] — product is ON or IN the person: [for clothing: wearing the item in front of full-length mirror] [for watch: wearing on wrist holding arm up] [for teeth: strip/gel applied ON teeth close-up] [for skincare: cream being massaged into face] — product colors and shape exact from reference, iPhone close-up angle, visible skin texture no retouching, genuine focused expression, single frame photo not collage, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
       "kling_prompt": "Continuing same setting same person uses product on themselves naturally, hands clearly visible doing the action, no talking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene3"
     },
     {
       "type": "CTA",
-      "nb_prompt": "same person from reference in same [setting] showing the RESULT — genuine happy smile [whiter teeth / wearing outfit confidently / skin glowing / watch on wrist], product naturally visible colors and shape exact from reference, iPhone selfie angle, real skin texture no retouching, single frame photo, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated",
+      "nb_prompt": "same person from reference in same [setting] showing the RESULT — genuine happy smile [whiter teeth / wearing outfit confidently / skin glowing / watch on wrist], product naturally visible colors and shape exact from reference, iPhone selfie angle, real skin texture no retouching, single frame photo, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
       "kling_prompt": "Continuing same setting same person shows genuine happy result, casual smile shifting weight forward pointing at camera, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene4"
     }
@@ -260,25 +263,25 @@ function getDefaultScenes(productName, applicationArea, productDesc) {
   return [
     {
       type: 'כאב',
-      nb_prompt: `woman frustrated in appropriate setting examining specific problem: ${productDesc}, stressed natural expression, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated`,
+      nb_prompt: `woman frustrated in appropriate setting examining specific problem: ${productDesc}, stressed natural expression, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
       kling_prompt: `Person shows specific problem frustrated in setting, ${STABLE}`,
       subtitle: 'הבעיה הזאת הציקה לי כבר הרבה זמן ולא ידעתי מה לעשות.'
     },
     {
       type: 'גילוי',
-      nb_prompt: `same person from reference in same setting just discovered ${productName}, holding product naturally with curious surprised expression, preserve exact product appearance from reference, single frame photo, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated`,
+      nb_prompt: `same person from reference in same setting just discovered ${productName}, holding product naturally with curious surprised expression, preserve exact product appearance from reference, single frame photo, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
       kling_prompt: `Continuing same person discovers ${productName} curiously, ${STABLE}`,
       subtitle: `גיליתי את ${productName} ולא האמנתי שיעזור לי.`
     },
     {
       type: 'שימוש',
-      nb_prompt: `same person from reference in same setting with product ON or IN them — wearing/applying/using ${productName} naturally as part of ${applicationArea}, product integrated on person not just held, preserve exact product appearance, single frame photo not collage, genuine focused expression, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated`,
+      nb_prompt: `same person from reference in same setting with product ON or IN them — wearing/applying/using ${productName} naturally as part of ${applicationArea}, product integrated on person not just held, preserve exact product appearance, single frame photo not collage, genuine focused expression, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
       kling_prompt: `Continuing same person uses ${productName} on themselves naturally during ${applicationArea}, ${STABLE}, hands clearly visible, no talking`,
       subtitle: `התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי.`
     },
     {
       type: 'CTA',
-      nb_prompt: `same person from reference in same setting showing happy result after using ${productName}, genuine smile showing the change, product naturally visible preserve exact appearance, single frame photo, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated`,
+      nb_prompt: `same person from reference in same setting showing happy result after using ${productName}, genuine smile showing the change, product naturally visible preserve exact appearance, single frame photo, maintain exact facial features, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
       kling_prompt: `Continuing same person shows genuine happy result, ${STABLE}, pointing at camera`,
       subtitle: `תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`
     }
