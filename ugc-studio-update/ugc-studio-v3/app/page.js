@@ -72,18 +72,21 @@ async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase6
     const drawSubtitle = (text) => {
       if (!text) return;
       const fontSize = Math.round(H * 0.028);
+      const maxTextWidth = W * 0.9 - 40; // 90% of canvas width minus padding
       ctx.save();
       ctx.direction = 'rtl';
       ctx.font = `bold ${fontSize}px Arial, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       const textX = W / 2, textY = H - 100;
-      const m = ctx.measureText(text), pad = 20;
+      const m = ctx.measureText(text);
+      const actualWidth = Math.min(m.width, maxTextWidth);
+      const pad = 20;
       ctx.fillStyle = 'rgba(0,0,0,0.8)';
-      const bx = textX - m.width/2 - pad, by = textY - fontSize - 8;
-      const bw = m.width + pad*2, bh = fontSize + 24;
+      const bx = textX - actualWidth/2 - pad, by = textY - fontSize - 8;
+      const bw = actualWidth + pad*2, bh = fontSize + 24;
       if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,8); ctx.fill(); }
       else ctx.fillRect(bx,by,bw,bh);
-      ctx.fillStyle = '#fff'; ctx.fillText(text, textX, textY);
+      ctx.fillStyle = '#fff'; ctx.fillText(text, textX, textY, maxTextWidth);
       ctx.restore();
     };
 
