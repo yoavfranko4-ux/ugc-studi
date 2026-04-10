@@ -16,10 +16,11 @@ const SCENE_STARTS = [0, 5, 10, 20];
 
 const MUSIC_TRACKS = [
   { id: 0, name: 'ללא מוזיקה', url: null, emoji: '🔇' },
-  { id: 1, name: 'Upbeat Pop', url: 'https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3', emoji: '🎵' },
-  { id: 2, name: 'Chill Vibes', url: 'https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0c6ff1bab.mp3', emoji: '🎶' },
-  { id: 3, name: 'Energetic', url: 'https://cdn.pixabay.com/download/audio/2022/03/15/audio_8cb749e7d5.mp3', emoji: '⚡' },
-  { id: 4, name: 'Motivational', url: 'https://cdn.pixabay.com/download/audio/2021/11/25/audio_5b31fd7e64.mp3', emoji: '🔥' },
+  { id: 1, name: 'Happy Pop', url: 'https://raw.githubusercontent.com/effacestudios/Royalty-Free-Music-Pack/master/Happy%20Life.mp3', emoji: '🎵' },
+  { id: 2, name: 'Energetic', url: 'https://raw.githubusercontent.com/effacestudios/Royalty-Free-Music-Pack/master/Sports%20Spirit.mp3', emoji: '⚡' },
+  { id: 3, name: 'Commercial', url: 'https://raw.githubusercontent.com/effacestudios/Royalty-Free-Music-Pack/master/commercial.mp3', emoji: '🔥' },
+  { id: 4, name: 'Party Vibes', url: 'https://raw.githubusercontent.com/effacestudios/Royalty-Free-Music-Pack/master/Party%20Time.mp3', emoji: '🎶' },
+  { id: 5, name: 'Starter', url: 'https://raw.githubusercontent.com/effacestudios/Royalty-Free-Music-Pack/master/Starter.mp3', emoji: '🎧' },
 ];
 
 const proxyUrl = (url) => url ? `/api/proxy?url=${encodeURIComponent(url)}` : null;
@@ -29,7 +30,7 @@ const proxyUrl = (url) => url ? `/api/proxy?url=${encodeURIComponent(url)}` : nu
 // Full client-side export: plays all scenes sequentially on a Canvas,
 // burns subtitles via drawImage, mixes audio via Web Audio API → MediaRecorder → Blob.
 // Zero server calls — no FFmpeg, no fal.ai merge.
-async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase64, musicUrl, onProgress) {
+async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase64, musicUrl, onProgress, voiceoverDuration) {
   return new Promise(async (resolve, reject) => {
     const W = 1080, H = 1920;
     const canvas = document.createElement('canvas');
@@ -87,16 +88,26 @@ async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase6
     };
 
     // ── Scene queue ──────────────────────────────────────────────────────────
+    // Build voice-synced timings for export if we have real voiceover duration
+    const voiceTimingsExport = voiceoverDuration ? buildVoiceTimings(subtitles, voiceoverDuration) : null;
+
     const scenes = videoUrls
       .map((url, i) => ({ url, sub: subtitles[i]||'', dur: durations[i]||5, idx: i }))
       .filter(s => s.url);
+
+    let absoluteTimeOffset = 0; // track absolute time across scenes for voice sync
 
     const playScene = (si) => {
       if (si >= scenes.length) { recorder.stop(); return; }
       const sc = scenes[si];
       onProgress && onProgress(`🎬 מייצא סצנה ${sc.idx+1}/${scenes.length}...`);
 
-      const wordTimings = getWordTimings(sc.sub);
+      // Calculate absolute time offset for this scene
+      absoluteTimeOffset = 0;
+      for (let j = 0; j < sc.idx; j++) absoluteTimeOffset += (durations[j] || 5);
+
+      const fallbackTimings = getWordTimings(sc.sub);
+      const sceneVoiceTimings = voiceTimingsExport ? voiceTimingsExport[sc.idx] : null;
 
       const vid = document.createElement('video');
       vid.muted = true; vid.crossOrigin = 'anonymous'; vid.playsInline = true;
@@ -113,8 +124,14 @@ async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase6
           if (vid.readyState < 2) return;
           if (vid.ended || vid.currentTime >= sc.dur + 0.15) { next(); return; }
           ctx.drawImage(vid, 0, 0, W, H);
-          const frac = Math.min(vid.currentTime / sc.dur, 1);
-          const visibleWords = wordTimings.filter(t => frac >= t.startFrac).map(t => t.word).join(' ');
+          let visibleWords;
+          if (sceneVoiceTimings && sceneVoiceTimings.length > 0) {
+            const absTime = absoluteTimeOffset + vid.currentTime;
+            visibleWords = sceneVoiceTimings.filter(t => absTime >= t.startTime).map(t => t.word).join(' ');
+          } else {
+            const frac = Math.min(vid.currentTime / sc.dur, 1);
+            visibleWords = fallbackTimings.filter(t => frac >= t.startFrac).map(t => t.word).join(' ');
+          }
           drawSubtitle(visibleWords || '');
         }, 33);
       };
@@ -238,6 +255,31 @@ function getWordTimings(text) {
   }));
 }
 
+// Build word timings based on actual voiceover audio duration.
+// allSubtitles = array of 4 subtitle strings, voiceDuration = real audio seconds.
+// Returns per-scene arrays of { word, startTime, endTime } in absolute seconds.
+function buildVoiceTimings(allSubtitles, voiceDuration) {
+  const allWords = [];
+  allSubtitles.forEach((sub, sceneIdx) => {
+    const words = (sub || '').trim().split(' ').filter(Boolean);
+    words.forEach(w => allWords.push({ word: w, sceneIdx }));
+  });
+  if (allWords.length === 0 || !voiceDuration) return [[], [], [], []];
+  const perWord = voiceDuration / allWords.length;
+  const result = [[], [], [], []];
+  allWords.forEach((w, i) => {
+    result[w.sceneIdx].push({ word: w.word, startTime: i * perWord, endTime: (i + 1) * perWord });
+  });
+  return result;
+}
+
+// Get subtitle text for a scene at absolute time (seconds) using voice-synced timings
+function getSubtitleAtTime(timings, absoluteTime) {
+  if (!timings || timings.length === 0) return '';
+  const visible = timings.filter(t => absoluteTime >= t.startTime);
+  return visible.map(t => t.word).join(' ');
+}
+
 // Get the subtitle text to display at a given fraction (0..1) of the scene — shows words progressively
 function getSubtitleAtFraction(text, fraction) {
   const timings = getWordTimings(text);
@@ -274,8 +316,26 @@ export default function Home() {
   const [selectedMusic, setSelectedMusic] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [savedProjects, setSavedProjects] = useState([]);
+  const [voiceoverDuration, setVoiceoverDuration] = useState(null);
 
   useEffect(() => { setSavedProjects(loadProjectsFromStorage()); }, []);
+
+  // Decode audio to get real voiceover duration
+  useEffect(() => {
+    if (!audioBase64) { setVoiceoverDuration(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AC();
+        const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+        const buf = await ctx.decodeAudioData(bytes.buffer.slice(0));
+        if (!cancelled) setVoiceoverDuration(buf.duration);
+        ctx.close();
+      } catch (e) { console.warn('Audio duration decode error:', e.message); }
+    })();
+    return () => { cancelled = true; };
+  }, [audioBase64]);
 
   const saveProject = () => {
     if (!videoUrls.some(Boolean)) return alert('אין סרטונים לשמירה');
@@ -373,7 +433,8 @@ export default function Home() {
         SCENE_DURATIONS,
         audioBase64,
         musicTrack?.url || null,
-        (msg) => addLog(msg)
+        (msg) => addLog(msg),
+        voiceoverDuration
       );
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -520,9 +581,14 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
   const sceneTypes = ['כאב 😤','גילוי 💡','שימוש ✨','CTA 🚀'];
   const klingIcon = (s) => s==='loading'?'⏳':s==='done'?'🎬':s==='error'?'❌':'—';
 
+  // Build voice-synced timings when we have real audio duration
+  const voiceTimings = voiceoverDuration ? buildVoiceTimings(editSubtitles, voiceoverDuration) : null;
+
   const subParts = splitSubtitle(editSubtitles[activeScene]);
   const currentSub = isPlaying
-    ? getSubtitleAtFraction(editSubtitles[activeScene], sceneFraction)
+    ? (voiceTimings
+        ? getSubtitleAtTime(voiceTimings[activeScene], currentTime)
+        : getSubtitleAtFraction(editSubtitles[activeScene], sceneFraction))
     : (subParts[subtitleHalf] || subParts[0] || '');
 
   return (

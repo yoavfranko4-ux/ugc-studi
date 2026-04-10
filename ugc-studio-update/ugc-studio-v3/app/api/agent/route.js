@@ -74,6 +74,8 @@ How to use: ${applicationArea}${storyContext}
 
 SCENE DURATIONS: Scene 1=5s, Scene 2=5s, Scene 3=10s, Scene 4=5s. Total=25s.
 
+CRITICAL: if a Story is provided above, you MUST OVERRIDE all scene settings, nb_prompt descriptions, kling_prompt descriptions, and actions to match the story EXACTLY. Change the "setting" field, every nb_prompt, every kling_prompt, and voiceover lines so they reflect the story the user described. For example if the story says "last scene in a restaurant with a dress" — the setting must be a restaurant, the scenes must show the person in a restaurant, and the product interaction must match. The story takes PRIORITY over the default setting rules below. Only fall back to the default setting rules if NO story is provided.
+
 CRITICAL RULES:
 
 1. VOICEOVER TIMING — STRICT:
