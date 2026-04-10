@@ -66,18 +66,18 @@ export default function Home() {
       lines.push(words.slice(i, i + 3).join(' '))
     }
 
-    ctx.font = 'bold 48px Heebo, sans-serif'
+    ctx.font = 'bold 64px Heebo, sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
 
     const lineHeight = 40
-    const startY = canvas.height * 0.75 - ((lines.length - 1) * lineHeight) / 2
+    const startY = canvas.height * 0.80 - ((lines.length - 1) * lineHeight) / 2
     const x = canvas.width / 2
 
     lines.forEach((line, i) => {
       const y = startY + i * lineHeight
       ctx.strokeStyle = 'black'
-      ctx.lineWidth = 12
+      ctx.lineWidth = 16
       ctx.lineJoin = 'round'
       ctx.miterLimit = 2
       ctx.strokeText(line, x, y)
@@ -301,16 +301,16 @@ export default function Home() {
               ctx.drawImage(vid, 0, 0, offCanvas.width, offCanvas.height)
 
               // Draw CapCut subtitles
-              ctx.font = 'bold 48px Heebo, sans-serif'
+              ctx.font = 'bold 64px Heebo, sans-serif'
               ctx.textAlign = 'center'
               ctx.textBaseline = 'middle'
               const lineHeight = 40
-              const startY = offCanvas.height * 0.75 - ((lines.length - 1) * lineHeight) / 2
+              const startY = offCanvas.height * 0.80 - ((lines.length - 1) * lineHeight) / 2
               const x = offCanvas.width / 2
               lines.forEach((line, li) => {
                 const y = startY + li * lineHeight
                 ctx.strokeStyle = 'black'
-                ctx.lineWidth = 12
+                ctx.lineWidth = 16
                 ctx.lineJoin = 'round'
                 ctx.miterLimit = 2
                 ctx.strokeText(line, x, y)
@@ -330,11 +330,15 @@ export default function Home() {
       await donePromise
 
       const blob = new Blob(chunks, { type: mimeType })
+      const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `ugc-video-${Date.now()}.mp4`
+      a.style.display = 'none'
+      a.href = url
+      a.download = 'ugc-video.mp4'
+      document.body.appendChild(a)
       a.click()
-      URL.revokeObjectURL(a.href)
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
     } catch (e) {
       alert('שגיאה בייצוא: ' + e.message)
     } finally {
