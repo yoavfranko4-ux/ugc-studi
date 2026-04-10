@@ -71,22 +71,41 @@ async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase6
     // ── Subtitle drawing ─────────────────────────────────────────────────────
     const drawSubtitle = (text) => {
       if (!text) return;
-      const fontSize = Math.round(H * 0.028);
-      const maxTextWidth = W * 0.9 - 40; // 90% of canvas width minus padding
+      const fontSize = 28;
+      const maxLineWidth = W - 60;
+      const lineHeight = fontSize + 10;
+      const pad = 20;
       ctx.save();
       ctx.direction = 'rtl';
       ctx.font = `bold ${fontSize}px Arial, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      const textX = W / 2, textY = H - 100;
-      const m = ctx.measureText(text);
-      const actualWidth = Math.min(m.width, maxTextWidth);
-      const pad = 20;
+      // Word-wrap into lines
+      const words = text.split(' ');
+      const lines = [];
+      let cur = '';
+      for (const w of words) {
+        const test = cur ? cur + ' ' + w : w;
+        if (ctx.measureText(test).width > maxLineWidth && cur) { lines.push(cur); cur = w; }
+        else cur = test;
+      }
+      if (cur) lines.push(cur);
+      // Measure widest line for box width
+      let widest = 0;
+      for (const l of lines) widest = Math.max(widest, ctx.measureText(l).width);
+      const textX = W / 2;
+      const boxH = lines.length * lineHeight + pad;
+      const boxW = widest + pad * 2;
+      const boxY = H - 100 - boxH + pad / 2;
+      const boxX = textX - boxW / 2;
       ctx.fillStyle = 'rgba(0,0,0,0.8)';
-      const bx = textX - actualWidth/2 - pad, by = textY - fontSize - 8;
-      const bw = actualWidth + pad*2, bh = fontSize + 24;
-      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,8); ctx.fill(); }
-      else ctx.fillRect(bx,by,bw,bh);
-      ctx.fillStyle = '#fff'; ctx.fillText(text, textX, textY, maxTextWidth);
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, boxY, boxW, boxH, 8); ctx.fill(); }
+      else ctx.fillRect(boxX, boxY, boxW, boxH);
+      // Draw each line
+      ctx.fillStyle = '#fff';
+      const firstLineY = boxY + fontSize + (pad / 2 - 2);
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], textX, firstLineY + i * lineHeight);
+      }
       ctx.restore();
     };
 
