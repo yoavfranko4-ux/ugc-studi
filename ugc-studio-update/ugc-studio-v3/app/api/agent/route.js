@@ -26,7 +26,7 @@ async function pollFal(requestId, maxWait = 300000) {
 
 async function generateNBFrame(prompt, imageUrls) {
   const validUrls = imageUrls.filter(Boolean);
-  const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real person not model`;
+  const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real person not model, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated`;
   if (validUrls.length === 0) {
     const res = await fetch('https://queue.fal.run/fal-ai/nano-banana-2', {
       method: 'POST', headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
@@ -103,7 +103,13 @@ Identify the exact pain from productDesc and write it explicitly:
 - Fitness/sport/gym → ALWAYS: "gym with equipment visible or outdoor"
 - Tech/gadget/device → ALWAYS: "desk or living room couch"
 - Car accessories → ALWAYS: "inside car, steering wheel visible"
+- Sleep/pillow/mattress → ALWAYS: "bedroom, bed visible"
+- Baby/kids products → ALWAYS: "living room or nursery"
+- Cleaning products → ALWAYS: "kitchen or bathroom"
 - NEVER put clothing/fashion scenes in a car. NEVER put dental scenes in a bedroom.
+- NEVER put ANY product in a car scene UNLESS it is explicitly a car accessory. Cars are ONLY for car accessories.
+
+6. EVERY nb_prompt MUST end with: "NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated"
 
 4. SCENE 3 (שימוש) nb_prompt — MUST describe product ON the person, not held:
 - Clothing/dress → "same person WEARING the [exact item] standing in front of full-length bedroom mirror, dress/item ON her body, she is admiring the fit and looking at herself, NOT holding it — it is ON her"
@@ -126,25 +132,25 @@ Return ONLY valid JSON (no markdown):
   "scenes": [
     {
       "type": "כאב",
-      "nb_prompt": "woman in [LOGICAL SETTING] showing SPECIFIC PROBLEM of ${productDesc} — e.g. examining yellow teeth in bathroom mirror / frustrated with clothes not fitting in bedroom / checking old watch at dressing table. Natural window light, iPhone vertical selfie angle, visible skin texture no retouching, candid unposed, single frame photo, do not change person appearance from reference",
+      "nb_prompt": "woman in [LOGICAL SETTING] showing SPECIFIC PROBLEM of ${productDesc} — e.g. examining yellow teeth in bathroom mirror / frustrated with clothes not fitting in bedroom / checking old watch at dressing table. Natural window light, iPhone vertical selfie angle, visible skin texture no retouching, candid unposed, single frame photo, do not change person appearance from reference, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated",
       "kling_prompt": "Person in [setting] visibly frustrated with [specific problem], natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene1"
     },
     {
       "type": "גילוי",
-      "nb_prompt": "same person from reference in same [setting], just found ${productName} — holding it naturally with curious surprised expression, product colors and shape exact from reference, iPhone vertical selfie angle, visible skin texture no retouching, candid feel, single frame photo, maintain exact facial features",
+      "nb_prompt": "same person from reference in same [setting], just found ${productName} — holding it naturally with curious surprised expression, product colors and shape exact from reference, iPhone vertical selfie angle, visible skin texture no retouching, candid feel, single frame photo, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated",
       "kling_prompt": "Continuing same setting same person discovers ${productName} curiously, slight head tilt, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene2"
     },
     {
       "type": "שימוש",
-      "nb_prompt": "same person from reference in same [setting] — product is ON or IN the person: [for clothing: wearing the item in front of full-length mirror] [for watch: wearing on wrist holding arm up] [for teeth: strip/gel applied ON teeth close-up] [for skincare: cream being massaged into face] — product colors and shape exact from reference, iPhone close-up angle, visible skin texture no retouching, genuine focused expression, single frame photo not collage, maintain exact facial features",
+      "nb_prompt": "same person from reference in same [setting] — product is ON or IN the person: [for clothing: wearing the item in front of full-length mirror] [for watch: wearing on wrist holding arm up] [for teeth: strip/gel applied ON teeth close-up] [for skincare: cream being massaged into face] — product colors and shape exact from reference, iPhone close-up angle, visible skin texture no retouching, genuine focused expression, single frame photo not collage, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated",
       "kling_prompt": "Continuing same setting same person uses product on themselves naturally, hands clearly visible doing the action, no talking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene3"
     },
     {
       "type": "CTA",
-      "nb_prompt": "same person from reference in same [setting] showing the RESULT — genuine happy smile [whiter teeth / wearing outfit confidently / skin glowing / watch on wrist], product naturally visible colors and shape exact from reference, iPhone selfie angle, real skin texture no retouching, single frame photo, maintain exact facial features",
+      "nb_prompt": "same person from reference in same [setting] showing the RESULT — genuine happy smile [whiter teeth / wearing outfit confidently / skin glowing / watch on wrist], product naturally visible colors and shape exact from reference, iPhone selfie angle, real skin texture no retouching, single frame photo, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated",
       "kling_prompt": "Continuing same setting same person shows genuine happy result, casual smile shifting weight forward pointing at camera, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene4"
     }
@@ -252,25 +258,25 @@ function getDefaultScenes(productName, applicationArea, productDesc) {
   return [
     {
       type: 'כאב',
-      nb_prompt: `woman frustrated in appropriate setting examining specific problem: ${productDesc}, stressed natural expression, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference`,
+      nb_prompt: `woman frustrated in appropriate setting examining specific problem: ${productDesc}, stressed natural expression, morning natural light iPhone vertical, single frame photo, do not change person appearance from reference, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated`,
       kling_prompt: `Person shows specific problem frustrated in setting, ${STABLE}`,
       subtitle: 'הבעיה הזאת הציקה לי כבר הרבה זמן ולא ידעתי מה לעשות.'
     },
     {
       type: 'גילוי',
-      nb_prompt: `same person from reference in same setting just discovered ${productName}, holding product naturally with curious surprised expression, preserve exact product appearance from reference, single frame photo, maintain exact facial features`,
+      nb_prompt: `same person from reference in same setting just discovered ${productName}, holding product naturally with curious surprised expression, preserve exact product appearance from reference, single frame photo, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated`,
       kling_prompt: `Continuing same person discovers ${productName} curiously, ${STABLE}`,
       subtitle: `גיליתי את ${productName} ולא האמנתי שיעזור לי.`
     },
     {
       type: 'שימוש',
-      nb_prompt: `same person from reference in same setting with product ON or IN them — wearing/applying/using ${productName} naturally as part of ${applicationArea}, product integrated on person not just held, preserve exact product appearance, single frame photo not collage, genuine focused expression, maintain exact facial features`,
+      nb_prompt: `same person from reference in same setting with product ON or IN them — wearing/applying/using ${productName} naturally as part of ${applicationArea}, product integrated on person not just held, preserve exact product appearance, single frame photo not collage, genuine focused expression, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated`,
       kling_prompt: `Continuing same person uses ${productName} on themselves naturally during ${applicationArea}, ${STABLE}, hands clearly visible, no talking`,
       subtitle: `התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי.`
     },
     {
       type: 'CTA',
-      nb_prompt: `same person from reference in same setting showing happy result after using ${productName}, genuine smile showing the change, product naturally visible preserve exact appearance, single frame photo, maintain exact facial features`,
+      nb_prompt: `same person from reference in same setting showing happy result after using ${productName}, genuine smile showing the change, product naturally visible preserve exact appearance, single frame photo, maintain exact facial features, NEVER in a car, NEVER in a vehicle, if holding phone phone screen faces camera correctly phone is right-side up not upside down or rotated`,
       kling_prompt: `Continuing same person shows genuine happy result, ${STABLE}, pointing at camera`,
       subtitle: `תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`
     }

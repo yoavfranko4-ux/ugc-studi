@@ -96,9 +96,7 @@ async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase6
       const sc = scenes[si];
       onProgress && onProgress(`🎬 מייצא סצנה ${sc.idx+1}/${scenes.length}...`);
 
-      const words = sc.sub.trim().split(' ').filter(Boolean);
-      const mid = Math.ceil(words.length / 2);
-      const parts = [words.slice(0,mid).join(' '), words.slice(mid).join(' ')];
+      const wordTimings = getWordTimings(sc.sub);
 
       const vid = document.createElement('video');
       vid.muted = true; vid.crossOrigin = 'anonymous'; vid.playsInline = true;
@@ -115,7 +113,9 @@ async function exportVideoClientSide(videoUrls, subtitles, durations, audioBase6
           if (vid.readyState < 2) return;
           if (vid.ended || vid.currentTime >= sc.dur + 0.15) { next(); return; }
           ctx.drawImage(vid, 0, 0, W, H);
-          drawSubtitle(parts[vid.currentTime < sc.dur/2 ? 0 : 1] || '');
+          const frac = Math.min(vid.currentTime / sc.dur, 1);
+          const visibleWords = wordTimings.filter(t => frac >= t.startFrac).map(t => t.word).join(' ');
+          drawSubtitle(visibleWords || '');
         }, 33);
       };
       vid.src = `/api/proxy?url=${encodeURIComponent(sc.url)}`;
@@ -220,9 +220,30 @@ function getSceneFromTime(t) {
 
 function splitSubtitle(text) {
   if (!text) return ['', ''];
-  const words = text.trim().split(' ');
+  const words = text.trim().split(' ').filter(Boolean);
   const mid = Math.ceil(words.length / 2);
   return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
+}
+
+// Word-level timing: returns array of { word, startFrac, endFrac } where fractions are 0..1 of scene duration
+function getWordTimings(text) {
+  if (!text) return [];
+  const words = text.trim().split(' ').filter(Boolean);
+  if (words.length === 0) return [];
+  const perWord = 1 / words.length;
+  return words.map((word, i) => ({
+    word,
+    startFrac: i * perWord,
+    endFrac: (i + 1) * perWord,
+  }));
+}
+
+// Get the subtitle text to display at a given fraction (0..1) of the scene — shows words progressively
+function getSubtitleAtFraction(text, fraction) {
+  const timings = getWordTimings(text);
+  if (timings.length === 0) return '';
+  const visible = timings.filter(t => fraction >= t.startFrac);
+  return visible.map(t => t.word).join(' ');
 }
 
 const PROJECTS_KEY = 'ugc_saved_projects';
@@ -446,6 +467,14 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
     setSubtitleHalf(t < sceneDur / 2 ? 0 : 1);
   }, [currentTime, activeScene]);
 
+  // Word-level fraction within current scene
+  const sceneFraction = (() => {
+    const sceneStart = SCENE_STARTS[activeScene];
+    const sceneDur = SCENE_DURATIONS[activeScene];
+    const t = Math.max(0, currentTime - sceneStart);
+    return Math.min(t / sceneDur, 1);
+  })();
+
   const stopAll = useCallback(() => {
     setIsPlaying(false);
     cancelAnimationFrame(animFrameRef.current);
@@ -492,7 +521,9 @@ function EditorScreen({ isGenerating, logs, progress, scenes, voiceover, audioBa
   const klingIcon = (s) => s==='loading'?'⏳':s==='done'?'🎬':s==='error'?'❌':'—';
 
   const subParts = splitSubtitle(editSubtitles[activeScene]);
-  const currentSub = subParts[subtitleHalf] || subParts[0] || '';
+  const currentSub = isPlaying
+    ? getSubtitleAtFraction(editSubtitles[activeScene], sceneFraction)
+    : (subParts[subtitleHalf] || subParts[0] || '');
 
   return (
     <div style={{ height:'100vh', background:'#0d0e14', color:'#fff', fontFamily:'system-ui', direction:'rtl', display:'flex', flexDirection:'column', overflow:'hidden' }}>
