@@ -301,7 +301,6 @@ export default function Home() {
   const [productName, setProductName] = useState('');
   const [productDesc, setProductDesc] = useState('');
   const [applicationArea, setApplicationArea] = useState('');
-  const [storyDescription, setStoryDescription] = useState('');
   const [logs, setLogs] = useState([]);
   const [progress, setProgress] = useState(0);
   const [scenes, setScenes] = useState([]);
@@ -459,7 +458,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productName, productDesc, applicationArea, storyDescription, avatarUrl, productImageUrl: productImage||null, sceneDurations: SCENE_DURATIONS })
+        body: JSON.stringify({ productName, productDesc, applicationArea, avatarUrl, productImageUrl: productImage||null, sceneDurations: SCENE_DURATIONS })
       });
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -478,6 +477,7 @@ export default function Home() {
             if (data.scenes) { setScenes(data.scenes); finalScenes=data.scenes; setEditSubtitles(data.scenes.map(s=>s.subtitle||'')); }
             if (data.voiceover) setVoiceover(data.voiceover);
             if (data.audioBase64) setAudioBase64(data.audioBase64);
+            if (data.audioDuration) setVoiceoverDuration(data.audioDuration);
             if (data.frameUrl !== undefined && data.frameIndex !== undefined) {
               setFrameUrls(prev => { const n=[...prev]; n[data.frameIndex]=data.frameUrl; return n; });
               finalFrameUrls[data.frameIndex] = data.frameUrl;
@@ -496,7 +496,7 @@ export default function Home() {
     setIsGenerating(false);
   };
 
-  if (screen === 'form') return <FormScreen {...{selectedAvatar,setSelectedAvatar,customAvatar,handleAvatarUpload,productImage,handleProductUpload,productName,setProductName,productDesc,setProductDesc,applicationArea,setApplicationArea,storyDescription,setStoryDescription,runAgent,savedProjects,loadProject,deleteProject}} />;
+  if (screen === 'form') return <FormScreen {...{selectedAvatar,setSelectedAvatar,customAvatar,handleAvatarUpload,productImage,handleProductUpload,productName,setProductName,productDesc,setProductDesc,applicationArea,setApplicationArea,runAgent,savedProjects,loadProject,deleteProject}} />;
 
   const totalDone = videoUrls.filter(Boolean).length;
   const allDone = !isGenerating && klingStatus.every(s => s==='done'||s==='error');
@@ -838,7 +838,7 @@ function formatTime(s) {
   return `${m}:${sec.toString().padStart(2,'0')}`;
 }
 
-function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAvatarUpload, productImage, handleProductUpload, productName, setProductName, productDesc, setProductDesc, applicationArea, setApplicationArea, storyDescription, setStoryDescription, runAgent, savedProjects, loadProject, deleteProject }) {
+function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAvatarUpload, productImage, handleProductUpload, productName, setProductName, productDesc, setProductDesc, applicationArea, setApplicationArea, runAgent, savedProjects, loadProject, deleteProject }) {
   return (
     <div style={{ minHeight:'100vh', background:'#0a0a0f', color:'#fff', fontFamily:'system-ui', direction:'rtl' }}>
       <div style={{ maxWidth:680, margin:'0 auto', padding:'40px 20px' }}>
@@ -902,11 +902,6 @@ function FormScreen({ selectedAvatar, setSelectedAvatar, customAvatar, handleAva
           <Input label="שם המוצר *" value={productName} onChange={e=>setProductName(e.target.value)} placeholder="מדבקות הלבנת שיניים FRAKO" />
           <Input label="מה המוצר פותר" value={productDesc} onChange={e=>setProductDesc(e.target.value)} placeholder="מלבין שיניים תוך 7 ימים, ללא רגישות" />
           <Input label="איך משתמשים" value={applicationArea} onChange={e=>setApplicationArea(e.target.value)} placeholder="מניחים על השיניים 30 דקות, מסירים ושוטפים" />
-        </Section>
-        <Section title="🎭 תאר את הסיפור (אופציונלי)">
-          <div style={{ fontSize:12, color:'#666', marginBottom:10 }}>תאר אירועים, סגנון — למשל: "מותג בגדים, אישה בחנות מנסה שמלה"</div>
-          <textarea value={storyDescription} onChange={e=>setStoryDescription(e.target.value)} placeholder="כתוב כאן את הסיפור..." rows={3}
-            style={{ width:'100%', padding:'12px 14px', background:'#0a0a0f', border:'1px solid #2a2a3e', borderRadius:10, color:'#fff', fontSize:14, outline:'none', boxSizing:'border-box', resize:'vertical', fontFamily:'system-ui' }} />
         </Section>
         <button onClick={runAgent} style={{ width:'100%', padding:'18px', fontSize:18, fontWeight:700, background:'linear-gradient(135deg,#a855f7,#ec4899)', color:'#fff', border:'none', borderRadius:14, cursor:'pointer', marginTop:8 }}>
           🎬 צור 4 סצנות UGC עכשיו

@@ -50,19 +50,22 @@ async function generateNBFrame(prompt, imageUrls) {
 async function generateVoice(text) {
   if (!ELEVEN_KEY || !text) return null;
   try {
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}`, {
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, model_id: 'eleven_v3', voice_settings: { stability: 0.55, similarity_boost: 0.75, style: 0.55, use_speaker_boost: true } })
     });
     if (!res.ok) { console.error('ElevenLabs failed:', await res.text()); return null; }
-    return Buffer.from(await res.arrayBuffer()).toString('base64');
+    const audioBuffer = Buffer.from(await res.arrayBuffer());
+    const base64 = audioBuffer.toString('base64');
+    // Estimate MP3 duration: fileSize(bytes) * 8 / bitrate(bits/sec)
+    const durationSec = (audioBuffer.length * 8) / (128 * 1000);
+    return { base64, duration: Math.round(durationSec * 100) / 100 };
   } catch (e) { console.error('Voice error:', e.message); return null; }
 }
 
-async function generateScript(productName, productDesc, applicationArea, storyDescription) {
+async function generateScript(productName, productDesc, applicationArea, hook) {
   if (!ANTHROPIC_KEY) return null;
-  const storyContext = storyDescription ? `\nSTORY OVERRIDE (MANDATORY): ${storyDescription} — You MUST change ALL scenes to match. If story mentions restaurant — nb_prompt must describe restaurant. If story mentions specific action — all prompts must match. This overrides ALL default settings absolutely.` : '';
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
@@ -70,11 +73,9 @@ async function generateScript(productName, productDesc, applicationArea, storyDe
       model: 'claude-sonnet-4-20250514', max_tokens: 2500,
       messages: [{ role: 'user', content: `You are a UGC ad expert. Create a viral 4-scene ad for: "${productName}".
 Description: ${productDesc}
-How to use: ${applicationArea}${storyContext}
+How to use: ${applicationArea}
 
 SCENE DURATIONS = [5, 5, 5, 5] = 20 seconds total. Scene 1: ~8 Hebrew words. Scene 2: ~8 Hebrew words. Scene 3: ~16 Hebrew words. Scene 4: ~8 Hebrew words.
-
-CRITICAL: if a STORY OVERRIDE is provided above, you MUST OVERRIDE all scene settings, nb_prompt descriptions, kling_prompt descriptions, and actions to match the story EXACTLY. Change the "setting" field, every nb_prompt, every kling_prompt, and voiceover lines so they reflect the story the user described. For example if the story says "last scene in a restaurant with a dress" — the setting must be a restaurant, the scenes must show the person in a restaurant, and the product interaction must match. The story takes PRIORITY over the default setting rules below. Only fall back to the default setting rules if NO story is provided.
 
 CRITICAL RULES:
 
@@ -86,17 +87,9 @@ CRITICAL RULES:
 - Write at NATURAL SPEAKING PACE — not too fast, not too slow. Each scene must feel complete.
 - voiceover MUST fill the full duration naturally — write enough words to fill each scene, do not leave silence gaps
 
-2. HOOK (voiceover_scene1) — MANDATORY SPECIFIC:
-Identify the exact pain from productDesc and write it explicitly:
-- Teeth whitening → "שיניים צהובות שמביכות אותי בכל תמונה ולא יכולה לחייך"
-- Dress/clothing → "לא מוצאת בגד שמחמיא לדמות שלי ומרגישה לא בטוחה"
-- Watch/jewelry → "השעון הישן שלי לא מתאים לסגנון שלי ומוריד ממני"
-- Acne/skincare → "כתמים ואקנה שלא נעלמים ומביכים אותי כל יום"
-- Hair → "שיער שנשבר ונושר ולא יכולה לעשות כלום איתו"
-- Sleep → "שוכבת בלילה שעות ולא יכולה להירדם בכלל"
-- NEVER use "נמאס לי" alone — always describe THE SPECIFIC VISIBLE PROBLEM
-
-HOOK RULE (CRITICAL): voiceover_scene1 MUST name the EXACT visible problem of THIS specific product. Examples: teeth whitening → 'שיניים צהובות שמביכות אותי בכל תמונה'; dress → 'לא מוצאת שמלה שמחמיאה לדמות שלי'; face cream → 'כתמים ואקנה שמופיעים כל בוקר'. NEVER say הבעיה הזאת alone.
+2. HOOK (voiceover_scene1) — PRE-SET, DO NOT CHANGE:
+voiceover_scene1 is already set to: "${hook}"
+You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 
 3. SETTING — HARD RULES, no exceptions:
 - Clothing/dress/fashion → ALWAYS: "bedroom with full-length mirror and open closet/wardrobe in background"
@@ -131,7 +124,7 @@ HOOK RULE (CRITICAL): voiceover_scene1 MUST name the EXACT visible problem of TH
 - Supplement → "avatar at kitchen table actually taking/drinking/eating the supplement"
 
 5. END every Kling prompt with exactly this phrase (no more, no less):
-"natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference"
+"silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference"
 
 Return ONLY valid JSON (no markdown):
 {
@@ -144,25 +137,25 @@ Return ONLY valid JSON (no markdown):
     {
       "type": "כאב",
       "nb_prompt": "avatar showing specific problem related to ${productDesc}, frustrated expression, no product visible yet, correct human anatomy, exactly two arms, no extra limbs, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar in [setting] visibly frustrated with [specific problem], no product visible, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps",
+      "kling_prompt": "Avatar in [setting] visibly frustrated with [specific problem], no product visible, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps",
       "subtitle": "same as voiceover_scene1"
     },
     {
       "type": "מוצר",
       "nb_prompt": "close-up beauty shot of ${productName}, beautiful natural lighting, product is the hero of the shot, clean background, preserve exact product appearance from reference — exact colors exact shape",
-      "kling_prompt": "Cinematic close-up of ${productName} rotating slowly or being revealed, beautiful lighting, clean background, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
+      "kling_prompt": "Cinematic close-up of ${productName} rotating slowly or being revealed, beautiful lighting, clean background, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene2"
     },
     {
       "type": "שימוש",
       "nb_prompt": "avatar actively using ${productName} — wearing/applying/consuming based on product type, product ON the avatar not just held, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar actively using ${productName} on themselves — product ON the avatar, hands clearly visible doing the action, no talking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
+      "kling_prompt": "Avatar actively using ${productName} on themselves — product ON the avatar, hands clearly visible doing the action, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene3"
     },
     {
       "type": "תוצאה",
       "nb_prompt": "avatar genuinely happy with result of using ${productName}, natural smile showing positive outcome, product naturally visible, correct human anatomy, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar genuinely happy showing positive result after using ${productName}, natural smile, product naturally visible, casual pointing at camera, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
+      "kling_prompt": "Avatar genuinely happy showing positive result after using ${productName}, natural smile, product naturally visible, casual pointing at camera, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene4"
     }
   ]
@@ -196,7 +189,7 @@ export async function POST(req) {
     try { await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch {}
   };
 
-  const { productName, productDesc, applicationArea, storyDescription, avatarUrl, productImageUrl } = await req.json();
+  const { productName, productDesc, applicationArea, avatarUrl, productImageUrl } = await req.json();
 
   (async () => {
     try {
@@ -206,15 +199,25 @@ export async function POST(req) {
       await send({ step: 'upload_done', progress: 8, message: '✅ מוכן!' });
 
       await send({ step: 'script', progress: 10, message: '✍️ כותב סקריפט...' });
-      const script = await generateScript(productName, productDesc, applicationArea, storyDescription);
+      const hook = getHook(productName, productDesc);
+      const script = await generateScript(productName, productDesc, applicationArea, hook);
       const scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
-      const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea);
+      // Override voiceover_scene1 with deterministic hook
+      if (script) {
+        script.voiceover_scene1 = hook;
+        if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook;
+        script.voiceover = `${hook} ${script.voiceover_scene2 || ''} ${script.voiceover_scene3 || ''} ${script.voiceover_scene4 || ''}`.trim();
+      }
+      if (scenes[0]) scenes[0].subtitle = hook;
+      const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook);
       await send({ step: 'script_done', progress: 15, message: '✅ סקריפט מוכן!', scenes, voiceover });
 
       await send({ step: 'voice', progress: 18, message: '🎙️ יוצר קריינות V3...' });
-      const fullAudioBase64 = await generateVoice(voiceover);
+      const voiceResult = await generateVoice(voiceover);
+      const fullAudioBase64 = voiceResult?.base64 || null;
+      const audioDuration = voiceResult?.duration || null;
       if (fullAudioBase64) {
-        await send({ step: 'voice_done', progress: 22, message: '✅ קריינות מוכנה!', audioBase64: fullAudioBase64 });
+        await send({ step: 'voice_done', progress: 22, message: '✅ קריינות מוכנה!', audioBase64: fullAudioBase64, audioDuration });
       } else {
         await send({ step: 'voice_fail', progress: 22, message: '⚠️ קריינות נכשלה' });
       }
@@ -259,19 +262,38 @@ export async function POST(req) {
   });
 }
 
-function getDefaultVoiceover(productName, applicationArea) {
-  return `הבעיה הזאת הציקה לי כבר הרבה זמן ולא ידעתי מה לעשות. גיליתי את ${productName} ולא האמנתי שיעזור לי. התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
+function getHook(productName, productDesc) {
+  const desc = ((productDesc || '') + ' ' + (productName || '')).toLowerCase();
+  if (desc.includes('שמלה') || desc.includes('בגד') || desc.includes('חולצה'))
+    return 'לא מוצאת בגד שמחמיא לדמות שלי ומרגישה לא בטוחה בבגדים';
+  if (desc.includes('שינ') || desc.includes('דנטל') || desc.includes('לבן'))
+    return 'שיניים צהובות שמביכות אותי בכל תמונה ולא יכולה לחייך';
+  if (desc.includes('קרם') || desc.includes('פנים') || desc.includes('אקנה') || desc.includes('עור'))
+    return 'כתמים ואקנה שמופיעים כל בוקר ולא יודעת מה לעשות';
+  if (desc.includes('שיער'))
+    return 'שיער שנושר ונשבר ולא יכולה לעשות איתו כלום';
+  if (desc.includes('שעון') || desc.includes('תכשיט'))
+    return 'האביזרים שלי לא מתאימים לסגנון שלי בכלל';
+  if (desc.includes('שינה') || desc.includes('לישון'))
+    return 'שוכבת בלילה שעות ולא יכולה להירדם בכלל';
+  return `הבעיה עם ${productName} הציקה לי כבר הרבה זמן`;
 }
 
-const STABLE = 'natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference';
+function getDefaultVoiceover(productName, applicationArea, hook) {
+  const h = hook || getHook(productName, '');
+  return `${h}. גיליתי את ${productName} ולא האמנתי שיעזור לי. התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
+}
+
+const STABLE = 'silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference';
 
 function getDefaultScenes(productName, applicationArea, productDesc) {
+  const hook = getHook(productName, productDesc);
   return [
     {
       type: 'כאב',
       nb_prompt: `avatar showing specific problem related to ${productDesc}, frustrated expression, no product visible yet, correct human anatomy, exactly two arms, no extra limbs, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
       kling_prompt: `Avatar visibly frustrated with specific problem related to ${productDesc}, no product visible, ${STABLE}`,
-      subtitle: 'הבעיה הזאת הציקה לי כבר הרבה זמן ולא ידעתי מה לעשות.'
+      subtitle: hook
     },
     {
       type: 'מוצר',
