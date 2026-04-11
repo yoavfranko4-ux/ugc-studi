@@ -180,84 +180,57 @@ Return ONLY valid JSON (no markdown):
 }
 
 export async function POST(req) {
-  const encoder = new TextEncoder();
-  const stream = new TransformStream();
-  const writer = stream.writable.getWriter();
-  const send = async (data) => {
-    try { await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch {}
-  };
+  try {
+    const { productName, productDesc, applicationArea, avatarUrl, productImageUrl } = await req.json();
 
-  const { productName, productDesc, applicationArea, avatarUrl, productImageUrl } = await req.json();
+    const preparedAvatar = avatarUrl || null;
+    const preparedProduct = productImageUrl || null;
 
-  (async () => {
-    try {
-      await send({ step: 'upload', progress: 5, message: '📤 מכין תמונות...' });
-      const preparedAvatar = avatarUrl || null;
-      const preparedProduct = productImageUrl || null;
-      await send({ step: 'upload_done', progress: 8, message: '✅ מוכן!' });
-
-      await send({ step: 'script', progress: 10, message: '✍️ כותב סקריפט...' });
-      const hook = getHook(productName, productDesc);
-      const script = await generateScript(productName, productDesc, applicationArea, hook);
-      const scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
-      // Override voiceover_scene1 with deterministic hook
-      if (script) {
-        script.voiceover_scene1 = hook;
-        if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook;
-        script.voiceover = `${hook} ${script.voiceover_scene2 || ''} ${script.voiceover_scene3 || ''} ${script.voiceover_scene4 || ''}`.trim();
-      }
-      if (scenes[0]) scenes[0].subtitle = hook;
-      const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook);
-      await send({ step: 'script_done', progress: 15, message: '✅ סקריפט מוכן!', scenes, voiceover });
-
-      await send({ step: 'voice', progress: 18, message: '🎙️ יוצר קריינות V3...' });
-      const voiceResult = await generateVoice(voiceover);
-      const fullAudioBase64 = voiceResult?.base64 || null;
-      const audioDuration = voiceResult?.duration || null;
-      if (fullAudioBase64) {
-        await send({ step: 'voice_done', progress: 22, message: '✅ קריינות מוכנה!', audioBase64: fullAudioBase64, audioDuration });
-      } else {
-        await send({ step: 'voice_fail', progress: 22, message: '⚠️ קריינות נכשלה' });
-      }
-
-      const frameUrls = [];
-      const frameProgresses = [25, 38, 51, 64];
-      let prevFrame = null;
-      for (let i = 0; i < 4; i++) {
-        await send({ step: `nb_${i+1}`, progress: frameProgresses[i], message: `🎨 Nano Banana — סצנה ${i+1}...` });
-        try {
-          const imageUrls = [];
-          if (preparedAvatar) imageUrls.push(preparedAvatar);
-          if (prevFrame) imageUrls.push(prevFrame);
-          if (preparedProduct && (i === 1 || i === 2 || i === 3)) imageUrls.push(preparedProduct);
-          const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls);
-          frameUrls.push(frameUrl);
-          if (frameUrl) prevFrame = frameUrl;
-          await send({ step: `nb_${i+1}_done`, progress: frameProgresses[i]+5, message: `✅ פריים ${i+1} מוכן!`, frameUrl, frameIndex: i });
-        } catch (e) {
-          frameUrls.push(null);
-          await send({ step: `nb_${i+1}_fail`, progress: frameProgresses[i]+5, message: `❌ פריים ${i+1} נכשל`, frameIndex: i });
-        }
-      }
-
-      await send({
-        step: 'frames_done', progress: 70,
-        message: '🎬 מתחיל Kling...',
-        frameUrls, scenes, voiceover,
-        audioBase64: fullAudioBase64,
-        klingPrompts: scenes.map(s => s.kling_prompt)
-      });
-
-    } catch (e) {
-      await send({ step: 'error', message: `שגיאה: ${e.message}` });
-    } finally {
-      try { await writer.close(); } catch {}
+    // Script
+    const hook = getHook(productName, productDesc);
+    const script = await generateScript(productName, productDesc, applicationArea, hook);
+    const scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
+    if (script) {
+      script.voiceover_scene1 = hook;
+      if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook;
+      script.voiceover = `${hook} ${script.voiceover_scene2 || ''} ${script.voiceover_scene3 || ''} ${script.voiceover_scene4 || ''}`.trim();
     }
-  })();
+    if (scenes[0]) scenes[0].subtitle = hook;
+    const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook);
 
-  return new Response(stream.readable, {
-    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }
-  });
+    // Voice
+    const voiceResult = await generateVoice(voiceover);
+    const audioBase64 = voiceResult?.base64 || null;
+
+    // Frames
+    const frames = [];
+    let prevFrame = null;
+    for (let i = 0; i < 4; i++) {
+      try {
+        const imageUrls = [];
+        if (preparedAvatar) imageUrls.push(preparedAvatar);
+        if (prevFrame) imageUrls.push(prevFrame);
+        if (preparedProduct && (i === 1 || i === 2 || i === 3)) imageUrls.push(preparedProduct);
+        const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls);
+        frames.push(frameUrl);
+        if (frameUrl) prevFrame = frameUrl;
+      } catch (e) {
+        console.error(`Frame ${i+1} failed:`, e.message);
+        frames.push(null);
+      }
+    }
+
+    return Response.json({
+      story: { scenes, hebrew_voice: voiceover },
+      frames,
+      videos: [],
+      audioBase64,
+      hebrewVoice: voiceover
+    });
+  } catch (e) {
+    console.error('Agent error:', e.message);
+    return Response.json({ error: e.message }, { status: 500 });
+  }
 }
 
 function getHook(productName, productDesc) {
