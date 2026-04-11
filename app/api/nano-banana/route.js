@@ -1,6 +1,18 @@
+import { checkRateLimit } from '../middleware/rateLimit.js'
+
 export async function POST(req) {
+  // Rate limiting
+  const rateLimitRes = await checkRateLimit(req, 'general')
+  if (rateLimitRes) return rateLimitRes
+
   try {
-    const { prompt, imageUrl, falKey } = await req.json()
+    const { prompt, imageUrl } = await req.json()
+
+    // Server-side API key only
+    const falKey = process.env.FAL_API_KEY
+    if (!falKey) {
+      return Response.json({ error: 'Server configuration error' }, { status: 500 })
+    }
 
     const res = await fetch('https://fal.run/fal-ai/nano-banana-2', {
       method: 'POST',
@@ -17,7 +29,6 @@ export async function POST(req) {
     })
 
     if (!res.ok) {
-      const err = await res.text()
       // Fallback to Flux if Nano Banana fails
       const fluxRes = await fetch('https://fal.run/fal-ai/flux/schnell', {
         method: 'POST',
@@ -41,6 +52,6 @@ export async function POST(req) {
     const url = data.images?.[0]?.url || data.images?.[0]
     return Response.json({ url })
   } catch (e) {
-    return Response.json({ error: e.message }, { status: 500 })
+    return Response.json({ error: 'Image generation failed' }, { status: 500 })
   }
 }

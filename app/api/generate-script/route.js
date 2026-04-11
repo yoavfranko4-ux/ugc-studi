@@ -1,9 +1,26 @@
-export async function POST(req) {
-  try {
-    const { product, productName, applicationArea } = await req.json()
+import { checkRateLimit } from '../middleware/rateLimit.js'
+import { validateProductInput } from '../middleware/validate.js'
 
+export async function POST(req) {
+  // Rate limiting
+  const rateLimitRes = await checkRateLimit(req, 'general')
+  if (rateLimitRes) return rateLimitRes
+
+  try {
+    const body = await req.json()
+
+    // Input validation
+    const validation = validateProductInput({
+      productName: body.productName,
+      product: body.product,
+      applicationArea: body.applicationArea,
+    })
+    if (!validation.valid) {
+      return Response.json({ error: validation.error }, { status: 400 })
+    }
+
+    const { productName, product: pDesc, applicationArea } = validation.data
     const pName = productName || 'המוצר'
-    const pDesc = product || ''
     const pUse = applicationArea || 'משתמשים במוצר'
 
     // Try Claude API if key exists
@@ -19,7 +36,7 @@ export async function POST(req) {
           body: JSON.stringify({
             model: 'claude-sonnet-4-20250514',
             max_tokens: 1200,
-            messages: [{ role: 'user', content: `Create 4-scene TikTok UGC ad for: ${productName} - ${product}. Use: ${applicationArea}. Return ONLY JSON: {"scene1":"...","scene2":"Continuing from previous scene same person...","scene3":"Continuing from previous scene same person...","scene4":"Continuing from previous scene same person...","nb1":"...","nb2":"...","nb3":"...","nb4":"...","hebrewVoice":"[Hebrew only mentioning ${productName}]"}` }]
+            messages: [{ role: 'user', content: `Create 4-scene TikTok UGC ad for: ${pName} - ${pDesc}. Use: ${pUse}. Return ONLY JSON: {"scene1":"...","scene2":"Continuing from previous scene same person...","scene3":"Continuing from previous scene same person...","scene4":"Continuing from previous scene same person...","nb1":"...","nb2":"...","nb3":"...","nb4":"...","hebrewVoice":"[Hebrew only mentioning ${pName}]"}` }]
           })
         })
         if (response.ok) {
@@ -44,6 +61,6 @@ export async function POST(req) {
       hebrewVoice: `אתם לא מאמינים כמה זמן בזבזתי על הבעיה הזאת. ניסיתי הכל ושום דבר לא עבד. עד שמישהו המליץ לי על ${pName} ולא הכרתי אותו בכלל. התחלתי להשתמש ו${pUse} ופשוט לא האמנתי לתוצאות. שבוע אחד ואני לגמרי מרוצה. ואם אתם מסתפקים תדעו שיש גם אחריות מלאה אז אין לכם מה להפסיד. פשוט תנסו את ${pName}.`
     })
   } catch (e) {
-    return Response.json({ error: e.message }, { status: 500 })
+    return Response.json({ error: 'Failed to generate script' }, { status: 500 })
   }
 }

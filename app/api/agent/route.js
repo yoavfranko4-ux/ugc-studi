@@ -1,14 +1,35 @@
+import { checkRateLimit } from '../middleware/rateLimit.js'
+import { validateProductInput, sanitizeForLLM } from '../middleware/validate.js'
+
 export async function POST(req) {
+  // Rate limiting
+  const rateLimitRes = await checkRateLimit(req, 'general')
+  if (rateLimitRes) return rateLimitRes
+
   const req_data = await req.json()
-  const { product, productName, applicationArea, avatarUrl, productImageUrl, storyDescription } = req_data
-  // Use env vars directly — don't rely on client sending keys
-  const falKey = process.env.FAL_API_KEY || req_data.falKey || ''
-  const elevenKey = process.env.ELEVENLABS_API_KEY || req_data.elevenKey || ''
-  const voiceId = process.env.ELEVENLABS_VOICE_ID || req_data.voiceId || '73z5yvUD5zgBgz92lJMW'
-  
+  const { avatarUrl, productImageUrl } = req_data
+
+  // Input validation
+  const validation = validateProductInput({
+    productName: req_data.productName,
+    product: req_data.product,
+    applicationArea: req_data.applicationArea,
+    storyDescription: req_data.storyDescription,
+  })
+  if (!validation.valid) {
+    return Response.json({ error: validation.error }, { status: 400 })
+  }
+
+  const { productName: rawProductName, product, applicationArea, storyDescription } = validation.data
+
+  // Server-side keys ONLY — never from client
+  const falKey = process.env.FAL_API_KEY || ''
+  const elevenKey = process.env.ELEVENLABS_API_KEY || ''
+  const voiceId = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW'
+
   console.log('Keys available:', { hasFal: !!falKey, hasEleven: !!elevenKey, voiceId })
 
-  const pName = productName || 'המוצר'
+  const pName = rawProductName || 'המוצר'
   const pUse = applicationArea || 'מורחים על האזור הבעייתי'
 
   // If avatar is base64 data URL, upload it to fal first
@@ -38,8 +59,8 @@ export async function POST(req) {
     }
   }
 
-  console.log('Agent started:', { productName, applicationArea, hasAvatar: !!finalAvatarUrl, isDataUrl: avatarUrl?.startsWith('data:'), hasProduct: !!productImageUrl })
-  
+  console.log('Agent started:', { productName: rawProductName, applicationArea, hasAvatar: !!finalAvatarUrl, isDataUrl: avatarUrl?.startsWith('data:'), hasProduct: !!productImageUrl })
+
   // ── STEP 1: Claude writes the full story ──
   let story = null
   if (process.env.ANTHROPIC_API_KEY) {
@@ -199,7 +220,7 @@ Return ONLY JSON:
   }
 
     console.log('Frames done:', frames.map((f,i) => `${i+1}:${f?'OK':'FAIL'}`))
-  
+
   // ── STEP 3: Generate Kling videos SEQUENTIALLY ──
   const videos = []
   for (let i = 0; i < 4; i++) {
@@ -257,14 +278,13 @@ Return ONLY JSON:
         audioBase64 = Buffer.from(buf).toString('base64')
         console.log('ElevenLabs V3: success!')
       } else {
-        const errText = await vRes.text()
-        console.error('ElevenLabs V3 failed:', vRes.status, errText.slice(0,300))
+        console.error('ElevenLabs V3 failed:', vRes.status)
       }
     } catch(e) {
       console.error('ElevenLabs exception:', e.message)
     }
   } else {
-    console.log('No ElevenLabs key provided')
+    console.log('No ElevenLabs key configured')
   }
 
   // ── Return everything ──

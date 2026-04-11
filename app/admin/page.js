@@ -33,8 +33,15 @@ export default function AdminPage() {
     checkUser()
   }, [])
 
+  const getAuthHeaders = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) return {}
+    return { 'Authorization': `Bearer ${session.access_token}` }
+  }
+
   const fetchUsers = async () => {
-    const res = await fetch('/api/admin/grant')
+    const headers = await getAuthHeaders()
+    const res = await fetch('/api/admin/grant', { headers })
     if (res.ok) {
       const data = await res.json()
       setUsers(data.users || [])
@@ -49,9 +56,10 @@ export default function AdminPage() {
     setMessage('')
 
     try {
+      const authHeaders = await getAuthHeaders()
       const res = await fetch('/api/admin/grant', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ userId, plan }),
       })
       const data = await res.json()

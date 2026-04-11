@@ -1,6 +1,26 @@
+import { checkRateLimit } from '../middleware/rateLimit.js'
+
 export async function POST(req) {
+  // Rate limiting
+  const rateLimitRes = await checkRateLimit(req, 'general')
+  if (rateLimitRes) return rateLimitRes
+
   try {
-    const { text, voiceId, elevenKey } = await req.json()
+    const { text, voiceId: requestedVoiceId } = await req.json()
+
+    // Server-side API key only
+    const elevenKey = process.env.ELEVENLABS_API_KEY
+    if (!elevenKey) {
+      return Response.json({ error: 'Server configuration error' }, { status: 500 })
+    }
+
+    // Use server-configured voice ID with fallback, allow client override for voice selection only
+    const voiceId = requestedVoiceId || process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW'
+
+    // Validate text length
+    if (!text || text.length > 5000) {
+      return Response.json({ error: 'Text is required and must be under 5000 characters' }, { status: 400 })
+    }
 
     // Try V3 first
     let res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
@@ -33,7 +53,7 @@ export async function POST(req) {
     }
 
     if (!res.ok) {
-      return Response.json({ error: 'ElevenLabs failed: ' + await res.text() }, { status: 500 })
+      return Response.json({ error: 'Voice generation failed' }, { status: 500 })
     }
 
     const audioBuffer = await res.arrayBuffer()
@@ -44,6 +64,6 @@ export async function POST(req) {
       }
     })
   } catch (e) {
-    return Response.json({ error: e.message }, { status: 500 })
+    return Response.json({ error: 'Voice generation failed' }, { status: 500 })
   }
 }

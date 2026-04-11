@@ -12,14 +12,50 @@ const PLANS = {
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  console.log('Service key exists:', !!serviceKey)
-  console.log('Supabase URL exists:', !!url)
   if (!url || !serviceKey) return null
   return createClient(url, serviceKey)
 }
 
+/**
+ * Verify the requesting user is the admin.
+ * Uses Supabase auth to check the user's session.
+ */
+async function verifyAdmin(req) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !anonKey) return { authorized: false, error: 'Auth not configured' }
+
+  // Extract token from Authorization header or cookie
+  const authHeader = req.headers.get('authorization')
+  const token = authHeader?.replace('Bearer ', '')
+
+  if (!token) {
+    return { authorized: false, error: 'Authentication required' }
+  }
+
+  const supabase = createClient(url, anonKey)
+  const { data: { user }, error } = await supabase.auth.getUser(token)
+
+  if (error || !user) {
+    return { authorized: false, error: 'Invalid session' }
+  }
+
+  if (user.email !== ADMIN_EMAIL) {
+    return { authorized: false, error: 'Forbidden — admin access only' }
+  }
+
+  return { authorized: true, user }
+}
+
 // GET — list all users with their subscriptions
 export async function GET(req) {
+  // Auth check
+  const auth = await verifyAdmin(req)
+  if (!auth.authorized) {
+    const status = auth.error === 'Forbidden — admin access only' ? 403 : 401
+    return NextResponse.json({ error: auth.error }, { status })
+  }
+
   const supabase = getSupabaseAdmin()
   if (!supabase) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 })
 
@@ -54,6 +90,13 @@ export async function GET(req) {
 
 // POST — grant subscription to a user
 export async function POST(req) {
+  // Auth check
+  const auth = await verifyAdmin(req)
+  if (!auth.authorized) {
+    const status = auth.error === 'Forbidden — admin access only' ? 403 : 401
+    return NextResponse.json({ error: auth.error }, { status })
+  }
+
   const supabase = getSupabaseAdmin()
   if (!supabase) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 })
 

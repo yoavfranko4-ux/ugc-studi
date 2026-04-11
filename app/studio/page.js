@@ -36,15 +36,7 @@ export default function Home() {
   const [applicationArea, setApplicationArea] = useState('')
   const [productImage, setProductImage] = useState(null)
   const [storyDescription, setStoryDescription] = useState('')
-  const [falKey, setFalKey] = useState('')
-  const [elevenKey, setElevenKey] = useState('')
-  const [keysOpen, setKeysOpen] = useState(false)
-  useEffect(() => {
-    fetch('/api/keys').then(r => r.json()).then(d => {
-      if (d.fal) setFalKey(d.fal)
-      if (d.eleven) setElevenKey(d.eleven)
-    }).catch(() => {})
-  }, [])
+  // API keys are now server-side only — no client exposure
   const [agentStatus, setAgentStatus] = useState({})
   const [result, setResult] = useState(null)
   const [currentScene, setCurrentScene] = useState(0)
@@ -108,7 +100,7 @@ export default function Home() {
         const bc = atob(base64), ba = new Uint8Array(bc.length)
         for (let i = 0; i < bc.length; i++) ba[i] = bc.charCodeAt(i)
         const blob = new Blob([ba], { type: mime })
-        const fd = new FormData(); fd.append('file', blob, 'avatar.jpg'); fd.append('falKey', falKey)
+        const fd = new FormData(); fd.append('file', blob, 'avatar.jpg')
         const up = await fetch('/api/upload', { method: 'POST', body: fd })
         const upData = await up.json()
         finalAvatarUrl = upData.url || upData.access_url
@@ -122,7 +114,7 @@ export default function Home() {
         const pbc = atob(pb), pba = new Uint8Array(pbc.length)
         for (let i = 0; i < pbc.length; i++) pba[i] = pbc.charCodeAt(i)
         const pblob = new Blob([pba], { type: pm })
-        const pfd = new FormData(); pfd.append('file', pblob, 'product.jpg'); pfd.append('falKey', falKey)
+        const pfd = new FormData(); pfd.append('file', pblob, 'product.jpg')
         addLog('מעלה תמונת מוצר...')
         const pup = await fetch('/api/upload', { method: 'POST', body: pfd })
         const pupData = await pup.json()
@@ -131,7 +123,7 @@ export default function Home() {
       }
       const agentRes = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl, falKey, elevenKey, voiceId: 'Z3R5wn05IrDiVCyEkUrK' })
+        body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl })
       })
       if (!agentRes.ok) throw new Error('Agent failed')
       addLog('מקבל תוצאות מה-Agent...')
@@ -218,23 +210,7 @@ export default function Home() {
         </a>
       </div>
 
-      {/* API Keys */}
-      <div style={cardS}>
-        <button onClick={() => setKeysOpen(o => !o)} style={{ ...ghostBtn, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-          API Keys
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: keysOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 200ms' }}><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
-        {keysOpen && (
-          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label style={lblS}>fal.ai Key</label><input type="password" value={falKey} onChange={e => setFalKey(e.target.value)} placeholder="xxxxxxxx:xxxxxxxx" style={{ ...inpS, marginTop: 6 }} /></div>
-            <div><label style={lblS}>ElevenLabs Key</label><input type="password" value={elevenKey} onChange={e => setElevenKey(e.target.value)} placeholder="sk_xxxxxxxx" style={{ ...inpS, marginTop: 6 }} /></div>
-            <div style={{ gridColumn: '1/-1', background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.12)', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#52525b' }}>
-              <span style={{ color: '#a855f7', fontWeight: 600 }}>Claude API</span> רץ בשרת — לא צריך מפתח
-            </div>
-          </div>
-        )}
-      </div>
+      {/* API Keys managed server-side — no client exposure */}
 
       {/* Avatar Selection */}
       <div style={cardS}>
