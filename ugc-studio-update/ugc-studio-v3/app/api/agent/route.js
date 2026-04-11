@@ -1,3 +1,5 @@
+import Anthropic from '@anthropic-ai/sdk'
+
 const FAL_KEY = process.env.FAL_API_KEY;
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW';
@@ -66,12 +68,10 @@ async function generateVoice(text) {
 
 async function generateScript(productName, productDesc, applicationArea, hook) {
   if (!ANTHROPIC_KEY) return null;
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514', max_tokens: 2500,
-      messages: [{ role: 'user', content: `You are a UGC ad expert. Create a viral 4-scene ad for: "${productName}".
+  const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514', max_tokens: 2500,
+    messages: [{ role: 'user', content: `You are a UGC ad expert. Create a viral 4-scene ad for: "${productName}".
 Description: ${productDesc}
 How to use: ${applicationArea}
 
@@ -160,10 +160,8 @@ Return ONLY valid JSON (no markdown):
     }
   ]
 }` }]
-    })
   });
-  const data = await res.json();
-  const text = data.content?.[0]?.text || '';
+  const text = message.content?.[0]?.text || '';
   try {
     const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
     const v1 = parsed.voiceover_scene1 || '';

@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@radix-ui/react-compose-refs": "^1.1.2",
     "@radix-ui/react-slot": "^1.2.4",
     "@supabase/auth-helpers-nextjs": "^0.15.0",
@@ -19,6 +20,7 @@
     "next": "15.3.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sharp": "^0.34.5",
     "tailwind-merge": "^3.5.0",
     "three": "^0.176.0"
   }
