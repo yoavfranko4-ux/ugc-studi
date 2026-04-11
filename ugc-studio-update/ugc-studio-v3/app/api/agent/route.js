@@ -206,10 +206,49 @@ export async function POST(req) {
       }
     }
 
+    // Kling videos
+    const videos = [];
+    for (let i = 0; i < 4; i++) {
+      if (!frames[i]) { videos.push(null); continue; }
+      try {
+        console.log(`Kling scene ${i+1}: starting...`);
+        const kRes = await fetch('https://fal.run/fal-ai/kling-video/v1.6/standard/image-to-video', {
+          method: 'POST',
+          headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: scenes[i].kling_prompt,
+            image_url: frames[i],
+            duration: '5',
+            aspect_ratio: '9:16'
+          })
+        });
+        const kData = await kRes.json();
+        let videoUrl = kData.video?.url || kData.url;
+        if (!videoUrl && kData.request_id) {
+          for (let p = 0; p < 72; p++) {
+            await new Promise(r => setTimeout(r, 5000));
+            const poll = await fetch(
+              `https://fal.run/fal-ai/kling-video/v1.6/standard/image-to-video/requests/${kData.request_id}`,
+              { headers: { Authorization: `Key ${FAL_KEY}` } }
+            );
+            const pd = await poll.json();
+            if (pd.video?.url) { videoUrl = pd.video.url; break; }
+            if (pd.output?.video?.url) { videoUrl = pd.output.video.url; break; }
+            if (pd.status === 'FAILED') { console.error(`Kling scene ${i+1} FAILED`); break; }
+          }
+        }
+        console.log(`Kling scene ${i+1}:`, videoUrl ? 'OK' : 'no URL');
+        videos.push(videoUrl || null);
+      } catch (e) {
+        console.error(`Kling scene ${i+1} error:`, e.message);
+        videos.push(null);
+      }
+    }
+
     return Response.json({
       story: { scenes, hebrew_voice: voiceover },
       frames,
-      videos: [],
+      videos,
       audioBase64,
       hebrewVoice: voiceover
     });
