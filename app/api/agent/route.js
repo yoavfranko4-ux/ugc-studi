@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk'
 import { checkRateLimit } from '../middleware/rateLimit.js'
 import { validateProductInput, sanitizeForLLM } from '../middleware/validate.js'
 
@@ -66,15 +67,8 @@ export async function POST(req) {
   let story = null
   if (process.env.ANTHROPIC_API_KEY) {
     try {
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': process.env.ANTHROPIC_API_KEY },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 2000,
-          messages: [{
-            role: 'user',
-            content: isBusiness
+      const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+      const promptContent = isBusiness
             ? `You are a UGC ad director and AI video prompt engineer for LOCAL BUSINESSES and SERVICES.
 Create a CONNECTED 4-scene TikTok story for: ${pName} - ${product}. What customers get: ${pUse}
 
@@ -174,22 +168,16 @@ Return ONLY JSON:
   ],
   "hebrew_voice": "..."
 }`
-          }]
-        })
+      const message = await anthropic.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: promptContent }]
       })
-      const rawText = await r.text()
-      console.log('Claude raw response:', rawText.slice(0, 500))
-      if (!r.ok) {
-        console.error('Claude API error:', r.status, rawText.slice(0, 300))
-      } else if (rawText.trimStart().startsWith('data:')) {
-        console.error('Claude returned SSE stream instead of JSON — check that stream is not enabled')
-      } else {
-        const d = JSON.parse(rawText)
-        const text = d.content[0].text.trim().replace(/```json|```/g, '')
-        story = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1))
-      }
+      const rawText = message.content[0].text.trim().replace(/```json|```/g, '')
+      console.log('Claude response:', rawText.slice(0, 500))
+      story = JSON.parse(rawText.slice(rawText.indexOf('{'), rawText.lastIndexOf('}') + 1))
     } catch (e) {
-      console.error('Claude parse error:', e.message)
+      console.error('Claude SDK error:', e.message)
       /* use fallback */
     }
   }
