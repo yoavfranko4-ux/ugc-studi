@@ -1,6 +1,5 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { PLANS } from '../../lib/plans'
 
@@ -10,13 +9,12 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [videos, setVideos] = useState([])
   const [contactMsg, setContactMsg] = useState('')
-  const router = useRouter()
 
   useEffect(() => {
-    const init = async () => {
+    const checkUser = async () => {
       if (!supabase) { setLoading(false); return }
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/login'); return }
+      if (!user) { window.location.replace('/login'); return }
       setUser(user)
 
       const { data } = await supabase
@@ -35,12 +33,12 @@ export default function DashboardPage() {
 
       setLoading(false)
     }
-    init()
-  }, [router])
+    checkUser()
+  }, [])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    router.push('/')
+    window.location.replace('/')
   }
 
   if (loading) return (
@@ -124,7 +122,7 @@ export default function DashboardPage() {
 
             {/* Create video button */}
             <button
-              onClick={() => router.push('/studio')}
+              onClick={() => window.location.href = '/studio'}
               style={{ display: 'block', width: '100%', padding: 18, background: 'linear-gradient(135deg,#7c3aed,#5b21b6)', border: 'none', borderRadius: 14, color: 'white', fontFamily: 'Heebo,sans-serif', fontSize: 18, fontWeight: 700, cursor: 'pointer', marginBottom: 20 }}
             >
               ✨ צור סרטון חדש

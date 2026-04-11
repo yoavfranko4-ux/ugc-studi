@@ -25,7 +25,7 @@ export default function LoginPage() {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
         if (data?.user) {
-          window.location.href = '/dashboard'
+          window.location.replace('/dashboard')
         }
       }
     } catch (err) {

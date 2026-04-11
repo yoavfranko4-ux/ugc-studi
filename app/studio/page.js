@@ -1,5 +1,6 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
+import { supabase } from '../../lib/supabase'
 
 const AVATARS = [
   { url: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=400&h=600&fit=crop&crop=face', name: 'Maya' },
@@ -18,6 +19,18 @@ const AGENT_STEPS = [
 ]
 
 export default function Home() {
+  // Auth guard — redirect to login if not authenticated
+  useEffect(() => {
+    const checkUser = async () => {
+      if (!supabase) return
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        window.location.replace('/login')
+      }
+    }
+    checkUser()
+  }, [])
+
   const [step, setStep] = useState('form')
   const [selectedAvatar, setSelectedAvatar] = useState(null)
   const [customAvatar, setCustomAvatar] = useState(null)

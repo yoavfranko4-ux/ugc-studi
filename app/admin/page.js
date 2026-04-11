@@ -1,6 +1,5 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 
 const ADMIN_EMAIL = 'yoavfranko34@gmail.com'
@@ -18,23 +17,21 @@ export default function AdminPage() {
   const [granting, setGranting] = useState({})
   const [selectedPlan, setSelectedPlan] = useState({})
   const [message, setMessage] = useState('')
-  const router = useRouter()
 
   useEffect(() => {
-    const init = async () => {
+    const checkUser = async () => {
       if (!supabase) { setLoading(false); return }
       const { data: { user } } = await supabase.auth.getUser()
 
-      if (!user || user.email !== ADMIN_EMAIL) {
-        router.push('/')
-        return
-      }
+      if (!user) { window.location.replace('/login'); return }
+      if (user.email !== ADMIN_EMAIL) { window.location.replace('/'); return }
+
       setUser(user)
       await fetchUsers()
       setLoading(false)
     }
-    init()
-  }, [router])
+    checkUser()
+  }, [])
 
   const fetchUsers = async () => {
     const res = await fetch('/api/admin/grant')
