@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '../../../lib/supabase'
 
 export default function LoginPage() {
@@ -9,6 +10,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const router = useRouter()
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -30,7 +32,7 @@ export default function LoginPage() {
       if (error) {
         setError(error.message)
       } else {
-        window.location.href = '/dashboard'
+        router.push('/dashboard')
       }
     }
     setLoading(false)
