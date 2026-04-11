@@ -16,10 +16,18 @@ export async function middleware(req) {
   }
 
   // Protected paths — redirect to login if not authenticated
-  if (path.startsWith('/dashboard') || path.startsWith('/studio')) {
+  if (path.startsWith('/dashboard') || path.startsWith('/studio') || path.startsWith('/admin')) {
     if (!session) {
       const loginUrl = new URL('/login', req.url)
       return NextResponse.redirect(loginUrl)
+    }
+  }
+
+  // Admin — only allow specific email
+  if (path.startsWith('/admin')) {
+    if (session?.user?.email !== 'yoavfranko34@gmail.com') {
+      const homeUrl = new URL('/', req.url)
+      return NextResponse.redirect(homeUrl)
     }
   }
 
