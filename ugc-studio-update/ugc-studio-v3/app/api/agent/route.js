@@ -7,46 +7,26 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 const SCENE_DURATIONS = [5, 5, 5, 5];
 
-async function pollFal(requestId, maxWait = 300000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    const res = await fetch(`https://queue.fal.run/fal-ai/nano-banana-2/requests/${requestId}/status`, {
-      headers: { Authorization: `Key ${FAL_KEY}` }
-    });
-    const data = await res.json();
-    if (data.status === 'COMPLETED') {
-      const result = await fetch(`https://queue.fal.run/fal-ai/nano-banana-2/requests/${requestId}`, {
-        headers: { Authorization: `Key ${FAL_KEY}` }
-      });
-      return await result.json();
-    }
-    if (data.status === 'FAILED') throw new Error('Fal job failed');
-    await new Promise(r => setTimeout(r, 3000));
-  }
-  throw new Error('Timeout');
-}
-
 async function generateNBFrame(prompt, imageUrls) {
   const validUrls = imageUrls.filter(Boolean);
+  console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
   const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real avatar not model, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`;
-  if (validUrls.length === 0) {
-    const res = await fetch('https://queue.fal.run/fal-ai/nano-banana-2', {
-      method: 'POST', headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: enhancedPrompt, image_size: 'portrait_4_3' })
-    });
-    const json = await res.json();
-    if (!json.request_id) throw new Error('No request_id');
-    const result = await pollFal(json.request_id);
-    return result?.images?.[0]?.url || null;
-  }
-  const res = await fetch('https://queue.fal.run/fal-ai/nano-banana-2/edit', {
-    method: 'POST', headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: enhancedPrompt, image_urls: validUrls })
+  const endpoint = validUrls.length === 0
+    ? 'https://fal.run/fal-ai/nano-banana-2'
+    : 'https://fal.run/fal-ai/nano-banana-2/edit';
+  const body = validUrls.length === 0
+    ? { prompt: enhancedPrompt, image_size: 'portrait_4_3' }
+    : { prompt: enhancedPrompt, image_urls: validUrls };
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
   });
   const json = await res.json();
-  if (!json.request_id) throw new Error('No request_id: ' + JSON.stringify(json));
-  const result = await pollFal(json.request_id);
-  return result?.images?.[0]?.url || null;
+  console.log('NB response:', JSON.stringify(json).slice(0, 400));
+  const imageUrl = json.images?.[0]?.url || json.images?.[0] || null;
+  console.log('NB image URL:', imageUrl?.slice(0, 100));
+  return imageUrl;
 }
 
 async function generateVoice(text) {
