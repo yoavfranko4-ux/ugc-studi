@@ -163,8 +163,14 @@ export async function POST(req) {
   try {
     const { productName, productDesc, applicationArea, avatarUrl, productImageUrl } = await req.json();
 
-    const preparedAvatar = avatarUrl || null;
-    const preparedProduct = productImageUrl || null;
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
+    const preparedAvatar = avatarUrl
+      ? (avatarUrl.startsWith('http') || avatarUrl.startsWith('data:') ? avatarUrl : `${baseUrl}${avatarUrl}`)
+      : null;
+    const preparedProduct = productImageUrl
+      ? (productImageUrl.startsWith('http') || productImageUrl.startsWith('data:') ? productImageUrl : `${baseUrl}${productImageUrl}`)
+      : null;
+    console.log('Prepared URLs:', { avatar: preparedAvatar?.slice(0, 80), product: preparedProduct?.slice(0, 80) });
 
     // Script
     const hook = getHook(productName, productDesc);
