@@ -14,9 +14,10 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
 
+    console.log('handleSubmit called, supabase:', !!supabase)
     if (!supabase) { setError('Supabase not configured'); setLoading(false); return }
 
-    console.log('Starting login...')
+    console.log('Starting login with email:', email)
 
     try {
       if (isSignUp) {
