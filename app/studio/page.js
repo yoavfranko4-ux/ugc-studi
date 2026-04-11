@@ -12,21 +12,18 @@ const AVATARS = [
 ]
 
 const AGENT_STEPS = [
-  { id: 'script', icon: '🧠', label: 'Claude כותב את הסיפור — פרומפט לכל סצנה' },
-  { id: 'frames', icon: '🎨', label: 'Nano Banana יוצר 4 פריימים מחוברים' },
-  { id: 'videos', icon: '🎬', label: 'Kling מחיה 4 סצנות × 5 שניות' },
-  { id: 'voice',  icon: '🎙️', label: 'ElevenLabs קריינות עברית V3' },
+  { id: 'script', label: 'Claude כותב את הסיפור — פרומפט לכל סצנה', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/></svg> },
+  { id: 'frames', label: 'Nano Banana יוצר 4 פריימים מחוברים', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> },
+  { id: 'videos', label: 'Kling מחיה 4 סצנות × 5 שניות', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg> },
+  { id: 'voice',  label: 'ElevenLabs קריינות עברית V3', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg> },
 ]
 
 export default function Home() {
-  // Auth guard — redirect to login if not authenticated
   useEffect(() => {
     const checkUser = async () => {
       if (!supabase) return
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        window.location.replace('/login')
-      }
+      if (!user) window.location.replace('/login')
     }
     checkUser()
   }, [])
@@ -42,7 +39,6 @@ export default function Home() {
   const [falKey, setFalKey] = useState('')
   const [elevenKey, setElevenKey] = useState('')
   const [keysOpen, setKeysOpen] = useState(false)
-  // Keys loaded from server env vars on mount
   useEffect(() => {
     fetch('/api/keys').then(r => r.json()).then(d => {
       if (d.fal) setFalKey(d.fal)
@@ -58,44 +54,30 @@ export default function Home() {
   const audioRef = useRef(null)
   const canvasRef = useRef(null)
 
-  // Draw CapCut-style subtitles on canvas overlay
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !result?.story?.scenes?.[currentScene]) return
     const subtitle = result.story.scenes[currentScene].subtitle
     if (!subtitle) return
-
     const ctx = canvas.getContext('2d')
     const container = canvas.parentElement
     canvas.width = container.offsetWidth
     canvas.height = container.offsetHeight
-
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-    // Break subtitle into lines of max 4-5 words
     const words = subtitle.split(/\s+/)
     const lines = []
-    for (let i = 0; i < words.length; i += 3) {
-      lines.push(words.slice(i, i + 3).join(' '))
-    }
-
+    for (let i = 0; i < words.length; i += 3) lines.push(words.slice(i, i + 3).join(' '))
     ctx.font = 'bold 64px Heebo, sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-
     const lineHeight = 40
     const startY = canvas.height * 0.80 - ((lines.length - 1) * lineHeight) / 2
     const x = canvas.width / 2
-
     lines.forEach((line, i) => {
       const y = startY + i * lineHeight
-      ctx.strokeStyle = 'black'
-      ctx.lineWidth = 16
-      ctx.lineJoin = 'round'
-      ctx.miterLimit = 2
+      ctx.strokeStyle = 'black'; ctx.lineWidth = 16; ctx.lineJoin = 'round'; ctx.miterLimit = 2
       ctx.strokeText(line, x, y)
-      ctx.fillStyle = 'white'
-      ctx.fillText(line, x, y)
+      ctx.fillStyle = 'white'; ctx.fillText(line, x, y)
     })
   }, [currentScene, result, step])
 
@@ -114,38 +96,25 @@ export default function Home() {
     const currentCheck = customAvatar || selectedAvatar?.url
     if (!currentCheck) return alert('בחר דמות')
     if (!productName || !productDesc) return alert('הכנס שם ותיאור מוצר')
-
-    setStep('generating')
-    setLogs([])
-    setAgentStatus({ script: 'active' })
-    addLog('🧠 Agent מתחיל לעבוד...')
-
+    setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' }); addLog('Agent מתחיל לעבוד...')
     try {
-      // Recalculate avatarUrl inside the function to get latest value
       const currentAvatarUrl = customAvatar || selectedAvatar?.url
       addLog('Avatar: ' + (currentAvatarUrl ? currentAvatarUrl.slice(0,40) : 'NONE'), currentAvatarUrl ? '' : 'err')
-      
       let finalAvatarUrl = currentAvatarUrl
       if (currentAvatarUrl && currentAvatarUrl.startsWith('data:')) {
-        addLog('☁️ מעלה אווטאר ל-fal.ai...')
+        addLog('מעלה אווטאר ל-fal.ai...')
         const [header, base64] = avatarUrl.split(',')
         const mime = header.match(/:(.*?);/)[1]
         const bc = atob(base64), ba = new Uint8Array(bc.length)
         for (let i = 0; i < bc.length; i++) ba[i] = bc.charCodeAt(i)
         const blob = new Blob([ba], { type: mime })
-        const fd = new FormData()
-        fd.append('file', blob, 'avatar.jpg')
-        fd.append('falKey', falKey)
+        const fd = new FormData(); fd.append('file', blob, 'avatar.jpg'); fd.append('falKey', falKey)
         const up = await fetch('/api/upload', { method: 'POST', body: fd })
         const upData = await up.json()
         finalAvatarUrl = upData.url || upData.access_url
-        addLog('✅ אווטאר הועלה', 'ok')
+        addLog('אווטאר הועלה', 'ok')
       }
-
-      addLog('🧠 Claude כותב סיפור מחובר ל-4 סצנות...')
-      setAgentStatus({ script: 'active' })
-
-      // Upload product image if provided
+      addLog('Claude כותב סיפור מחובר ל-4 סצנות...'); setAgentStatus({ script: 'active' })
       let productImageUrl = null
       if (productImage && productImage.startsWith('data:')) {
         const [ph, pb] = productImage.split(',')
@@ -153,90 +122,37 @@ export default function Home() {
         const pbc = atob(pb), pba = new Uint8Array(pbc.length)
         for (let i = 0; i < pbc.length; i++) pba[i] = pbc.charCodeAt(i)
         const pblob = new Blob([pba], { type: pm })
-        const pfd = new FormData()
-        pfd.append('file', pblob, 'product.jpg')
-        pfd.append('falKey', falKey)
-        addLog('☁️ מעלה תמונת מוצר...')
+        const pfd = new FormData(); pfd.append('file', pblob, 'product.jpg'); pfd.append('falKey', falKey)
+        addLog('מעלה תמונת מוצר...')
         const pup = await fetch('/api/upload', { method: 'POST', body: pfd })
         const pupData = await pup.json()
         productImageUrl = pupData.url || pupData.access_url
-        addLog('✅ מוצר הועלה', 'ok')
+        addLog('מוצר הועלה', 'ok')
       }
-
       const agentRes = await fetch('/api/agent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          product: productDesc, productName, applicationArea, storyDescription,
-          avatarUrl: finalAvatarUrl, productImageUrl,
-          falKey, elevenKey, voiceId: 'Z3R5wn05IrDiVCyEkUrK'
-        })
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl, falKey, elevenKey, voiceId: 'Z3R5wn05IrDiVCyEkUrK' })
       })
-
       if (!agentRes.ok) throw new Error('Agent failed')
-
-      addLog('📦 מקבל תוצאות מה-Agent...', '')
+      addLog('מקבל תוצאות מה-Agent...')
       const data = await agentRes.json()
-      
-      // Log each scene result
-      if (data.frames) {
-        data.frames.forEach((f, i) => addLog(f ? `✅ Frame ${i+1}: ${f.slice(0,40)}...` : `❌ Frame ${i+1}: נכשל`, f ? 'ok' : 'err'))
-      }
-      if (data.videos) {
-        data.videos.forEach((v, i) => addLog(v ? `✅ סרטון ${i+1}: ${v.slice(0,40)}...` : `❌ סרטון ${i+1}: נכשל`, v ? 'ok' : 'err'))
-      }
-      
+      if (data.frames) data.frames.forEach((f, i) => addLog(f ? `Frame ${i+1}: OK` : `Frame ${i+1}: נכשל`, f ? 'ok' : 'err'))
+      if (data.videos) data.videos.forEach((v, i) => addLog(v ? `סרטון ${i+1}: OK` : `סרטון ${i+1}: נכשל`, v ? 'ok' : 'err'))
       setAgentStatus({ script: 'done', frames: 'done', videos: 'done', voice: data.audioBase64 ? 'done' : 'error' })
-      addLog(data.audioBase64 ? '✅ קריינות מוכנה!' : '❌ קריינות נכשלה — בדוק ElevenLabs key', data.audioBase64 ? 'ok' : 'err')
-
+      addLog(data.audioBase64 ? 'קריינות מוכנה!' : 'קריינות נכשלה', data.audioBase64 ? 'ok' : 'err')
       if (data.audioBase64) {
         const blob = new Blob([Uint8Array.from(atob(data.audioBase64), c => c.charCodeAt(0))], { type: 'audio/mpeg' })
         if (audioRef.current) audioRef.current.src = URL.createObjectURL(blob)
-        addLog('✅ קריינות מוכנה', 'ok')
       }
-
-      // Show full results in log before switching to editor
-      addLog('━━━━━━━━━━━━━━━━━━━━━━━━', '')
-      addLog('📊 תוצאות Agent:', '')
-      
-      if (data.frames?.length) {
-        data.frames.forEach((f, i) => 
-          addLog(f ? `✅ Frame ${i+1}: ${f.slice(0,50)}` : `❌ Frame ${i+1}: נכשל`, f ? 'ok' : 'err')
-        )
-      } else {
-        addLog('❌ אין Frames — Nano Banana נכשל', 'err')
-      }
-      
-      if (data.videos?.length) {
-        data.videos.forEach((v, i) => 
-          addLog(v ? `✅ סרטון ${i+1}: ${v.slice(0,50)}` : `❌ סרטון ${i+1}: נכשל`, v ? 'ok' : 'err')
-        )
-      } else {
-        addLog('❌ אין סרטונים — Kling נכשל', 'err')
-      }
-      
-      addLog(data.audioBase64 ? '✅ קריינות V3 מוכנה' : '❌ קריינות נכשלה', data.audioBase64 ? 'ok' : 'err')
-      addLog('━━━━━━━━━━━━━━━━━━━━━━━━', '')
-
       setResult(data)
-      
-      // Only go to editor if we have at least some videos
       const hasVideos = data.videos?.some(v => v)
       if (hasVideos) {
         setStep('done')
-        if (data.videos[0] && videoRef.current) {
-          videoRef.current.src = data.videos[0]
-          videoRef.current.load()
-        }
+        if (data.videos[0] && videoRef.current) { videoRef.current.src = data.videos[0]; videoRef.current.load() }
       } else {
-        addLog('⚠️ לא נוצרו סרטונים — נשאר בדף הלוגים', 'err')
-        // Stay on generating page so user can see logs
+        addLog('לא נוצרו סרטונים — נשאר בדף הלוגים', 'err')
       }
-    } catch (e) {
-      addLog('❌ ' + e.message, 'err')
-      alert('שגיאה: ' + e.message)
-      setStep('form')
-    }
+    } catch (e) { addLog(e.message, 'err'); alert('שגיאה: ' + e.message); setStep('form') }
   }
 
   const loadScene = (idx) => {
@@ -249,88 +165,31 @@ export default function Home() {
     if (!result?.videos?.length) return
     setExporting(true)
     try {
-      const offCanvas = document.createElement('canvas')
-      offCanvas.width = 1080
-      offCanvas.height = 1920
+      const offCanvas = document.createElement('canvas'); offCanvas.width = 1080; offCanvas.height = 1920
       const ctx = offCanvas.getContext('2d')
-
-      // Choose best mimeType
       let mimeType = 'video/mp4'
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'video/webm;codecs=h264'
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'video/webm;codecs=vp9'
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'video/webm'
-          }
-        }
-      }
-
+      if (!MediaRecorder.isTypeSupported(mimeType)) { mimeType = 'video/webm;codecs=h264'; if (!MediaRecorder.isTypeSupported(mimeType)) { mimeType = 'video/webm;codecs=vp9'; if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm' } }
       const stream = offCanvas.captureStream(30)
-
-      // Add audio if available
-      if (audioRef.current?.src) {
-        try {
-          const audioCtx = new AudioContext()
-          const source = audioCtx.createMediaElementSource(audioRef.current)
-          const dest = audioCtx.createMediaStreamDestination()
-          source.connect(dest)
-          source.connect(audioCtx.destination)
-          dest.stream.getAudioTracks().forEach(t => stream.addTrack(t))
-        } catch {}
-      }
-
-      const mediaRecorder = new MediaRecorder(stream, { mimeType })
-      const chunks = []
+      if (audioRef.current?.src) { try { const audioCtx = new AudioContext(); const source = audioCtx.createMediaElementSource(audioRef.current); const dest = audioCtx.createMediaStreamDestination(); source.connect(dest); source.connect(audioCtx.destination); dest.stream.getAudioTracks().forEach(t => stream.addTrack(t)) } catch {} }
+      const mediaRecorder = new MediaRecorder(stream, { mimeType }); const chunks = []
       mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
-
       const donePromise = new Promise(resolve => { mediaRecorder.onstop = resolve })
       mediaRecorder.start()
-
-      // Play each scene sequentially onto canvas with subtitles
       for (let i = 0; i < result.videos.length; i++) {
-        const url = result.videos[i]
-        if (!url) continue
-
-        await new Promise((resolve, reject) => {
-          const vid = document.createElement('video')
-          vid.crossOrigin = 'anonymous'
-          vid.src = url
-          vid.muted = true
-          vid.playsInline = true
-
+        const url = result.videos[i]; if (!url) continue
+        await new Promise((resolve) => {
+          const vid = document.createElement('video'); vid.crossOrigin = 'anonymous'; vid.src = url; vid.muted = true; vid.playsInline = true
           vid.onloadeddata = async () => {
             try { await vid.play() } catch { resolve(); return }
-
             const subtitle = result.story?.scenes?.[i]?.subtitle || ''
-            const words = subtitle.split(/\s+/)
-            const lines = []
-            for (let w = 0; w < words.length; w += 3) {
-              lines.push(words.slice(w, w + 3).join(' '))
-            }
-
+            const words = subtitle.split(/\s+/); const lines = []
+            for (let w = 0; w < words.length; w += 3) lines.push(words.slice(w, w + 3).join(' '))
             const drawFrame = () => {
               if (vid.paused || vid.ended) { resolve(); return }
               ctx.drawImage(vid, 0, 0, offCanvas.width, offCanvas.height)
-
-              // Draw CapCut subtitles
-              ctx.font = 'bold 64px Heebo, sans-serif'
-              ctx.textAlign = 'center'
-              ctx.textBaseline = 'middle'
-              const lineHeight = 40
-              const startY = offCanvas.height * 0.80 - ((lines.length - 1) * lineHeight) / 2
-              const x = offCanvas.width / 2
-              lines.forEach((line, li) => {
-                const y = startY + li * lineHeight
-                ctx.strokeStyle = 'black'
-                ctx.lineWidth = 16
-                ctx.lineJoin = 'round'
-                ctx.miterLimit = 2
-                ctx.strokeText(line, x, y)
-                ctx.fillStyle = 'white'
-                ctx.fillText(line, x, y)
-              })
-
+              ctx.font = 'bold 64px Heebo, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+              const lineHeight = 40; const startY = offCanvas.height * 0.80 - ((lines.length - 1) * lineHeight) / 2; const x = offCanvas.width / 2
+              lines.forEach((line, li) => { const y = startY + li * lineHeight; ctx.strokeStyle = 'black'; ctx.lineWidth = 16; ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.strokeText(line, x, y); ctx.fillStyle = 'white'; ctx.fillText(line, x, y) })
               requestAnimationFrame(drawFrame)
             }
             requestAnimationFrame(drawFrame)
@@ -338,198 +197,256 @@ export default function Home() {
           vid.onerror = () => resolve()
         })
       }
-
-      mediaRecorder.stop()
-      await donePromise
-
-      const blob = new Blob(chunks, { type: mimeType })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.style.display = 'none'
-      a.href = url
-      a.download = 'ugc-video.mp4'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-    } catch (e) {
-      alert('שגיאה בייצוא: ' + e.message)
-    } finally {
-      setExporting(false)
-    }
+      mediaRecorder.stop(); await donePromise
+      const blob = new Blob(chunks, { type: mimeType }); const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.style.display = 'none'; a.href = url; a.download = 'ugc-video.mp4'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+    } catch (e) { alert('שגיאה בייצוא: ' + e.message) } finally { setExporting(false) }
   }
 
+  // ===== FORM STEP =====
   if (step === 'form') return (
     <div style={pageStyle}>
-      <div style={{textAlign:'center',marginBottom:50}}>
-        <div style={{fontFamily:'monospace',fontSize:12,color:'#06b6d4',letterSpacing:4,textTransform:'uppercase',marginBottom:16,opacity:0.8}}>✦ AI UGC Agent ✦</div>
-        <h1 style={{fontSize:'clamp(40px,7vw,68px)',fontWeight:900,lineHeight:1,background:'linear-gradient(135deg,#fff 0%,#7c3aed 50%,#06b6d4 100%)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:14}}>UGC Studio</h1>
-        <p style={{color:'#8888aa',fontSize:16}}>Agent AI יוצר 4 סצנות מחוברות — סיפור אחד שלם</p>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 40 }}>
+        <div>
+          <h1 style={{ fontSize: 28, fontWeight: 900, color: '#f0f0ff', marginBottom: 4 }}>יצירת סרטון</h1>
+          <p style={{ color: '#52525b', fontSize: 14 }}>Agent AI יוצר 4 סצנות מחוברות — סיפור אחד שלם</p>
+        </div>
+        <a href="/dashboard" style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#52525b', fontSize: 13, textDecoration: 'none' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          חזרה לדשבורד
+        </a>
       </div>
 
+      {/* API Keys */}
       <div style={cardS}>
-        <button onClick={()=>setKeysOpen(o=>!o)} style={ghostBtn}>🔑 API Keys</button>
+        <button onClick={() => setKeysOpen(o => !o)} style={{ ...ghostBtn, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+          API Keys
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: keysOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 200ms' }}><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
         {keysOpen && (
-          <div style={{marginTop:16,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-            <div><label style={lblS}>fal.ai Key</label><input type="password" value={falKey} onChange={e=>setFalKey(e.target.value)} placeholder="xxxxxxxx:xxxxxxxx" style={{...inpS,marginTop:4}}/></div>
-            <div><label style={lblS}>ElevenLabs Key</label><input type="password" value={elevenKey} onChange={e=>setElevenKey(e.target.value)} placeholder="sk_xxxxxxxx" style={{...inpS,marginTop:4}}/></div>
-            <div style={{gridColumn:'1/-1',background:'#7c3aed11',border:'1px solid #7c3aed33',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#8888aa'}}>
-              💡 <strong style={{color:'#06b6d4'}}>Claude API</strong> רץ בשרת — לא צריך מפתח!
+          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div><label style={lblS}>fal.ai Key</label><input type="password" value={falKey} onChange={e => setFalKey(e.target.value)} placeholder="xxxxxxxx:xxxxxxxx" style={{ ...inpS, marginTop: 6 }} /></div>
+            <div><label style={lblS}>ElevenLabs Key</label><input type="password" value={elevenKey} onChange={e => setElevenKey(e.target.value)} placeholder="sk_xxxxxxxx" style={{ ...inpS, marginTop: 6 }} /></div>
+            <div style={{ gridColumn: '1/-1', background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.12)', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#52525b' }}>
+              <span style={{ color: '#a855f7', fontWeight: 600 }}>Claude API</span> רץ בשרת — לא צריך מפתח
             </div>
           </div>
         )}
       </div>
 
+      {/* Avatar Selection */}
       <div style={cardS}>
         <div style={secTitle}>בחר דמות</div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:12}}>
-          {AVATARS.map(av => (
-            <div key={av.name} onClick={()=>{setSelectedAvatar(av);setCustomAvatar(null)}}
-              style={{position:'relative',border:`2px solid ${selectedAvatar?.name===av.name&&!customAvatar?'#7c3aed':'#ffffff12'}`,borderRadius:12,overflow:'hidden',cursor:'pointer',aspectRatio:'3/4',boxShadow:selectedAvatar?.name===av.name&&!customAvatar?'0 0 20px #7c3aed44':'none'}}>
-              <img src={av.url} alt={av.name} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-              <div style={{position:'absolute',bottom:0,left:0,right:0,background:'linear-gradient(transparent,#000a)',padding:'4px 6px',fontSize:10,color:'rgba(255,255,255,0.7)',textAlign:'center'}}>{av.name}</div>
-              {selectedAvatar?.name===av.name&&!customAvatar&&<div style={{position:'absolute',top:4,right:4,width:20,height:20,background:'#7c3aed',borderRadius:'50%',fontSize:11,color:'white',display:'flex',alignItems:'center',justifyContent:'center'}}>✓</div>}
-            </div>
-          ))}
-          <div style={{position:'relative',border:`2px solid ${customAvatar?'#10b981':'#ffffff12'}`,borderRadius:12,overflow:'hidden',cursor:'pointer',aspectRatio:'3/4',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,background:customAvatar?'transparent':'#16162a',backgroundImage:customAvatar?`url(${customAvatar})`:'none',backgroundSize:'cover',backgroundPosition:'center'}}>
-            <input type="file" accept="image/*" onChange={handleAvatarUpload} style={{position:'absolute',inset:0,opacity:0,cursor:'pointer',width:'100%',height:'100%'}}/>
-            {!customAvatar&&<><span style={{fontSize:22}}>➕</span><span style={{fontSize:10,color:'#8888aa'}}>העלה שלך</span></>}
-            {customAvatar&&<div style={{position:'absolute',top:4,right:4,width:20,height:20,background:'#10b981',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,color:'white'}}>✓</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 12 }}>
+          {AVATARS.map(av => {
+            const sel = selectedAvatar?.name === av.name && !customAvatar
+            return (
+              <div key={av.name} onClick={() => { setSelectedAvatar(av); setCustomAvatar(null) }}
+                style={{ position: 'relative', border: `2px solid ${sel ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 14, overflow: 'hidden', cursor: 'pointer', aspectRatio: '3/4', boxShadow: sel ? '0 0 24px rgba(168,85,247,0.2)' : 'none', transition: 'all 300ms ease' }}>
+                <img src={av.url} alt={av.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', padding: '20px 6px 6px', fontSize: 11, color: 'rgba(255,255,255,0.8)', textAlign: 'center', fontWeight: 500 }}>{av.name}</div>
+                {sel && <div style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                </div>}
+              </div>
+            )
+          })}
+          {/* Custom upload */}
+          <div style={{ position: 'relative', border: `2px solid ${customAvatar ? 'rgba(34,197,94,0.5)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 14, overflow: 'hidden', cursor: 'pointer', aspectRatio: '3/4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, background: customAvatar ? 'transparent' : 'rgba(255,255,255,0.02)', backgroundImage: customAvatar ? `url(${customAvatar})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center', transition: 'all 300ms ease' }}>
+            <input type="file" accept="image/*" onChange={handleAvatarUpload} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
+            {!customAvatar && <>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span style={{ fontSize: 10, color: '#52525b' }}>העלה שלך</span>
+            </>}
+            {customAvatar && <div style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, background: '#22c55e', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+            </div>}
           </div>
         </div>
       </div>
 
+      {/* Product Details */}
       <div style={cardS}>
         <div style={secTitle}>פרטי המוצר</div>
-        <div style={{display:'flex',flexDirection:'column',gap:12}}>
-          <div><label style={lblS}>שם המוצר הספציפי</label><input value={productName} onChange={e=>setProductName(e.target.value)} placeholder="HiSmile Whitening Strips" style={{...inpS,direction:'rtl',fontFamily:'Heebo,sans-serif',marginTop:4}}/></div>
-          <div><label style={lblS}>מה הוא פותר?</label><textarea value={productDesc} onChange={e=>setProductDesc(e.target.value)} placeholder="רצועות הלבנת שיניים שמלבינות תוך 7 ימים, ללא רגישות..." style={{...inpS,height:80,direction:'rtl',fontFamily:'Heebo,sans-serif',resize:'none',marginTop:4}}/></div>
-          <div><label style={lblS}>איך משתמשים?</label><input value={applicationArea} onChange={e=>setApplicationArea(e.target.value)} placeholder="מניחים על השיניים למשך 30 דקות" style={{...inpS,direction:'rtl',fontFamily:'Heebo,sans-serif',marginTop:4}}/></div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label style={lblS}>📦 תמונת מוצר (חשוב! Nano Banana ישים אותו בידיים)</label>
-            <div style={{marginTop:4,border:`2px dashed ${productImage?'#10b981':'#ffffff22'}`,borderRadius:12,minHeight:90,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',position:'relative',overflow:'hidden',background:productImage?'transparent':'#16162a'}}>
-              <input type="file" accept="image/*" onChange={e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>setProductImage(ev.target.result);r.readAsDataURL(f)}} style={{position:'absolute',inset:0,opacity:0,cursor:'pointer',width:'100%',height:'100%'}}/>
-              {productImage
-                ? <img src={productImage} alt="product" style={{maxHeight:80,borderRadius:8}}/>
-                : <span style={{color:'#8888aa',fontSize:13}}>לחץ להעלאת תמונת מוצר</span>
-              }
+            <label style={lblS}>שם המוצר הספציפי</label>
+            <input value={productName} onChange={e => setProductName(e.target.value)} placeholder="HiSmile Whitening Strips" style={{ ...inpS, direction: 'rtl', fontFamily: 'Heebo,sans-serif', marginTop: 6 }} />
+          </div>
+          <div>
+            <label style={lblS}>מה הוא פותר?</label>
+            <textarea value={productDesc} onChange={e => setProductDesc(e.target.value)} placeholder="רצועות הלבנת שיניים שמלבינות תוך 7 ימים..." style={{ ...inpS, height: 80, direction: 'rtl', fontFamily: 'Heebo,sans-serif', resize: 'none', marginTop: 6 }} />
+          </div>
+          <div>
+            <label style={lblS}>איך משתמשים?</label>
+            <input value={applicationArea} onChange={e => setApplicationArea(e.target.value)} placeholder="מניחים על השיניים למשך 30 דקות" style={{ ...inpS, direction: 'rtl', fontFamily: 'Heebo,sans-serif', marginTop: 6 }} />
+          </div>
+          <div>
+            <label style={lblS}>תמונת מוצר (חשוב!)</label>
+            <div style={{ marginTop: 6, border: `2px dashed ${productImage ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 14, minHeight: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', position: 'relative', overflow: 'hidden', background: 'rgba(255,255,255,0.02)', transition: 'all 300ms ease' }}>
+              <input type="file" accept="image/*" onChange={e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => setProductImage(ev.target.result); r.readAsDataURL(f) }} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
+              {productImage ? <img src={productImage} alt="product" style={{ maxHeight: 80, borderRadius: 8 }} /> : <span style={{ color: '#3f3f46', fontSize: 13 }}>לחץ להעלאת תמונת מוצר</span>}
             </div>
           </div>
           <div>
-            <label style={lblS}>📝 תיאור סיפור מותאם (אופציונלי)</label>
-            <textarea value={storyDescription} onChange={e=>setStoryDescription(e.target.value)} placeholder="תאר סיפור מותאם אישית — לדוגמה: בסצנה 4 הדמות רוקדת עם המוצר ביד..." style={{...inpS,height:80,direction:'rtl',fontFamily:'Heebo,sans-serif',resize:'none',marginTop:4}}/>
+            <label style={lblS}>תיאור סיפור מותאם (אופציונלי)</label>
+            <textarea value={storyDescription} onChange={e => setStoryDescription(e.target.value)} placeholder="תאר סיפור מותאם אישית..." style={{ ...inpS, height: 80, direction: 'rtl', fontFamily: 'Heebo,sans-serif', resize: 'none', marginTop: 6 }} />
           </div>
         </div>
       </div>
 
-      <button onClick={runAgent} style={bigBtn}>✨ הפעל Agent — צור 4 סצנות מחוברות</button>
+      <button onClick={runAgent} style={bigBtn}>
+        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          הפעל Agent — צור 4 סצנות מחוברות
+        </span>
+      </button>
     </div>
   )
 
+  // ===== GENERATING STEP =====
   if (step === 'generating') return (
     <div style={pageStyle}>
-      <div style={{textAlign:'center',marginBottom:40}}>
-        <h2 style={{fontSize:28,fontWeight:900,color:'#f0f0ff',marginBottom:8}}>⚙️ Agent עובד...</h2>
-        <p style={{color:'#8888aa'}}>יוצר סיפור מחובר עם 4 סצנות — זה לוקח 8-12 דקות</p>
+      <div style={{ textAlign: 'center', marginBottom: 40 }}>
+        <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.15)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+          <div style={{ width: 24, height: 24, border: '3px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        </div>
+        <h2 style={{ fontSize: 24, fontWeight: 900, color: '#f0f0ff', marginBottom: 8 }}>Agent עובד...</h2>
+        <p style={{ color: '#52525b', fontSize: 14 }}>יוצר סיפור מחובר עם 4 סצנות — 8-12 דקות</p>
       </div>
+
+      {/* Progress Steps */}
       <div style={cardS}>
-        {AGENT_STEPS.map(s => {
+        {AGENT_STEPS.map((s, idx) => {
           const st = agentStatus[s.id]
+          const colors = { active: '#a855f7', done: '#22c55e', error: '#ef4444' }
+          const c = colors[st] || '#27272a'
           return (
-            <div key={s.id} style={{display:'flex',alignItems:'center',gap:14,padding:'14px 16px',background:'#16162a',borderRadius:12,border:`1px solid ${st==='active'?'#7c3aed':st==='done'?'#10b981':st==='error'?'#ef4444':'#ffffff12'}`,marginBottom:10,transition:'all 0.3s'}}>
-              <div style={{width:38,height:38,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,background:st==='active'?'#7c3aed':st==='done'?'#10b981':st==='error'?'#ef4444':'#0f0f1a'}}>
-                {st==='done'?'✅':st==='error'?'❌':st==='active'?'⏳':s.icon}
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 18px', background: st === 'active' ? 'rgba(168,85,247,0.04)' : 'transparent', borderRadius: 12, border: `1px solid ${st === 'active' ? 'rgba(168,85,247,0.2)' : st === 'done' ? 'rgba(34,197,94,0.15)' : st === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.04)'}`, marginBottom: 8, transition: 'all 0.4s ease' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${c}12`, color: c, flexShrink: 0 }}>
+                {st === 'done' ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+                  : st === 'error' ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  : st === 'active' ? <div style={{ width: 16, height: 16, border: '2px solid rgba(168,85,247,0.3)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  : s.icon}
               </div>
-              <div style={{flex:1,fontWeight:600,fontSize:14}}>{s.label}</div>
-              <div style={{fontFamily:'monospace',fontSize:11,color:st==='active'?'#7c3aed':st==='done'?'#10b981':st==='error'?'#ef4444':'#8888aa'}}>
-                {st==='active'?'בתהליך...':st==='done'?'✓':st==='error'?'✗':'ממתין'}
+              <div style={{ flex: 1, fontWeight: 600, fontSize: 14, color: st ? '#e4e4e7' : '#52525b' }}>{s.label}</div>
+              <div style={{ fontSize: 12, color: c, fontWeight: 600 }}>
+                {st === 'active' ? 'בתהליך...' : st === 'done' ? 'הושלם' : st === 'error' ? 'שגיאה' : 'ממתין'}
               </div>
             </div>
           )
         })}
       </div>
-      <div style={{...cardS,fontFamily:'monospace',fontSize:11,maxHeight:150,overflowY:'auto'}}>
-        {logs.map((l,i)=><div key={i} style={{color:l.type==='ok'?'#10b981':l.type==='err'?'#ef4444':'#8888aa',lineHeight:2}}>[{l.t}] {l.msg}</div>)}
+
+      {/* Logs */}
+      <div style={{ ...cardS, maxHeight: 180, overflowY: 'auto' }}>
+        <div style={{ ...secTitle, marginBottom: 10 }}>לוגים</div>
+        <div style={{ fontFamily: 'monospace', fontSize: 11 }}>
+          {logs.map((l, i) => (
+            <div key={i} style={{ color: l.type === 'ok' ? '#22c55e' : l.type === 'err' ? '#ef4444' : '#52525b', lineHeight: 2 }}>
+              <span style={{ color: '#3f3f46' }}>[{l.t}]</span> {l.msg}
+            </div>
+          ))}
+        </div>
       </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
 
+  // ===== DONE STEP =====
   return (
-    <div style={{...pageStyle,maxWidth:1100}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:24,flexWrap:'wrap',gap:12}}>
-        <h2 style={{fontSize:24,fontWeight:900,background:'linear-gradient(135deg,#fff,#7c3aed)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>🎉 הסרטון שלך מוכן!</h2>
-        <button onClick={()=>{setStep('form');setResult(null);setCurrentScene(0)}} style={ghostBtn}>← מודעה חדשה</button>
+    <div style={{ ...pageStyle, maxWidth: 1100 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <h2 style={{ fontSize: 24, fontWeight: 900, color: '#f0f0ff' }}>הסרטון שלך מוכן!</h2>
+        <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0) }} style={ghostBtn}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          מודעה חדשה
+        </button>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:20}}>
-        {result?.story?.scenes?.map((scene,i)=>(
-          <div key={i} onClick={()=>loadScene(i)} style={{background:'#0f0f1a',border:`2px solid ${currentScene===i?'#7c3aed':'#ffffff12'}`,borderRadius:14,overflow:'hidden',cursor:'pointer'}}>
-            <div style={{aspectRatio:'9/16',maxHeight:160,background:'#0a0a14',position:'relative',overflow:'hidden',display:'flex',alignItems:'center',justifyContent:'center'}}>
+      {/* Scene Timeline */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 24 }}>
+        {result?.story?.scenes?.map((scene, i) => (
+          <div key={i} onClick={() => loadScene(i)} style={{ background: CARD_BG, border: `2px solid ${currentScene === i ? 'rgba(168,85,247,0.5)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 14, overflow: 'hidden', cursor: 'pointer', transition: 'all 300ms ease', boxShadow: currentScene === i ? '0 0 20px rgba(168,85,247,0.15)' : 'none' }}>
+            <div style={{ aspectRatio: '9/16', maxHeight: 160, background: BG, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {result.videos[i]
-                ? <video src={result.videos[i]} muted playsInline preload="metadata" style={{width:'100%',height:'100%',objectFit:'cover'}} onLoadedMetadata={e=>{e.target.currentTime=1}}/>
-                : <span style={{fontSize:24,opacity:0.3}}>⏳</span>
+                ? <video src={result.videos[i]} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onLoadedMetadata={e => { e.target.currentTime = 1 }} />
+                : <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#27272a" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               }
-              <div style={{position:'absolute',bottom:'25%',left:4,right:4,textAlign:'center',color:'white',fontSize:9,fontWeight:700,WebkitTextStroke:'0.5px black',textShadow:'0 0 4px #000, 0 0 4px #000, 0 0 4px #000',fontFamily:'Heebo,sans-serif',lineHeight:1.5}}>{scene.subtitle}</div>
+              <div style={{ position: 'absolute', bottom: '25%', left: 4, right: 4, textAlign: 'center', color: 'white', fontSize: 9, fontWeight: 700, WebkitTextStroke: '0.5px black', textShadow: '0 0 4px #000, 0 0 4px #000', fontFamily: 'Heebo,sans-serif', lineHeight: 1.5 }}>{scene.subtitle}</div>
             </div>
-            <div style={{padding:'6px 10px',fontSize:11,fontWeight:600,color:currentScene===i?'#7c3aed':'#8888aa'}}>{scene.label}</div>
+            <div style={{ padding: '8px 10px', fontSize: 11, fontWeight: 600, color: currentScene === i ? '#a855f7' : '#52525b', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 4, height: 4, borderRadius: '50%', background: currentScene === i ? '#a855f7' : '#27272a' }} />
+              {scene.label}
+            </div>
           </div>
         ))}
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1.5fr',gap:20}}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 20 }}>
         <div>
           <div style={cardS}>
             <div style={secTitle}>תצוגה מקדימה</div>
-            <div style={{background:'#000',borderRadius:12,overflow:'hidden',aspectRatio:'9/16',maxHeight:460,position:'relative'}}>
-              <video ref={videoRef} controls playsInline preload="auto" style={{width:'100%',height:'100%',objectFit:'contain',display:'block'}}/>
-              <canvas ref={canvasRef} style={{position:'absolute',top:0,left:0,width:'100%',height:'100%',pointerEvents:'none'}}/>
+            <div style={{ background: '#000', borderRadius: 14, overflow: 'hidden', aspectRatio: '9/16', maxHeight: 460, position: 'relative' }}>
+              <video ref={videoRef} controls playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+              <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
             </div>
           </div>
-          <div style={{marginBottom:12}}>
-            <button onClick={exportMp4} disabled={exporting} style={{...bigBtn,fontSize:15,padding:14,opacity:exporting?0.6:1}}>
-              {exporting ? '⏳ מייצא...' : '📥 ייצוא MP4 עם כתוביות'}
-            </button>
-          </div>
+          <button onClick={exportMp4} disabled={exporting} style={{ ...bigBtn, opacity: exporting ? 0.6 : 1, fontSize: 15, padding: 14, marginBottom: 16 }}>
+            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              {exporting ? <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>}
+              {exporting ? 'מייצא...' : 'ייצוא MP4 עם כתוביות'}
+            </span>
+          </button>
           <div style={cardS}>
             <div style={secTitle}>הורד סצנות</div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-              {result?.videos?.map((url,i)=>(
-                <div key={i} style={{background:'#16162a',border:'1px solid #ffffff12',borderRadius:10,padding:10,textAlign:'center',fontSize:12}}>
-                  {result.story.scenes[i].label}<br/>
-                  {url?<a href={url} target="_blank" rel="noreferrer" style={{color:'#06b6d4',textDecoration:'none'}}>הורד ↗</a>:<span style={{color:'#ffffff22'}}>שגיאה</span>}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {result?.videos?.map((url, i) => (
+                <div key={i} style={{ background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 10, padding: 10, textAlign: 'center', fontSize: 12 }}>
+                  <div style={{ color: '#71717a', marginBottom: 4 }}>{result.story.scenes[i].label}</div>
+                  {url ? <a href={url} target="_blank" rel="noreferrer" style={{ color: '#a855f7', textDecoration: 'none', fontWeight: 600 }}>הורד</a> : <span style={{ color: '#27272a' }}>שגיאה</span>}
                 </div>
               ))}
             </div>
           </div>
         </div>
 
-        <div style={{display:'flex',flexDirection:'column',gap:16}}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={cardS}>
-            <div style={secTitle}>קריינות עברית V3</div>
-            <audio ref={audioRef} controls style={{width:'100%',borderRadius:8}}/>
-            <div style={{marginTop:12,background:'#16162a',borderRadius:10,padding:'12px 14px',fontSize:13,color:'#f0f0ff',direction:'rtl',lineHeight:1.8,fontFamily:'Heebo,sans-serif'}}>{result?.hebrewVoice}</div>
+            <div style={secTitle}>קריינות עברית</div>
+            <audio ref={audioRef} controls style={{ width: '100%', borderRadius: 8 }} />
+            <div style={{ marginTop: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#a1a1aa', direction: 'rtl', lineHeight: 1.8, fontFamily: 'Heebo,sans-serif' }}>{result?.hebrewVoice}</div>
           </div>
           <div style={cardS}>
-            <div style={secTitle}>פירוט הסיפור — פרומפטים</div>
-            {result?.story?.scenes?.map((scene,i)=>(
-              <div key={i} style={{marginBottom:12,padding:'12px 14px',background:'#16162a',borderRadius:10,border:`1px solid ${currentScene===i?'#7c3aed33':'#ffffff08'}`}}>
-                <div style={{fontWeight:700,fontSize:12,marginBottom:8,color:'#f59e0b'}}>{scene.label}</div>
-                <div style={{fontSize:10,color:'#8888aa',marginBottom:4,lineHeight:1.6}}><strong style={{color:'#06b6d4'}}>🎨 NB:</strong> {scene.nb_prompt}</div>
-                <div style={{fontSize:10,color:'#8888aa',marginBottom:4,lineHeight:1.6}}><strong style={{color:'#7c3aed'}}>🎬 Kling:</strong> {scene.kling_prompt}</div>
-                <div style={{fontSize:10,color:'#10b981'}}><strong>💬</strong> {scene.subtitle}</div>
+            <div style={secTitle}>פירוט הסיפור</div>
+            {result?.story?.scenes?.map((scene, i) => (
+              <div key={i} style={{ marginBottom: 10, padding: '14px 16px', background: currentScene === i ? 'rgba(168,85,247,0.04)' : 'rgba(255,255,255,0.02)', borderRadius: 12, border: `1px solid ${currentScene === i ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.04)'}`, transition: 'all 300ms ease' }}>
+                <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8, color: '#a855f7' }}>{scene.label}</div>
+                <div style={{ fontSize: 11, color: '#52525b', marginBottom: 4, lineHeight: 1.7 }}><span style={{ color: '#8b5cf6', fontWeight: 600 }}>NB:</span> {scene.nb_prompt}</div>
+                <div style={{ fontSize: 11, color: '#52525b', marginBottom: 4, lineHeight: 1.7 }}><span style={{ color: '#7c3aed', fontWeight: 600 }}>Kling:</span> {scene.kling_prompt}</div>
+                <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 500 }}>{scene.subtitle}</div>
               </div>
             ))}
           </div>
         </div>
       </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
 }
 
-const pageStyle = {position:'relative',zIndex:1,maxWidth:900,margin:'0 auto',padding:'40px 20px'}
-const cardS = {background:'#0f0f1a',border:'1px solid #ffffff12',borderRadius:20,padding:24,marginBottom:16}
-const secTitle = {fontFamily:'monospace',fontSize:11,letterSpacing:3,color:'#f59e0b',textTransform:'uppercase',marginBottom:16}
-const lblS = {fontSize:13,color:'#8888aa',display:'block'}
-const inpS = {background:'#16162a',border:'1px solid #ffffff12',borderRadius:12,padding:'12px 14px',color:'#f0f0ff',fontSize:14,outline:'none',width:'100%',direction:'ltr',fontFamily:'monospace'}
-const ghostBtn = {background:'none',border:'1px solid #ffffff12',color:'#8888aa',padding:'8px 16px',borderRadius:8,cursor:'pointer',fontSize:13,fontFamily:'Heebo,sans-serif'}
-const bigBtn = {width:'100%',padding:18,background:'linear-gradient(135deg,#7c3aed,#5b21b6)',border:'none',borderRadius:14,color:'white',fontFamily:'Heebo,sans-serif',fontSize:18,fontWeight:700,cursor:'pointer',marginTop:8}
+const BG = '#09090b'
+const CARD_BG = 'rgba(255,255,255,0.03)'
+const BORDER = '1px solid rgba(255,255,255,0.08)'
+const GLOW = '0 0 30px rgba(124,58,237,0.3)'
+const pageStyle = { position: 'relative', zIndex: 1, maxWidth: 900, margin: '0 auto', padding: '32px 20px' }
+const cardS = { background: CARD_BG, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: BORDER, borderRadius: 18, padding: 24, marginBottom: 16 }
+const secTitle = { fontSize: 13, fontWeight: 700, color: '#a855f7', letterSpacing: 1, marginBottom: 16 }
+const lblS = { fontSize: 13, color: '#71717a', display: 'block', fontWeight: 500 }
+const inpS = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '14px 16px', color: '#f0f0ff', fontSize: 14, outline: 'none', width: '100%', direction: 'ltr', fontFamily: 'monospace', transition: 'all 300ms ease' }
+const ghostBtn = { background: 'rgba(255,255,255,0.03)', border: BORDER, color: '#71717a', padding: '8px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontFamily: 'Heebo,sans-serif', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 200ms ease' }
+const bigBtn = { width: '100%', padding: 18, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', border: 'none', borderRadius: 14, color: 'white', fontFamily: 'Heebo,sans-serif', fontSize: 18, fontWeight: 700, cursor: 'pointer', marginTop: 8, boxShadow: GLOW, transition: 'all 300ms ease' }

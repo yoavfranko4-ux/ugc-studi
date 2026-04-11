@@ -17,19 +17,15 @@ export default function WebGLShader({
     const container = containerRef.current
     if (!container) return
 
-    // Single renderer per page (skill: threejs.csv - Single Renderer Per Page)
     const scene = new THREE.Scene()
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
-    // Alpha canvas + CSS background (skill: threejs.csv - Alpha Canvas Plus CSS Background)
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-    // Pixel ratio cap at 2 (skill: threejs.csv - Pixel Ratio Cap at 2)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.setSize(container.clientWidth, container.clientHeight)
     container.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
-    // Custom shader material for flowing gradient background
     const vertexShader = `
       varying vec2 vUv;
       void main() {
@@ -48,7 +44,6 @@ export default function WebGLShader({
       uniform vec3 uColor4;
       varying vec2 vUv;
 
-      // Simplex-like noise
       vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
       vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
       vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
@@ -82,12 +77,10 @@ export default function WebGLShader({
         vec2 uv = vUv;
         float t = uTime * 0.15;
 
-        // Flowing noise layers
         float n1 = snoise(uv * 2.0 + t * 0.5) * uIntensity;
         float n2 = snoise(uv * 3.0 - t * 0.3) * uIntensity * 0.7;
         float n3 = snoise(uv * 1.5 + t * 0.2) * uIntensity * 0.5;
 
-        // Blend colors based on noise
         float blend1 = smoothstep(-0.5, 0.5, n1 + n2);
         float blend2 = smoothstep(-0.3, 0.7, n2 + n3);
         float blend3 = smoothstep(-0.4, 0.6, n1 + n3);
@@ -96,11 +89,9 @@ export default function WebGLShader({
         color = mix(color, uColor3, blend2 * 0.6);
         color = mix(color, uColor4, blend3 * 0.4);
 
-        // Vignette
         float vignette = 1.0 - length(uv - 0.5) * 0.8;
         color *= vignette;
 
-        // Subtle glow pulsation
         float glow = 0.05 * sin(uTime * 0.5) + 0.95;
         color *= glow;
 
@@ -125,13 +116,8 @@ export default function WebGLShader({
       uColor4: { value: hexToVec3(colors[3] || '#0ea5e9') },
     }
 
-    // Create geometry once (skill: threejs.csv - Never Create Geometry Per Frame)
     const geometry = new THREE.PlaneGeometry(2, 2)
-    const material = new THREE.ShaderMaterial({
-      vertexShader,
-      fragmentShader,
-      uniforms,
-    })
+    const material = new THREE.ShaderMaterial({ vertexShader, fragmentShader, uniforms })
     const mesh = new THREE.Mesh(geometry, material)
     scene.add(mesh)
 
@@ -144,7 +130,6 @@ export default function WebGLShader({
     }
     animate()
 
-    // Aspect ratio on resize (skill: threejs.csv)
     const handleResize = () => {
       const w = container.clientWidth
       const h = container.clientHeight
@@ -153,7 +138,6 @@ export default function WebGLShader({
     }
     window.addEventListener('resize', handleResize)
 
-    // Cleanup: dispose geometry + material (skill: threejs.csv - dispose on Scene Removal)
     return () => {
       cancelAnimationFrame(frameRef.current)
       window.removeEventListener('resize', handleResize)
