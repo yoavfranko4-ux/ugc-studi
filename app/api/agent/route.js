@@ -177,12 +177,21 @@ Return ONLY JSON:
           }]
         })
       })
-      if (r.ok) {
-        const d = await r.json()
+      const rawText = await r.text()
+      console.log('Claude raw response:', rawText.slice(0, 500))
+      if (!r.ok) {
+        console.error('Claude API error:', r.status, rawText.slice(0, 300))
+      } else if (rawText.trimStart().startsWith('data:')) {
+        console.error('Claude returned SSE stream instead of JSON — check that stream is not enabled')
+      } else {
+        const d = JSON.parse(rawText)
         const text = d.content[0].text.trim().replace(/```json|```/g, '')
         story = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1))
       }
-    } catch (e) { /* use fallback */ }
+    } catch (e) {
+      console.error('Claude parse error:', e.message)
+      /* use fallback */
+    }
   }
 
   // Fallback story if Claude unavailable
