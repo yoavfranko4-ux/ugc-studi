@@ -1,6 +1,180 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
+
+// === Subtitle Styles ===
+const SUBTITLE_STYLES = [
+  { id: 'classic', label: 'Classic', desc: 'לבן עם צל שחור' },
+  { id: 'bold', label: 'Bold', desc: 'שחור על רקע לבן' },
+  { id: 'minimal', label: 'Minimal', desc: 'טקסט לבן קטן' },
+  { id: 'neon', label: 'Neon', desc: 'לבן עם glow סגול' },
+]
+
+// === Background Music Tracks ===
+const MUSIC_TRACKS = [
+  { id: 'upbeat', label: 'Upbeat TikTok', emoji: '🎵', bpm: 130, key: 'C' },
+  { id: 'chill', label: 'Chill Vibes', emoji: '🌊', bpm: 85, key: 'Am' },
+  { id: 'motivational', label: 'Motivational', emoji: '💪', bpm: 110, key: 'G' },
+  { id: 'dramatic', label: 'Dramatic', emoji: '🎭', bpm: 70, key: 'Dm' },
+  { id: 'none', label: 'No Music', emoji: '🔇' },
+]
+
+// === Scene Transitions ===
+const TRANSITIONS = [
+  { id: 'cut', label: 'Cut', desc: 'חיתוך ישר' },
+  { id: 'fade', label: 'Fade', desc: 'דהייה' },
+  { id: 'zoom', label: 'Zoom', desc: 'זום קל' },
+]
+
+// === Web Audio API Sound Generators ===
+function createAudioContext() {
+  return new (window.AudioContext || window.webkitAudioContext)()
+}
+
+function playWhoosh(ctx) {
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  const filter = ctx.createBiquadFilter()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(800, ctx.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.3)
+  filter.type = 'bandpass'
+  filter.frequency.setValueAtTime(1000, ctx.currentTime)
+  filter.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.3)
+  filter.Q.value = 2
+  gain.gain.setValueAtTime(0.3, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
+  osc.connect(filter)
+  filter.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start(ctx.currentTime)
+  osc.stop(ctx.currentTime + 0.4)
+}
+
+function playPop(ctx) {
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(600, ctx.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.08)
+  gain.gain.setValueAtTime(0.4, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start(ctx.currentTime)
+  osc.stop(ctx.currentTime + 0.15)
+}
+
+function playDing(ctx) {
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(1200, ctx.currentTime)
+  gain.gain.setValueAtTime(0.4, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start(ctx.currentTime)
+  osc.stop(ctx.currentTime + 1)
+  const osc2 = ctx.createOscillator()
+  const gain2 = ctx.createGain()
+  osc2.type = 'sine'
+  osc2.frequency.setValueAtTime(1800, ctx.currentTime)
+  gain2.gain.setValueAtTime(0.2, ctx.currentTime)
+  gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6)
+  osc2.connect(gain2)
+  gain2.connect(ctx.destination)
+  osc2.start(ctx.currentTime)
+  osc2.stop(ctx.currentTime + 0.7)
+}
+
+// Generate background music buffer using Web Audio API
+function generateMusicBuffer(ctx, trackId, durationSec) {
+  const sampleRate = ctx.sampleRate
+  const length = sampleRate * durationSec
+  const buffer = ctx.createBuffer(2, length, sampleRate)
+  const left = buffer.getChannelData(0)
+  const right = buffer.getChannelData(1)
+  const noteFreqs = {
+    C: [261.63, 329.63, 392.00], Am: [220.00, 261.63, 329.63],
+    G: [196.00, 246.94, 293.66], Dm: [293.66, 349.23, 440.00],
+  }
+  const track = MUSIC_TRACKS.find(t => t.id === trackId)
+  if (!track || trackId === 'none') return buffer
+  const bpm = track.bpm
+  const beatLen = (60 / bpm) * sampleRate
+  const freqs = noteFreqs[track.key] || noteFreqs.C
+  for (let i = 0; i < length; i++) {
+    const t = i / sampleRate
+    const beatPhase = (i % beatLen) / beatLen
+    let val = 0
+    if (trackId === 'upbeat') {
+      val += 0.08 * Math.sin(2 * Math.PI * freqs[0] * t)
+      val += 0.06 * Math.sin(2 * Math.PI * freqs[1] * t)
+      val += 0.04 * Math.sin(2 * Math.PI * freqs[2] * t)
+      val += 0.05 * (beatPhase < 0.1 ? 1 - beatPhase * 10 : 0)
+      val += 0.03 * ((beatPhase > 0.5 && beatPhase < 0.55) ? 1 : 0)
+    } else if (trackId === 'chill') {
+      const slow = Math.sin(2 * Math.PI * 0.2 * t)
+      val += 0.06 * Math.sin(2 * Math.PI * freqs[0] * t) * (0.5 + 0.5 * slow)
+      val += 0.04 * Math.sin(2 * Math.PI * freqs[1] * t * 0.5)
+      val += 0.03 * Math.sin(2 * Math.PI * freqs[2] * t * 0.25)
+    } else if (trackId === 'motivational') {
+      val += 0.07 * Math.sin(2 * Math.PI * freqs[0] * t)
+      val += 0.05 * Math.sin(2 * Math.PI * freqs[1] * t)
+      val += 0.06 * Math.sin(2 * Math.PI * freqs[2] * t)
+      val += 0.06 * (beatPhase < 0.08 ? 1 - beatPhase * 12 : 0)
+    } else if (trackId === 'dramatic') {
+      val += 0.08 * Math.sin(2 * Math.PI * freqs[0] * 0.5 * t)
+      val += 0.06 * Math.sin(2 * Math.PI * freqs[1] * 0.5 * t)
+      val += 0.04 * Math.sin(2 * Math.PI * freqs[2] * 0.5 * t)
+      val += 0.02 * Math.sin(2 * Math.PI * 80 * t)
+    }
+    const fadeIn = Math.min(1, t / 1.0)
+    const fadeOut = Math.min(1, (durationSec - t) / 1.5)
+    val *= fadeIn * fadeOut * 0.7
+    left[i] = val
+    right[i] = val * 0.95 + 0.01 * Math.sin(2 * Math.PI * 0.5 * t) * val
+  }
+  return buffer
+}
+
+// Draw subtitles with a specific style
+function drawSubtitleOnCtx(ctx, lines, canvasW, canvasH, style) {
+  const isMinimal = style === 'minimal'
+  const fontSize = isMinimal ? 36 : 64
+  ctx.font = `bold ${fontSize}px Heebo, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  const lineHeight = isMinimal ? 28 : 40
+  const startY = canvasH * 0.80 - ((lines.length - 1) * lineHeight) / 2
+  const x = canvasW / 2
+  lines.forEach((line, i) => {
+    const y = startY + i * lineHeight
+    if (style === 'classic') {
+      ctx.strokeStyle = 'black'; ctx.lineWidth = 16; ctx.lineJoin = 'round'; ctx.miterLimit = 2
+      ctx.strokeText(line, x, y); ctx.fillStyle = 'white'; ctx.fillText(line, x, y)
+    } else if (style === 'bold') {
+      const metrics = ctx.measureText(line)
+      const tw = metrics.width + 28, th = fontSize + 16
+      ctx.fillStyle = 'rgba(255,255,255,0.92)'
+      const rx = x - tw / 2, ry = y - th / 2, r = 10
+      ctx.beginPath()
+      ctx.moveTo(rx + r, ry); ctx.lineTo(rx + tw - r, ry)
+      ctx.quadraticCurveTo(rx + tw, ry, rx + tw, ry + r); ctx.lineTo(rx + tw, ry + th - r)
+      ctx.quadraticCurveTo(rx + tw, ry + th, rx + tw - r, ry + th); ctx.lineTo(rx + r, ry + th)
+      ctx.quadraticCurveTo(rx, ry + th, rx, ry + th - r); ctx.lineTo(rx, ry + r)
+      ctx.quadraticCurveTo(rx, ry, rx + r, ry); ctx.closePath(); ctx.fill()
+      ctx.fillStyle = '#111'; ctx.fillText(line, x, y)
+    } else if (style === 'minimal') {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(line, x, y)
+    } else if (style === 'neon') {
+      ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 24
+      ctx.fillStyle = 'white'; ctx.fillText(line, x, y); ctx.fillText(line, x, y)
+      ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'
+    }
+  })
+}
 
 const AVATARS = [
   { url: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=400&h=600&fit=crop&crop=face', name: 'Maya' },
@@ -42,10 +216,21 @@ export default function Home() {
   const [currentScene, setCurrentScene] = useState(0)
   const [logs, setLogs] = useState([])
   const [exporting, setExporting] = useState(false)
+  // Editor settings
+  const [subtitleStyle, setSubtitleStyle] = useState('classic')
+  const [sfxWhoosh, setSfxWhoosh] = useState(true)
+  const [sfxPop, setSfxPop] = useState(true)
+  const [sfxDing, setSfxDing] = useState(true)
+  const [bgMusic, setBgMusic] = useState('none')
+  const [transition, setTransition] = useState('cut')
+  const [musicPlaying, setMusicPlaying] = useState(false)
   const videoRef = useRef(null)
   const audioRef = useRef(null)
   const canvasRef = useRef(null)
+  const musicSourceRef = useRef(null)
+  const audioCtxRef = useRef(null)
 
+  // Draw subtitles on canvas overlay with selected style
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !result?.story?.scenes?.[currentScene]) return
@@ -59,19 +244,38 @@ export default function Home() {
     const words = subtitle.split(/\s+/)
     const lines = []
     for (let i = 0; i < words.length; i += 3) lines.push(words.slice(i, i + 3).join(' '))
-    ctx.font = 'bold 64px Heebo, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    const lineHeight = 40
-    const startY = canvas.height * 0.80 - ((lines.length - 1) * lineHeight) / 2
-    const x = canvas.width / 2
-    lines.forEach((line, i) => {
-      const y = startY + i * lineHeight
-      ctx.strokeStyle = 'black'; ctx.lineWidth = 16; ctx.lineJoin = 'round'; ctx.miterLimit = 2
-      ctx.strokeText(line, x, y)
-      ctx.fillStyle = 'white'; ctx.fillText(line, x, y)
-    })
-  }, [currentScene, result, step])
+    drawSubtitleOnCtx(ctx, lines, canvas.width, canvas.height, subtitleStyle)
+  }, [currentScene, result, step, subtitleStyle])
+
+  // Play pop sound when subtitle appears
+  useEffect(() => {
+    if (step !== 'done' || !sfxPop || !result?.story?.scenes?.[currentScene]?.subtitle) return
+    try { const ctx = createAudioContext(); playPop(ctx); setTimeout(() => ctx.close(), 200) } catch {}
+  }, [currentScene, step, sfxPop, result])
+
+  // Background music preview
+  const toggleMusicPreview = useCallback(() => {
+    if (musicPlaying) {
+      if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
+      if (audioCtxRef.current) { try { audioCtxRef.current.close() } catch {} }
+      musicSourceRef.current = null; audioCtxRef.current = null; setMusicPlaying(false); return
+    }
+    if (bgMusic === 'none') return
+    try {
+      const ctx = createAudioContext(); audioCtxRef.current = ctx
+      const buf = generateMusicBuffer(ctx, bgMusic, 8)
+      const source = ctx.createBufferSource(); source.buffer = buf; source.connect(ctx.destination)
+      source.onended = () => setMusicPlaying(false); source.start()
+      musicSourceRef.current = source; setMusicPlaying(true)
+    } catch {}
+  }, [bgMusic, musicPlaying])
+
+  // Stop music on track change
+  useEffect(() => {
+    if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
+    if (audioCtxRef.current) { try { audioCtxRef.current.close() } catch {} }
+    musicSourceRef.current = null; audioCtxRef.current = null; setMusicPlaying(false)
+  }, [bgMusic])
 
   const avatarUrl = customAvatar || selectedAvatar?.url
   const addLog = (msg, type='') => setLogs(p => [...p, {msg, type, t: new Date().toLocaleTimeString('he-IL')}])
@@ -148,6 +352,9 @@ export default function Home() {
   }
 
   const loadScene = (idx) => {
+    if (idx !== currentScene && sfxWhoosh) {
+      try { const ctx = createAudioContext(); playWhoosh(ctx); setTimeout(() => ctx.close(), 500) } catch {}
+    }
     setCurrentScene(idx)
     const url = result?.videos?.[idx]
     if (url && videoRef.current) { videoRef.current.src = url; videoRef.current.load() }
@@ -162,13 +369,68 @@ export default function Home() {
       let mimeType = 'video/mp4'
       if (!MediaRecorder.isTypeSupported(mimeType)) { mimeType = 'video/webm;codecs=h264'; if (!MediaRecorder.isTypeSupported(mimeType)) { mimeType = 'video/webm;codecs=vp9'; if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm' } }
       const stream = offCanvas.captureStream(30)
-      if (audioRef.current?.src) { try { const audioCtx = new AudioContext(); const source = audioCtx.createMediaElementSource(audioRef.current); const dest = audioCtx.createMediaStreamDestination(); source.connect(dest); source.connect(audioCtx.destination); dest.stream.getAudioTracks().forEach(t => stream.addTrack(t)) } catch {} }
+
+      // Create audio context for mixing voice, music, and SFX
+      const exportAudioCtx = new AudioContext()
+      const dest = exportAudioCtx.createMediaStreamDestination()
+      dest.stream.getAudioTracks().forEach(t => stream.addTrack(t))
+
+      // Add voiceover audio
+      if (audioRef.current?.src) {
+        try {
+          const source = exportAudioCtx.createMediaElementSource(audioRef.current)
+          source.connect(dest); source.connect(exportAudioCtx.destination)
+        } catch {}
+      }
+
+      // Add background music
+      if (bgMusic !== 'none') {
+        const totalDuration = result.videos.filter(v => v).length * 5
+        const musicBuf = generateMusicBuffer(exportAudioCtx, bgMusic, totalDuration + 2)
+        const musicSource = exportAudioCtx.createBufferSource()
+        musicSource.buffer = musicBuf
+        const musicGain = exportAudioCtx.createGain(); musicGain.gain.value = 0.3
+        musicSource.connect(musicGain); musicGain.connect(dest); musicSource.start()
+      }
+
       const mediaRecorder = new MediaRecorder(stream, { mimeType }); const chunks = []
       mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
       const donePromise = new Promise(resolve => { mediaRecorder.onstop = resolve })
       mediaRecorder.start()
+
       for (let i = 0; i < result.videos.length; i++) {
         const url = result.videos[i]; if (!url) continue
+
+        // Whoosh SFX between scenes
+        if (i > 0 && sfxWhoosh) {
+          const wo = exportAudioCtx.createOscillator(); const wg = exportAudioCtx.createGain()
+          const wf = exportAudioCtx.createBiquadFilter()
+          wo.type = 'sawtooth'; wo.frequency.setValueAtTime(800, exportAudioCtx.currentTime)
+          wo.frequency.exponentialRampToValueAtTime(200, exportAudioCtx.currentTime + 0.3)
+          wf.type = 'bandpass'; wf.frequency.value = 600; wf.Q.value = 2
+          wg.gain.setValueAtTime(0.25, exportAudioCtx.currentTime)
+          wg.gain.exponentialRampToValueAtTime(0.001, exportAudioCtx.currentTime + 0.35)
+          wo.connect(wf); wf.connect(wg); wg.connect(dest)
+          wo.start(exportAudioCtx.currentTime); wo.stop(exportAudioCtx.currentTime + 0.4)
+        }
+
+        // Pop SFX for subtitle
+        if (sfxPop) {
+          setTimeout(() => {
+            try {
+              const po = exportAudioCtx.createOscillator(); const pg = exportAudioCtx.createGain()
+              po.type = 'sine'; po.frequency.setValueAtTime(600, exportAudioCtx.currentTime)
+              po.frequency.exponentialRampToValueAtTime(200, exportAudioCtx.currentTime + 0.08)
+              pg.gain.setValueAtTime(0.3, exportAudioCtx.currentTime)
+              pg.gain.exponentialRampToValueAtTime(0.001, exportAudioCtx.currentTime + 0.12)
+              po.connect(pg); pg.connect(dest)
+              po.start(exportAudioCtx.currentTime); po.stop(exportAudioCtx.currentTime + 0.15)
+            } catch {}
+          }, 300)
+        }
+
+        const transitionFrames = transition === 'cut' ? 0 : 15
+
         await new Promise((resolve) => {
           const vid = document.createElement('video'); vid.crossOrigin = 'anonymous'; vid.src = url; vid.muted = true; vid.playsInline = true
           vid.onloadeddata = async () => {
@@ -176,12 +438,25 @@ export default function Home() {
             const subtitle = result.story?.scenes?.[i]?.subtitle || ''
             const words = subtitle.split(/\s+/); const lines = []
             for (let w = 0; w < words.length; w += 3) lines.push(words.slice(w, w + 3).join(' '))
+            let frameCount = 0
             const drawFrame = () => {
               if (vid.paused || vid.ended) { resolve(); return }
-              ctx.drawImage(vid, 0, 0, offCanvas.width, offCanvas.height)
-              ctx.font = 'bold 64px Heebo, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-              const lineHeight = 40; const startY = offCanvas.height * 0.80 - ((lines.length - 1) * lineHeight) / 2; const x = offCanvas.width / 2
-              lines.forEach((line, li) => { const y = startY + li * lineHeight; ctx.strokeStyle = 'black'; ctx.lineWidth = 16; ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.strokeText(line, x, y); ctx.fillStyle = 'white'; ctx.fillText(line, x, y) })
+              frameCount++
+              const inTransition = frameCount <= transitionFrames
+              let alpha = 1, scale = 1
+              if (inTransition && transition === 'fade') alpha = frameCount / transitionFrames
+              if (inTransition && transition === 'zoom') { scale = 1.15 - 0.15 * (frameCount / transitionFrames); alpha = frameCount / transitionFrames }
+              if (vid.duration && vid.currentTime > vid.duration - 0.5 && i < result.videos.length - 1 && transition === 'fade') {
+                alpha = Math.max(0, (vid.duration - vid.currentTime) / 0.5)
+              }
+              ctx.globalAlpha = 1; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, offCanvas.width, offCanvas.height)
+              ctx.globalAlpha = alpha
+              if (scale !== 1) {
+                ctx.save(); ctx.translate(offCanvas.width / 2, offCanvas.height / 2); ctx.scale(scale, scale)
+                ctx.drawImage(vid, -offCanvas.width / 2, -offCanvas.height / 2, offCanvas.width, offCanvas.height); ctx.restore()
+              } else { ctx.drawImage(vid, 0, 0, offCanvas.width, offCanvas.height) }
+              ctx.globalAlpha = 1
+              drawSubtitleOnCtx(ctx, lines, offCanvas.width, offCanvas.height, subtitleStyle)
               requestAnimationFrame(drawFrame)
             }
             requestAnimationFrame(drawFrame)
@@ -189,9 +464,22 @@ export default function Home() {
           vid.onerror = () => resolve()
         })
       }
+
+      // Ding SFX at the end
+      if (sfxDing) {
+        const d1 = exportAudioCtx.createOscillator(); const dg = exportAudioCtx.createGain()
+        d1.type = 'sine'; d1.frequency.setValueAtTime(1200, exportAudioCtx.currentTime)
+        dg.gain.setValueAtTime(0.35, exportAudioCtx.currentTime)
+        dg.gain.exponentialRampToValueAtTime(0.001, exportAudioCtx.currentTime + 0.8)
+        d1.connect(dg); dg.connect(dest)
+        d1.start(exportAudioCtx.currentTime); d1.stop(exportAudioCtx.currentTime + 1)
+        await new Promise(r => setTimeout(r, 1000))
+      }
+
       mediaRecorder.stop(); await donePromise
-      const blob = new Blob(chunks, { type: mimeType }); const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.style.display = 'none'; a.href = url; a.download = 'ugc-video.mp4'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+      try { exportAudioCtx.close() } catch {}
+      const blob = new Blob(chunks, { type: mimeType }); const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.style.display = 'none'; a.href = blobUrl; a.download = 'ugc-video.mp4'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(blobUrl)
     } catch (e) { alert('שגיאה בייצוא: ' + e.message) } finally { setExporting(false) }
   }
 
@@ -360,6 +648,80 @@ export default function Home() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Editor Controls */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
+        {/* Subtitle Style */}
+        <div style={cardS}>
+          <div style={secTitle}>סגנון כתוביות</div>
+          <select value={subtitleStyle} onChange={e => setSubtitleStyle(e.target.value)}
+            style={{ ...inpS, cursor: 'pointer', appearance: 'auto' }}>
+            {SUBTITLE_STYLES.map(s => <option key={s.id} value={s.id}>{s.label} — {s.desc}</option>)}
+          </select>
+          <div style={{ marginTop: 10, background: 'rgba(255,255,255,0.02)', borderRadius: 10, padding: 10, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <canvas ref={el => {
+              if (!el) return; const c = el.getContext('2d'); el.width = 200; el.height = 60
+              c.clearRect(0, 0, 200, 60); c.font = 'bold 14px Heebo,sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'
+              if (subtitleStyle === 'classic') { c.strokeStyle = 'black'; c.lineWidth = 4; c.lineJoin = 'round'; c.strokeText('טקסט לדוגמה', 100, 30); c.fillStyle = 'white'; c.fillText('טקסט לדוגמה', 100, 30) }
+              else if (subtitleStyle === 'bold') { c.fillStyle = 'rgba(255,255,255,0.92)'; c.beginPath(); c.roundRect(20, 10, 160, 40, 6); c.fill(); c.fillStyle = '#111'; c.fillText('טקסט לדוגמה', 100, 30) }
+              else if (subtitleStyle === 'minimal') { c.fillStyle = 'rgba(255,255,255,0.7)'; c.font = '12px Heebo,sans-serif'; c.fillText('טקסט לדוגמה', 100, 30) }
+              else if (subtitleStyle === 'neon') { c.shadowColor = '#a855f7'; c.shadowBlur = 10; c.fillStyle = 'white'; c.fillText('טקסט לדוגמה', 100, 30); c.fillText('טקסט לדוגמה', 100, 30); c.shadowBlur = 0 }
+            }} width={200} height={60} style={{ borderRadius: 6 }} />
+          </div>
+        </div>
+
+        {/* Sound Effects */}
+        <div style={cardS}>
+          <div style={secTitle}>סאונד אפקטים</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[{ label: 'Whoosh בין סצנות', val: sfxWhoosh, set: setSfxWhoosh, icon: '💨' },
+              { label: 'Pop על כתוביות', val: sfxPop, set: setSfxPop, icon: '🫧' },
+              { label: 'Ding בסוף', val: sfxDing, set: setSfxDing, icon: '🔔' }
+            ].map(s => (
+              <button key={s.label} onClick={() => s.set(v => !v)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: s.val ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)', border: `1px solid ${s.val ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 10, cursor: 'pointer', color: s.val ? '#d4d4ff' : '#52525b', fontSize: 12, fontFamily: 'Heebo,sans-serif', textAlign: 'right', direction: 'rtl', transition: 'all 0.2s' }}>
+                <span style={{ fontSize: 16 }}>{s.icon}</span>
+                <span style={{ flex: 1 }}>{s.label}</span>
+                <span style={{ fontSize: 10, color: s.val ? '#a855f7' : '#3f3f46', fontWeight: 700 }}>{s.val ? 'ON' : 'OFF'}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Background Music */}
+        <div style={cardS}>
+          <div style={secTitle}>מוזיקת רקע</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {MUSIC_TRACKS.map(t => (
+              <button key={t.id} onClick={() => setBgMusic(t.id)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: bgMusic === t.id ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)', border: `1px solid ${bgMusic === t.id ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 10, cursor: 'pointer', color: bgMusic === t.id ? '#d4d4ff' : '#52525b', fontSize: 12, fontFamily: 'Heebo,sans-serif', transition: 'all 0.2s' }}>
+                <span>{t.emoji}</span>
+                <span style={{ flex: 1, textAlign: 'right' }}>{t.label}</span>
+                {bgMusic === t.id && t.id !== 'none' && <span style={{ fontSize: 9, color: '#a855f7' }}>✓</span>}
+              </button>
+            ))}
+          </div>
+          {bgMusic !== 'none' && (
+            <button onClick={toggleMusicPreview} style={{ ...ghostBtn, width: '100%', marginTop: 8, fontSize: 11, justifyContent: 'center', color: musicPlaying ? '#ef4444' : '#a855f7', borderColor: musicPlaying ? 'rgba(239,68,68,0.3)' : 'rgba(168,85,247,0.3)' }}>
+              {musicPlaying ? '⏹ עצור תצוגה מקדימה' : '▶ השמע תצוגה מקדימה'}
+            </button>
+          )}
+        </div>
+
+        {/* Transitions */}
+        <div style={cardS}>
+          <div style={secTitle}>מעברים בין סצנות</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {TRANSITIONS.map(t => (
+              <button key={t.id} onClick={() => setTransition(t.id)}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: transition === t.id ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)', border: `1px solid ${transition === t.id ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 10, cursor: 'pointer', color: transition === t.id ? '#d4d4ff' : '#52525b', fontSize: 13, fontFamily: 'Heebo,sans-serif', direction: 'rtl', transition: 'all 0.2s' }}>
+                <span style={{ flex: 1, textAlign: 'right', fontWeight: transition === t.id ? 700 : 400 }}>{t.label} — {t.desc}</span>
+                {transition === t.id && <span style={{ color: '#a855f7', fontSize: 14 }}>✓</span>}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 20 }}>
