@@ -3,6 +3,9 @@ import { useState } from 'react'
 import { supabase } from '../../../lib/supabase'
 
 export default function LoginPage() {
+  console.log('Supabase client:', supabase)
+  console.log('Supabase URL from env:', process.env.NEXT_PUBLIC_SUPABASE_URL)
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isSignUp, setIsSignUp] = useState(false)
