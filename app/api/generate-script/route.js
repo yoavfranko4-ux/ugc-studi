@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk'
 import { checkRateLimit } from '../middleware/rateLimit.js'
 import { validateProductInput } from '../middleware/validate.js'
 
@@ -26,26 +27,19 @@ export async function POST(req) {
     // Try Claude API if key exists
     if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'empty') {
       try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'anthropic-version': '2023-06-01',
-            'x-api-key': process.env.ANTHROPIC_API_KEY
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 1200,
-            messages: [{ role: 'user', content: `Create 4-scene TikTok UGC ad for: ${pName} - ${pDesc}. Use: ${pUse}. Return ONLY JSON: {"scene1":"...","scene2":"Continuing from previous scene same person...","scene3":"Continuing from previous scene same person...","scene4":"Continuing from previous scene same person...","nb1":"...","nb2":"...","nb3":"...","nb4":"...","hebrewVoice":"[Hebrew only mentioning ${pName}]"}` }]
-          })
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+        const message = await anthropic.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1200,
+          messages: [{ role: 'user', content: `Create 4-scene TikTok UGC ad for: ${pName} - ${pDesc}. Use: ${pUse}. Return ONLY JSON: {"scene1":"...","scene2":"Continuing from previous scene same person...","scene3":"Continuing from previous scene same person...","scene4":"Continuing from previous scene same person...","nb1":"...","nb2":"...","nb3":"...","nb4":"...","hebrewVoice":"[Hebrew only mentioning ${pName}]"}` }]
         })
-        if (response.ok) {
-          const data = await response.json()
-          const text = data.content[0].text.trim().replace(/```json|```/g, '')
-          const start = text.indexOf('{'), end = text.lastIndexOf('}') + 1
-          return Response.json(JSON.parse(text.slice(start, end)))
-        }
-      } catch (e) { /* fall through */ }
+        const text = message.content[0].text.trim().replace(/```json|```/g, '')
+        const start = text.indexOf('{'), end = text.lastIndexOf('}') + 1
+        return Response.json(JSON.parse(text.slice(start, end)))
+      } catch (e) {
+        console.error('Claude SDK error in generate-script:', e.message)
+        /* fall through */
+      }
     }
 
     // Smart template — uses actual product info, NO API KEY needed!
