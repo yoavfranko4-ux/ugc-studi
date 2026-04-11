@@ -77,51 +77,102 @@ export default function LandingPage() {
         </section>
 
         {/* How It Works */}
-        <section id="how" style={{ maxWidth: 1100, margin: '0 auto', padding: '100px 20px' }}>
-          <div style={{ textAlign: 'center', marginBottom: 56 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#a855f7', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 12 }}>תהליך פשוט</div>
-            <h2 style={{ fontSize: 'clamp(28px, 4vw, 42px)', fontWeight: 900, color: '#f0f0ff' }}>איך זה עובד?</h2>
-          </div>
+        <section id="how" style={{ background: '#09090b', padding: '100px 20px', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ maxWidth: 1100, margin: '0 auto', position: 'relative' }}>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
-            {[
-              { icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>, title: 'תאר את המוצר', desc: 'הכנס שם מוצר, תיאור קצר, ותמונה — ה-AI מבין בדיוק מה לייצר', color: '#a855f7' },
-              { icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>, title: 'Agent יוצר הכל', desc: 'תסריט מקצועי, 4 פריימים, 4 סרטונים + קריינות עברית — אוטומטי', color: '#8b5cf6' },
-              { icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>, title: 'הורד ופרסם', desc: 'ייצוא MP4 מוכן עם כתוביות — ישר לטיקטוק, אינסטגרם ורילס', color: '#7c3aed' },
-            ].map((s, i) => (
-              <div key={i} style={glassCard}>
-                <div style={{ position: 'absolute', top: 16, left: 16, width: 26, height: 26, borderRadius: 8, background: `${s.color}15`, border: `1px solid ${s.color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: s.color }}>{i + 1}</div>
-                <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(255,255,255,0.03)', border: BORDER, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>{s.icon}</div>
-                <h3 style={{ fontWeight: 800, fontSize: 19, marginBottom: 10, color: '#f0f0ff' }}>{s.title}</h3>
-                <p style={{ color: '#71717a', fontSize: 15, lineHeight: 1.7 }}>{s.desc}</p>
+            <div style={{ textAlign: 'center', marginBottom: 64 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#a855f7', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 12 }}>תהליך פשוט</div>
+              <h2 style={{ fontSize: 'clamp(28px, 4vw, 42px)', fontWeight: 900, color: '#f0f0ff' }}>איך זה עובד?</h2>
+            </div>
+
+            {/* Main layout: floating images + steps */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 40, flexWrap: 'wrap' }}>
+
+              {/* Left floating UGC images */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, flexShrink: 0 }}>
+                {[
+                  { src: '/ugc-showcase/ugc-1.jpg', rot: '-6deg' },
+                  { src: '/ugc-showcase/ugc-2.jpg', rot: '3deg' },
+                  { src: '/ugc-showcase/ugc-3.jpg', rot: '-3deg' },
+                ].map((img, i) => (
+                  <img key={i} src={img.src} alt="" style={{ width: 110, height: 140, objectFit: 'cover', borderRadius: 16, transform: `rotate(${img.rot})`, boxShadow: '0 8px 32px rgba(124,58,237,0.25), 0 2px 8px rgba(0,0,0,0.5)', border: '2px solid rgba(255,255,255,0.08)' }} />
+                ))}
               </div>
-            ))}
-          </div>
-        </section>
 
-        {/* Results / Examples */}
-        <section style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 20px 80px' }}>
-          <div style={{ textAlign: 'center', marginBottom: 48 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 12 }}>תוצאות</div>
-            <h2 style={{ fontSize: 'clamp(28px, 4vw, 42px)', fontWeight: 900, color: '#f0f0ff' }}>סרטונים שנוצרו</h2>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-            {[
-              { label: 'HiSmile Whitening', cat: 'יופי & טיפוח' },
-              { label: 'Serum Pro', cat: 'קוסמטיקה' },
-              { label: 'FitApp 360', cat: 'כושר & בריאות' },
-              { label: 'CleanHome AI', cat: 'מוצרי בית' },
-            ].map((ex, i) => (
-              <div key={i} style={{ ...glassCard, padding: 0, overflow: 'hidden' }}>
-                <div style={{ aspectRatio: '9/16', maxHeight: 240, background: `linear-gradient(135deg, ${['#7c3aed15','#a855f715','#6d28d915','#8b5cf615'][i]}, #09090b)`, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ffffff15" strokeWidth="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                  <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12 }}>
-                    <div style={{ fontSize: 10, color: '#a855f7', fontWeight: 600, marginBottom: 2 }}>{ex.cat}</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#e4e4e7' }}>{ex.label}</div>
+              {/* Center: 3 steps with curved arrows */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, maxWidth: 420 }}>
+
+                {/* Step 1 */}
+                <div style={{ ...glassCard, padding: '24px 32px', textAlign: 'center', width: '100%', background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(168,85,247,0.2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #7c3aed, #a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900, color: '#fff' }}>1</div>
+                    <h3 style={{ fontWeight: 800, fontSize: 17, color: '#f0f0ff', margin: 0 }}>תאר את המוצר או העסק</h3>
+                  </div>
+                  <p style={{ color: '#71717a', fontSize: 14, margin: 0, lineHeight: 1.6 }}>שם, תיאור קצר ותמונה</p>
+                </div>
+
+                {/* Arrow down */}
+                <svg width="40" height="48" viewBox="0 0 40 48" fill="none" style={{ margin: '-4px 0' }}>
+                  <path d="M20 4 C20 20, 32 24, 32 32 C32 38, 26 44, 20 44" stroke="url(#arrowGrad1)" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+                  <polygon points="16,40 20,48 24,40" fill="#a855f7" />
+                  <defs><linearGradient id="arrowGrad1" x1="20" y1="4" x2="20" y2="44"><stop offset="0%" stopColor="#7c3aed" /><stop offset="100%" stopColor="#a855f7" /></linearGradient></defs>
+                </svg>
+
+                {/* Step 2 */}
+                <div style={{ ...glassCard, padding: '24px 32px', textAlign: 'center', width: '100%', background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #8b5cf6, #a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900, color: '#fff' }}>2</div>
+                    <h3 style={{ fontWeight: 800, fontSize: 17, color: '#f0f0ff', margin: 0 }}>בחר אווטאר</h3>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 12 }}>
+                    {[1, 2, 3].map(n => (
+                      <img key={n} src={`/avatars/avatar-${n}.jpg`} alt="" style={{ width: 52, height: 52, borderRadius: 14, objectFit: 'cover', border: '2px solid rgba(168,85,247,0.3)', boxShadow: '0 4px 16px rgba(124,58,237,0.2)' }} />
+                    ))}
                   </div>
                 </div>
+
+                {/* Arrow down */}
+                <svg width="40" height="48" viewBox="0 0 40 48" fill="none" style={{ margin: '-4px 0' }}>
+                  <path d="M20 4 C20 20, 8 24, 8 32 C8 38, 14 44, 20 44" stroke="url(#arrowGrad2)" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+                  <polygon points="16,40 20,48 24,40" fill="#a855f7" />
+                  <defs><linearGradient id="arrowGrad2" x1="20" y1="4" x2="20" y2="44"><stop offset="0%" stopColor="#a855f7" /><stop offset="100%" stopColor="#c084fc" /></linearGradient></defs>
+                </svg>
+
+                {/* Step 3 */}
+                <div style={{ ...glassCard, padding: '24px 32px', textAlign: 'center', width: '100%', background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.3)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #a855f7, #c084fc)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900, color: '#fff' }}>3</div>
+                    <h3 style={{ fontWeight: 800, fontSize: 17, color: '#f0f0ff', margin: 0 }}>AI מייצר סרטון מוכן</h3>
+                  </div>
+                  <p style={{ color: '#71717a', fontSize: 14, margin: 0, lineHeight: 1.6 }}>תסריט, פריימים, קריינות וכתוביות — הכל אוטומטי</p>
+                </div>
               </div>
-            ))}
+
+              {/* Right floating UGC images */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, flexShrink: 0 }}>
+                {[
+                  { src: '/ugc-showcase/ugc-4.jpg', rot: '6deg' },
+                  { src: '/ugc-showcase/ugc-5.jpg', rot: '-3deg' },
+                  { src: '/ugc-showcase/ugc-6.jpg', rot: '3deg' },
+                ].map((img, i) => (
+                  <img key={i} src={img.src} alt="" style={{ width: 110, height: 140, objectFit: 'cover', borderRadius: 16, transform: `rotate(${img.rot})`, boxShadow: '0 8px 32px rgba(124,58,237,0.25), 0 2px 8px rgba(0,0,0,0.5)', border: '2px solid rgba(255,255,255,0.08)' }} />
+                ))}
+              </div>
+
+            </div>
+
+            {/* Showcase grid */}
+            <div style={{ marginTop: 80 }}>
+              <h3 style={{ textAlign: 'center', fontSize: 'clamp(22px, 3vw, 32px)', fontWeight: 900, color: '#f0f0ff', marginBottom: 36 }}>התוצאות מדברות בעד עצמן</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+                {[1, 2, 3, 4].map(n => (
+                  <div key={n} style={{ borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+                    <img src={`/ugc-showcase/ugc-${n}.jpg`} alt="" style={{ width: '100%', aspectRatio: '9/16', objectFit: 'cover', display: 'block' }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+
           </div>
         </section>
 
