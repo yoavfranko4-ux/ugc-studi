@@ -3,37 +3,51 @@ import { useState } from 'react'
 import { supabase } from '../../../lib/supabase'
 
 export default function LoginPage() {
+  console.log('Supabase client:', supabase)
+  console.log('Supabase URL from env:', process.env.NEXT_PUBLIC_SUPABASE_URL)
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
     setError('')
-    setMessage('')
 
+    console.log('handleSubmit called, supabase:', !!supabase)
     if (!supabase) { setError('Supabase not configured'); setLoading(false); return }
 
-    if (isSignUp) {
-      const { error } = await supabase.auth.signUp({ email, password })
-      if (error) {
-        setError(error.message)
+    console.log('Starting login with email:', email)
+
+    try {
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({ email, password })
+        if (error) throw error
+        setError('בדוק את המייל שלך לאימות')
       } else {
-        setMessage('נשלח אליך מייל אימות — בדוק את התיבה')
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+
+        console.log('Login result:', { data, error })
+
+        if (error) {
+          console.log('Error:', error.message)
+          setError(error.message)
+          return
+        }
+
+        console.log('Success! User:', data.user)
+        console.log('Redirecting to dashboard...')
+        window.location.replace('/dashboard')
       }
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) {
-        setError(error.message)
-      } else {
-        window.location.href = '/dashboard'
-      }
+    } catch (err) {
+      console.log('Catch error:', err)
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   return (
@@ -74,14 +88,13 @@ export default function LoginPage() {
           </div>
 
           {error && <div style={{ background: '#ef444422', border: '1px solid #ef4444', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#ef4444', marginBottom: 16 }}>{error}</div>}
-          {message && <div style={{ background: '#10b98122', border: '1px solid #10b981', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#10b981', marginBottom: 16 }}>{message}</div>}
 
           <button type="submit" disabled={loading} style={{ ...bigBtn, opacity: loading ? 0.6 : 1 }}>
             {loading ? '...' : isSignUp ? 'הרשמה' : 'התחברות'}
           </button>
 
           <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button type="button" onClick={() => { setIsSignUp(!isSignUp); setError(''); setMessage('') }} style={{ background: 'none', border: 'none', color: '#7c3aed', cursor: 'pointer', fontSize: 14, fontFamily: 'Heebo,sans-serif' }}>
+            <button type="button" onClick={() => { setIsSignUp(!isSignUp); setError('') }} style={{ background: 'none', border: 'none', color: '#7c3aed', cursor: 'pointer', fontSize: 14, fontFamily: 'Heebo,sans-serif' }}>
               {isSignUp ? 'כבר יש לך חשבון? התחבר' : 'אין לך חשבון? הירשם'}
             </button>
           </div>
