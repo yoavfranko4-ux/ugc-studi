@@ -1,5 +1,5 @@
 'use client'
-import { PLANS } from '../../lib/plans'
+import { PLANS } from '../lib/plans'
 
 export default function LandingPage() {
   return (
