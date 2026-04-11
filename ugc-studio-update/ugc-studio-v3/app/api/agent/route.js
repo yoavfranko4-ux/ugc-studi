@@ -106,7 +106,7 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 - Supplement → "avatar at kitchen table actually taking/drinking/eating the supplement"
 
 5. END every Kling prompt with exactly this phrase (no more, no less):
-"silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference"
+"silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference"
 
 Return ONLY valid JSON (no markdown):
 {
@@ -282,7 +282,7 @@ function getDefaultVoiceover(productName, applicationArea, hook) {
   return `${h}. גיליתי את ${productName} ולא האמנתי שיעזור לי. התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
 }
 
-const STABLE = 'silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference';
+const STABLE = 'silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference';
 
 function getDefaultScenes(productName, applicationArea, productDesc) {
   const hook = getHook(productName, productDesc);
