@@ -203,6 +203,7 @@ export default function Home() {
   }, [])
 
   const [step, setStep] = useState('form')
+  const [businessType, setBusinessType] = useState('product')
   const [selectedAvatar, setSelectedAvatar] = useState(null)
   const [customAvatar, setCustomAvatar] = useState(null)
   const [productName, setProductName] = useState('')
@@ -327,7 +328,7 @@ export default function Home() {
       }
       const agentRes = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl })
+        body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl, businessType })
       })
       if (!agentRes.ok) throw new Error('Agent failed')
       addLog('מקבל תוצאות מה-Agent...')
@@ -498,7 +499,22 @@ export default function Home() {
         </a>
       </div>
 
-      {/* API Keys managed server-side — no client exposure */}
+      {/* Business Type Toggle */}
+      <div style={cardS}>
+        <div style={secTitle}>סוג</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[
+            { value: 'product', label: '🛍️ מוצר', desc: 'מוצר פיזי למכירה' },
+            { value: 'business', label: '🏪 עסק / שירות', desc: 'מסעדה, מספרה, קליניקה...' }
+          ].map(opt => (
+            <div key={opt.value} onClick={() => setBusinessType(opt.value)}
+              style={{ flex: 1, padding: '14px 16px', background: businessType === opt.value ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${businessType === opt.value ? 'rgba(168,85,247,0.5)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 14, cursor: 'pointer', textAlign: 'center', transition: 'all 300ms ease' }}>
+              <div style={{ fontSize: 18, marginBottom: 4 }}>{opt.label}</div>
+              <div style={{ fontSize: 11, color: '#52525b' }}>{opt.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* Avatar Selection */}
       <div style={cardS}>
@@ -533,25 +549,25 @@ export default function Home() {
 
       {/* Product Details */}
       <div style={cardS}>
-        <div style={secTitle}>פרטי המוצר</div>
+        <div style={secTitle}>{businessType === 'business' ? 'פרטי העסק' : 'פרטי המוצר'}</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label style={lblS}>שם המוצר הספציפי</label>
-            <input value={productName} onChange={e => setProductName(e.target.value)} placeholder="HiSmile Whitening Strips" style={{ ...inpS, direction: 'rtl', fontFamily: 'Heebo,sans-serif', marginTop: 6 }} />
+            <label style={lblS}>{businessType === 'business' ? 'שם העסק' : 'שם המוצר הספציפי'}</label>
+            <input value={productName} onChange={e => setProductName(e.target.value)} placeholder={businessType === 'business' ? 'שווארמה אבו חסן / סטודיו לציפורניים נויה' : 'HiSmile Whitening Strips'} style={{ ...inpS, direction: 'rtl', fontFamily: 'Heebo,sans-serif', marginTop: 6 }} />
           </div>
           <div>
-            <label style={lblS}>מה הוא פותר?</label>
-            <textarea value={productDesc} onChange={e => setProductDesc(e.target.value)} placeholder="רצועות הלבנת שיניים שמלבינות תוך 7 ימים..." style={{ ...inpS, height: 80, direction: 'rtl', fontFamily: 'Heebo,sans-serif', resize: 'none', marginTop: 6 }} />
+            <label style={lblS}>{businessType === 'business' ? 'מה מיוחד בעסק?' : 'מה הוא פותר?'}</label>
+            <textarea value={productDesc} onChange={e => setProductDesc(e.target.value)} placeholder={businessType === 'business' ? 'השווארמה הכי טובה בעיר, בשר טרי כל יום...' : 'רצועות הלבנת שיניים שמלבינות תוך 7 ימים...'} style={{ ...inpS, height: 80, direction: 'rtl', fontFamily: 'Heebo,sans-serif', resize: 'none', marginTop: 6 }} />
           </div>
           <div>
-            <label style={lblS}>איך משתמשים?</label>
-            <input value={applicationArea} onChange={e => setApplicationArea(e.target.value)} placeholder="מניחים על השיניים למשך 30 דקות" style={{ ...inpS, direction: 'rtl', fontFamily: 'Heebo,sans-serif', marginTop: 6 }} />
+            <label style={lblS}>{businessType === 'business' ? 'מה הלקוחות מקבלים?' : 'איך משתמשים?'}</label>
+            <input value={applicationArea} onChange={e => setApplicationArea(e.target.value)} placeholder={businessType === 'business' ? 'מנה ענקית עם תוספות, שירות מהיר ואווירה מעולה' : 'מניחים על השיניים למשך 30 דקות'} style={{ ...inpS, direction: 'rtl', fontFamily: 'Heebo,sans-serif', marginTop: 6 }} />
           </div>
           <div>
-            <label style={lblS}>תמונת מוצר (חשוב!)</label>
+            <label style={lblS}>{businessType === 'business' ? 'תמונת העסק / המנה (חשוב!)' : 'תמונת מוצר (חשוב!)'}</label>
             <div style={{ marginTop: 6, border: `2px dashed ${productImage ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 14, minHeight: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', position: 'relative', overflow: 'hidden', background: 'rgba(255,255,255,0.02)', transition: 'all 300ms ease' }}>
               <input type="file" accept="image/*" onChange={e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => setProductImage(ev.target.result); r.readAsDataURL(f) }} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
-              {productImage ? <img src={productImage} alt="product" style={{ maxHeight: 80, borderRadius: 8 }} /> : <span style={{ color: '#3f3f46', fontSize: 13 }}>לחץ להעלאת תמונת מוצר</span>}
+              {productImage ? <img src={productImage} alt="product" style={{ maxHeight: 80, borderRadius: 8 }} /> : <span style={{ color: '#3f3f46', fontSize: 13 }}>{businessType === 'business' ? 'לחץ להעלאת תמונת העסק או המנה' : 'לחץ להעלאת תמונת מוצר'}</span>}
             </div>
           </div>
           <div>
