@@ -4,26 +4,32 @@ import { NextResponse } from 'next/server'
 const publicPaths = ['/', '/pricing', '/login']
 
 export async function middleware(req) {
-  const res = NextResponse.next()
-  const supabase = createMiddlewareClient({ req, res })
-  const { data: { session } } = await supabase.auth.getSession()
-
   const path = req.nextUrl.pathname
 
-  // Public paths — allow everyone
+  // Public paths — skip auth check entirely
   if (publicPaths.some(p => path === p)) {
-    return res
+    return NextResponse.next()
   }
 
-  // Protected paths — redirect to login if not authenticated
+  // Protected paths — check session
   if (path.startsWith('/dashboard') || path.startsWith('/studio')) {
-    if (!session) {
-      const loginUrl = new URL('/login', req.url)
-      return NextResponse.redirect(loginUrl)
+    try {
+      const res = NextResponse.next()
+      const supabase = createMiddlewareClient({ req, res })
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (!session) {
+        return NextResponse.redirect(new URL('/login', req.url))
+      }
+
+      return res
+    } catch (e) {
+      console.error('Middleware auth error:', e.message)
+      return NextResponse.redirect(new URL('/login', req.url))
     }
   }
 
-  return res
+  return NextResponse.next()
 }
 
 export const config = {
