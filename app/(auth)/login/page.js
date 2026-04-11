@@ -16,6 +16,8 @@ export default function LoginPage() {
 
     if (!supabase) { setError('Supabase not configured'); setLoading(false); return }
 
+    console.log('Starting login...')
+
     try {
       if (isSignUp) {
         const { error } = await supabase.auth.signUp({ email, password })
@@ -23,12 +25,21 @@ export default function LoginPage() {
         setError('בדוק את המייל שלך לאימות')
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-        if (data?.user) {
-          window.location.replace('/dashboard')
+
+        console.log('Login result:', { data, error })
+
+        if (error) {
+          console.log('Error:', error.message)
+          setError(error.message)
+          return
         }
+
+        console.log('Success! User:', data.user)
+        console.log('Redirecting to dashboard...')
+        window.location.replace('/dashboard')
       }
     } catch (err) {
+      console.log('Catch error:', err)
       setError(err.message)
     } finally {
       setLoading(false)
