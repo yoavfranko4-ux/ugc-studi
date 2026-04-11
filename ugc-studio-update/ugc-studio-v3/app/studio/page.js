@@ -3,12 +3,12 @@ import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 
 const AVATARS = [
-  { url: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=400&h=600&fit=crop&crop=face', name: 'Maya' },
-  { url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=600&fit=crop&crop=face', name: 'Sarah' },
-  { url: 'https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?w=400&h=600&fit=crop&crop=face', name: 'Noa' },
-  { url: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400&h=600&fit=crop&crop=face', name: 'Dana' },
-  { url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400&h=600&fit=crop&crop=face', name: 'Lior' },
-  { url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=600&fit=crop&crop=face', name: 'Avi' },
+  { id: 1, url: '/avatars/avatar-1.jpg', name: 'Maya' },
+  { id: 2, url: '/avatars/avatar-2.jpg', name: 'Noa' },
+  { id: 3, url: '/avatars/avatar-3.jpg', name: 'Adam' },
+  { id: 4, url: '/avatars/avatar-4.jpg', name: 'Yoav' },
+  { id: 5, url: '/avatars/avatar-5.jpg', name: 'Lior' },
+  { id: 6, url: '/avatars/avatar-6.jpg', name: 'Dana' },
 ]
 
 const AGENT_STEPS = [
