@@ -1,33 +1,31 @@
 import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs'
 import { NextResponse } from 'next/server'
 
-const publicPaths = ['/', '/pricing', '/login']
-
 export async function middleware(req) {
   const res = NextResponse.next()
-  const supabase = createMiddlewareClient({ req, res })
-  const { data: { session } } = await supabase.auth.getSession()
 
-  const path = req.nextUrl.pathname
+  const pathname = req.nextUrl.pathname
 
-  // Public paths — allow everyone
-  if (publicPaths.some(p => path === p)) {
+  // דפים פתוחים לכולם
+  if (pathname === '/' ||
+      pathname === '/login' ||
+      pathname === '/pricing' ||
+      pathname.startsWith('/_next') ||
+      pathname.startsWith('/api')) {
     return res
   }
 
-  // Protected paths — redirect to login if not authenticated
-  if (path.startsWith('/dashboard') || path.startsWith('/studio') || path.startsWith('/admin')) {
-    if (!session) {
-      const loginUrl = new URL('/login', req.url)
-      return NextResponse.redirect(loginUrl)
-    }
+  const supabase = createMiddlewareClient({ req, res })
+  const { data: { session } } = await supabase.auth.getSession()
+
+  if (!session) {
+    return NextResponse.redirect(new URL('/login', req.url))
   }
 
-  // Admin — only allow specific email
-  if (path.startsWith('/admin')) {
-    if (session?.user?.email !== 'yoavfranko34@gmail.com') {
-      const homeUrl = new URL('/', req.url)
-      return NextResponse.redirect(homeUrl)
+  // הגנה על admin
+  if (pathname.startsWith('/admin')) {
+    if (session.user.email !== 'yoavfranko34@gmail.com') {
+      return NextResponse.redirect(new URL('/', req.url))
     }
   }
 
@@ -35,5 +33,5 @@ export async function middleware(req) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)']
 }
