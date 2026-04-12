@@ -30,8 +30,7 @@ export async function POST(req) {
       method: 'POST',
       headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        start_frame: imageUrl,
-        end_frame: imageUrl,
+        image_url: imageUrl,
         prompt,
         duration: seedanceDuration,
         aspect_ratio: '9:16'

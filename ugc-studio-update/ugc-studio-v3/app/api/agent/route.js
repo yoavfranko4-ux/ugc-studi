@@ -248,8 +248,7 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
           headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: scenes[i].kling_prompt,
-            start_frame: frames[i],
-            end_frame: frames[i],
+            image_url: frames[i],
             duration: '5',
             aspect_ratio: '9:16'
           })
