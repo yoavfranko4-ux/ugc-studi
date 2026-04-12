@@ -6,7 +6,7 @@ import LiquidButton from '../components/ui/liquid-glass-button'
 
 export default function LandingPage() {
   return (
-    <div style={{ minHeight: '100vh', background: BG, color: '#f0f0ff', position: 'relative' }}>
+    <div style={{ minHeight: '100vh', background: 'transparent', color: '#f0f0ff', position: 'relative' }}>
       <WebGLShader colors={['#7c3aed', '#a855f7', '#1e1b4b', '#6d28d9']} speed={0.2} intensity={0.6} />
 
       {/* Overlay */}
