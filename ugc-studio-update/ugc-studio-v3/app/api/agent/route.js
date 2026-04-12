@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { supabase } from '../../../lib/supabase'
 
 export const maxDuration = 300;
 
@@ -163,8 +164,36 @@ Return ONLY valid JSON (no markdown):
 
 export async function POST(req) {
   try {
-    const { productName, productDesc, applicationArea, avatarUrl, productImageUrl } = await req.json();
+    const body = await req.json();
 
+    if (!supabase) {
+      return Response.json({ error: 'Supabase not configured' }, { status: 500 });
+    }
+
+    // Create a pending job
+    const { data: job, error: insertError } = await supabase
+      .from('jobs')
+      .insert({ status: 'pending' })
+      .select('id')
+      .single();
+
+    if (insertError) {
+      console.error('Job insert error:', insertError.message);
+      return Response.json({ error: 'Failed to create job' }, { status: 500 });
+    }
+
+    // Fire and forget — do NOT await
+    runJob(job.id, body).catch(err => console.error('Background job crashed:', err.message));
+
+    return Response.json({ jobId: job.id });
+  } catch (e) {
+    console.error('Agent error:', e.message);
+    return Response.json({ error: e.message }, { status: 500 });
+  }
+}
+
+async function runJob(jobId, { productName, productDesc, applicationArea, avatarUrl, productImageUrl }) {
+  try {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
     const preparedAvatar = avatarUrl
       ? (avatarUrl.startsWith('http') || avatarUrl.startsWith('data:') ? avatarUrl : `${baseUrl}${avatarUrl}`)
@@ -172,7 +201,7 @@ export async function POST(req) {
     const preparedProduct = productImageUrl
       ? (productImageUrl.startsWith('http') || productImageUrl.startsWith('data:') ? productImageUrl : `${baseUrl}${productImageUrl}`)
       : null;
-    console.log('Prepared URLs:', { avatar: preparedAvatar?.slice(0, 80), product: preparedProduct?.slice(0, 80) });
+    console.log(`[Job ${jobId}] Prepared URLs:`, { avatar: preparedAvatar?.slice(0, 80), product: preparedProduct?.slice(0, 80) });
 
     // Script
     const hook = getHook(productName, productDesc);
@@ -203,7 +232,7 @@ export async function POST(req) {
         frames.push(frameUrl);
         if (frameUrl) prevFrame = frameUrl;
       } catch (e) {
-        console.error(`Frame ${i+1} failed:`, e.message);
+        console.error(`[Job ${jobId}] Frame ${i+1} failed:`, e.message);
         frames.push(null);
       }
     }
@@ -213,7 +242,7 @@ export async function POST(req) {
     for (let i = 0; i < 4; i++) {
       if (!frames[i]) { videos.push(null); continue; }
       try {
-        console.log(`Kling scene ${i+1}: starting...`);
+        console.log(`[Job ${jobId}] Kling scene ${i+1}: starting...`);
         const kRes = await fetch('https://fal.run/fal-ai/kling-video/v1.6/standard/image-to-video', {
           method: 'POST',
           headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
@@ -236,27 +265,37 @@ export async function POST(req) {
             const pd = await poll.json();
             if (pd.video?.url) { videoUrl = pd.video.url; break; }
             if (pd.output?.video?.url) { videoUrl = pd.output.video.url; break; }
-            if (pd.status === 'FAILED') { console.error(`Kling scene ${i+1} FAILED`); break; }
+            if (pd.status === 'FAILED') { console.error(`[Job ${jobId}] Kling scene ${i+1} FAILED`); break; }
           }
         }
-        console.log(`Kling scene ${i+1}:`, videoUrl ? 'OK' : 'no URL');
+        console.log(`[Job ${jobId}] Kling scene ${i+1}:`, videoUrl ? 'OK' : 'no URL');
         videos.push(videoUrl || null);
       } catch (e) {
-        console.error(`Kling scene ${i+1} error:`, e.message);
+        console.error(`[Job ${jobId}] Kling scene ${i+1} error:`, e.message);
         videos.push(null);
       }
     }
 
-    return Response.json({
+    const result = {
       story: { scenes, hebrew_voice: voiceover },
       frames,
       videos,
       audioBase64,
       hebrewVoice: voiceover
-    });
+    };
+
+    await supabase
+      .from('jobs')
+      .update({ status: 'done', result })
+      .eq('id', jobId);
+
+    console.log(`[Job ${jobId}] Completed successfully`);
   } catch (e) {
-    console.error('Agent error:', e.message);
-    return Response.json({ error: e.message }, { status: 500 });
+    console.error(`[Job ${jobId}] Failed:`, e.message);
+    await supabase
+      .from('jobs')
+      .update({ status: 'error', error: e.message })
+      .eq('id', jobId);
   }
 }
 

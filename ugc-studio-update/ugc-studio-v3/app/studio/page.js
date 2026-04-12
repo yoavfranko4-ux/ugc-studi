@@ -114,7 +114,7 @@ export default function Home() {
         finalAvatarUrl = upData.url || upData.access_url
         addLog('אווטאר הועלה', 'ok')
       }
-      addLog('Claude כותב סיפור מחובר ל-4 סצנות...'); setAgentStatus({ script: 'active' })
+      addLog('שולח בקשה ל-Agent...'); setAgentStatus({ script: 'active' })
       let productImageUrl = null
       if (productImage && productImage.startsWith('data:')) {
         const [ph, pb] = productImage.split(',')
@@ -134,8 +134,47 @@ export default function Home() {
         body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl, falKey, elevenKey, voiceId: 'Z3R5wn05IrDiVCyEkUrK' })
       })
       if (!agentRes.ok) throw new Error('Agent failed')
-      addLog('מקבל תוצאות מה-Agent...')
-      const data = await agentRes.json()
+      const { jobId } = await agentRes.json()
+      if (!jobId) throw new Error('No jobId returned')
+      addLog(`Job ${jobId.slice(0, 8)}... נוצר, ממתין לתוצאות...`)
+
+      // Animate progress steps while polling
+      const steps = ['script', 'frames', 'videos', 'voice']
+      let stepIdx = 0
+      const progressInterval = setInterval(() => {
+        stepIdx = Math.min(stepIdx + 1, steps.length - 1)
+        const status = {}
+        for (let i = 0; i < steps.length; i++) {
+          if (i < stepIdx) status[steps[i]] = 'done'
+          else if (i === stepIdx) status[steps[i]] = 'active'
+        }
+        setAgentStatus(status)
+      }, 45000) // advance step roughly every 45s
+
+      // Poll for job completion
+      const pollResult = await new Promise((resolve, reject) => {
+        const poll = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`/api/agent/status?jobId=${jobId}`)
+            const statusData = await statusRes.json()
+            if (statusData.status === 'done') {
+              clearInterval(poll)
+              clearInterval(progressInterval)
+              resolve(statusData.result)
+            } else if (statusData.status === 'error') {
+              clearInterval(poll)
+              clearInterval(progressInterval)
+              reject(new Error(statusData.error || 'Job failed'))
+            }
+            // status === 'pending' — keep polling
+          } catch (err) {
+            // Network error during poll — keep trying
+            addLog('שגיאת רשת בבדיקת סטטוס, מנסה שוב...', 'err')
+          }
+        }, 3000)
+      })
+
+      const data = pollResult
       if (data.frames) data.frames.forEach((f, i) => addLog(f ? `Frame ${i+1}: OK` : `Frame ${i+1}: נכשל`, f ? 'ok' : 'err'))
       if (data.videos) data.videos.forEach((v, i) => addLog(v ? `סרטון ${i+1}: OK` : `סרטון ${i+1}: נכשל`, v ? 'ok' : 'err'))
       setAgentStatus({ script: 'done', frames: 'done', videos: 'done', voice: data.audioBase64 ? 'done' : 'error' })
