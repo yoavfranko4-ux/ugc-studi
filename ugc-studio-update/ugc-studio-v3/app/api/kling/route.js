@@ -15,7 +15,7 @@ async function pollSeedance(requestId, maxWait = 280000) {
       });
       return await result.json();
     }
-    if (data.status === 'FAILED') throw new Error('Seedance job failed');
+    if (data.status === 'FAILED') throw new Error('Seedance job failed: ' + JSON.stringify(data));
     await new Promise(r => setTimeout(r, 5000));
   }
   throw new Error('Timeout');
@@ -37,9 +37,10 @@ export async function POST(req) {
       })
     });
     const json = await res.json();
-    console.log(`Seedance ${sceneIndex} submit:`, JSON.stringify(json).slice(0, 150));
+    console.log(`Seedance ${sceneIndex} response (status=${res.status}):`, JSON.stringify(json));
     if (!json.request_id) throw new Error('No request_id: ' + JSON.stringify(json));
     const result = await pollSeedance(json.request_id);
+    console.log(`Seedance ${sceneIndex} poll result:`, JSON.stringify(result).slice(0, 500));
     const videoUrl = result?.video?.url || null;
     console.log(`Seedance ${sceneIndex}: ${videoUrl ? 'OK' : 'FAIL'}`);
     return Response.json({ videoUrl, sceneIndex });

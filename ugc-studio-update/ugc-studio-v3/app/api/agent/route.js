@@ -254,6 +254,7 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
           })
         });
         const kData = await kRes.json();
+        console.log(`[Job ${jobId}] Seedance scene ${i+1} response (status=${kRes.status}):`, JSON.stringify(kData));
         let videoUrl = kData.video?.url || kData.url;
         if (!videoUrl && kData.request_id) {
           for (let p = 0; p < 72; p++) {
@@ -263,9 +264,10 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
               { headers: { Authorization: `Key ${FAL_KEY}` } }
             );
             const pd = await poll.json();
+            console.log(`[Job ${jobId}] Seedance scene ${i+1} poll ${p+1} (status=${poll.status}):`, JSON.stringify(pd).slice(0, 500));
             if (pd.video?.url) { videoUrl = pd.video.url; break; }
             if (pd.output?.video?.url) { videoUrl = pd.output.video.url; break; }
-            if (pd.status === 'FAILED') { console.error(`[Job ${jobId}] Seedance scene ${i+1} FAILED`); break; }
+            if (pd.status === 'FAILED') { console.error(`[Job ${jobId}] Seedance scene ${i+1} FAILED:`, JSON.stringify(pd)); break; }
           }
         }
         console.log(`[Job ${jobId}] Seedance scene ${i+1}:`, videoUrl ? 'OK' : 'no URL');
