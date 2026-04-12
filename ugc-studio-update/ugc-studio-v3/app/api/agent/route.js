@@ -106,7 +106,7 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 - Hair → "avatar applying product directly INTO hair, running fingers through hair"
 - Supplement → "avatar at kitchen table actually taking/drinking/eating the supplement"
 
-5. END every kling_prompt with exactly this phrase (no more, no less):
+5. END every Kling prompt with exactly this phrase (no more, no less):
 "silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference"
 
 Return ONLY valid JSON (no markdown):
@@ -237,13 +237,13 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
       }
     }
 
-    // Seedance 2.0 videos
+    // Kling videos
     const videos = [];
     for (let i = 0; i < 4; i++) {
       if (!frames[i]) { videos.push(null); continue; }
       try {
-        console.log(`[Job ${jobId}] Seedance scene ${i+1}: starting...`);
-        const kRes = await fetch('https://fal.run/bytedance/seedance-2.0/fast/image-to-video', {
+        console.log(`[Job ${jobId}] Kling scene ${i+1}: starting...`);
+        const kRes = await fetch('https://fal.run/fal-ai/kling-video/v1.6/standard/image-to-video', {
           method: 'POST',
           headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -254,26 +254,24 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
           })
         });
         const kData = await kRes.json();
-        console.log(`[Job ${jobId}] Seedance scene ${i+1} response (status=${kRes.status}):`, JSON.stringify(kData));
         let videoUrl = kData.video?.url || kData.url;
         if (!videoUrl && kData.request_id) {
           for (let p = 0; p < 72; p++) {
             await new Promise(r => setTimeout(r, 5000));
             const poll = await fetch(
-              `https://fal.run/bytedance/seedance-2.0/fast/image-to-video/requests/${kData.request_id}`,
+              `https://fal.run/fal-ai/kling-video/v1.6/standard/image-to-video/requests/${kData.request_id}`,
               { headers: { Authorization: `Key ${FAL_KEY}` } }
             );
             const pd = await poll.json();
-            console.log(`[Job ${jobId}] Seedance scene ${i+1} poll ${p+1} (status=${poll.status}):`, JSON.stringify(pd).slice(0, 500));
             if (pd.video?.url) { videoUrl = pd.video.url; break; }
             if (pd.output?.video?.url) { videoUrl = pd.output.video.url; break; }
-            if (pd.status === 'FAILED') { console.error(`[Job ${jobId}] Seedance scene ${i+1} FAILED:`, JSON.stringify(pd)); break; }
+            if (pd.status === 'FAILED') { console.error(`[Job ${jobId}] Kling scene ${i+1} FAILED`); break; }
           }
         }
-        console.log(`[Job ${jobId}] Seedance scene ${i+1}:`, videoUrl ? 'OK' : 'no URL');
+        console.log(`[Job ${jobId}] Kling scene ${i+1}:`, videoUrl ? 'OK' : 'no URL');
         videos.push(videoUrl || null);
       } catch (e) {
-        console.error(`[Job ${jobId}] Seedance scene ${i+1} error:`, e.message);
+        console.error(`[Job ${jobId}] Kling scene ${i+1} error:`, e.message);
         videos.push(null);
       }
     }

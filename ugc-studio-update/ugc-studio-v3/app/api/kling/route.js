@@ -2,20 +2,20 @@ export const maxDuration = 300; // 5 minutes
 
 const FAL_KEY = process.env.FAL_API_KEY;
 
-async function pollSeedance(requestId, maxWait = 280000) {
+async function pollKling(requestId, maxWait = 280000) {
   const start = Date.now();
   while (Date.now() - start < maxWait) {
-    const res = await fetch(`https://queue.fal.run/bytedance/seedance-2.0/fast/image-to-video/requests/${requestId}/status`, {
+    const res = await fetch(`https://queue.fal.run/fal-ai/kling-video/requests/${requestId}/status`, {
       headers: { Authorization: `Key ${FAL_KEY}` }
     });
     const data = await res.json();
     if (data.status === 'COMPLETED') {
-      const result = await fetch(`https://queue.fal.run/bytedance/seedance-2.0/fast/image-to-video/requests/${requestId}`, {
+      const result = await fetch(`https://queue.fal.run/fal-ai/kling-video/requests/${requestId}`, {
         headers: { Authorization: `Key ${FAL_KEY}` }
       });
       return await result.json();
     }
-    if (data.status === 'FAILED') throw new Error('Seedance job failed: ' + JSON.stringify(data));
+    if (data.status === 'FAILED') throw new Error('Kling job failed');
     await new Promise(r => setTimeout(r, 5000));
   }
   throw new Error('Timeout');
@@ -23,29 +23,32 @@ async function pollSeedance(requestId, maxWait = 280000) {
 
 export async function POST(req) {
   const { imageUrl, prompt, sceneIndex, duration } = await req.json();
-  const seedanceDuration = duration === '10' ? '10' : '5';
-  console.log(`Seedance scene ${sceneIndex}: starting, duration=${seedanceDuration}s`);
+  const klingDuration = duration === '10' ? '10' : '5';
+  console.log(`Kling scene ${sceneIndex}: starting, duration=${klingDuration}s`);
   try {
-    const res = await fetch('https://queue.fal.run/bytedance/seedance-2.0/fast/image-to-video', {
+    const res = await fetch('https://queue.fal.run/fal-ai/kling-video/v3/pro/image-to-video', {
       method: 'POST',
       headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         image_url: imageUrl,
         prompt,
-        duration: seedanceDuration,
-        aspect_ratio: '9:16'
+        duration: klingDuration,
+        aspect_ratio: '9:16',
+        // Lower cfg_scale → freer, more organic motion (less mechanical following of prompt)
+        cfg_scale: 0.45,
+        // Prevent cinematic/ad look — force amateur handheld feel
+        negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
       })
     });
     const json = await res.json();
-    console.log(`Seedance ${sceneIndex} response (status=${res.status}):`, JSON.stringify(json));
+    console.log(`Kling ${sceneIndex} submit:`, JSON.stringify(json).slice(0, 150));
     if (!json.request_id) throw new Error('No request_id: ' + JSON.stringify(json));
-    const result = await pollSeedance(json.request_id);
-    console.log(`Seedance ${sceneIndex} poll result:`, JSON.stringify(result).slice(0, 500));
+    const result = await pollKling(json.request_id);
     const videoUrl = result?.video?.url || null;
-    console.log(`Seedance ${sceneIndex}: ${videoUrl ? 'OK' : 'FAIL'}`);
+    console.log(`Kling ${sceneIndex}: ${videoUrl ? 'OK' : 'FAIL'}`);
     return Response.json({ videoUrl, sceneIndex });
   } catch (e) {
-    console.error(`Seedance ${sceneIndex} failed:`, e.message);
+    console.error(`Kling ${sceneIndex} failed:`, e.message);
     return Response.json({ videoUrl: null, sceneIndex, error: e.message });
   }
 }
