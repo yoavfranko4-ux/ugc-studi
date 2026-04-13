@@ -38,7 +38,7 @@ export default function DashboardPage() {
           .from('saved_edits')
           .select('*')
           .eq('user_id', user.id)
-          .order('updated_at', { ascending: false })
+          .order('created_at', { ascending: false })
         if (edits) setSavedEdits(edits)
       } catch {}
 
@@ -63,8 +63,8 @@ export default function DashboardPage() {
   )
 
   const plan = subscription?.plan ? PLANS[subscription.plan] : null
-  const videosUsed = subscription?.videos_used || 0
-  const videosLeft = plan ? plan.videos - videosUsed : 0
+  const videosUsed = Math.max(subscription?.videos_used || 0, savedEdits.length)
+  const videosLeft = plan ? Math.max(0, plan.videos - videosUsed) : 0
   const isActive = subscription?.status === 'active' && plan
   const progressPercent = plan ? (videosUsed / plan.videos) * 100 : 0
 
@@ -175,69 +175,64 @@ export default function DashboardPage() {
               </div>
             </button>
 
-            {/* Saved Projects */}
-            {savedEdits.length > 0 && (
-              <div style={glassCard}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                  <h3 style={{ fontSize: 16, fontWeight: 700, color: '#f0f0ff' }}>פרויקטים שמורים</h3>
-                  <span style={{ fontSize: 12, color: '#3f3f46' }}>{savedEdits.length} פרויקטים</span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {savedEdits.map((edit, i) => {
-                    const d = edit.edit_data || {}
-                    return (
-                      <div key={edit.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 12, padding: '14px 18px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(34,197,94,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                          </div>
-                          <div>
-                            <div style={{ fontWeight: 600, fontSize: 14, color: '#e4e4e7' }}>{d.product_name || `פרויקט ${i + 1}`}</div>
-                            <div style={{ color: '#3f3f46', fontSize: 11, marginTop: 2 }}>{edit.created_at ? new Date(edit.created_at).toLocaleDateString('he-IL') : ''}</div>
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 11, color: '#52525b' }}>{d.subtitle_style || '—'} / {d.bg_music || '—'}</span>
-                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Video History */}
+            {/* Video History — shows saved edits as cards */}
             <div style={glassCard}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 700, color: '#f0f0ff' }}>היסטוריית סרטונים</h3>
-                <span style={{ fontSize: 12, color: '#3f3f46' }}>{videos.length} סרטונים</span>
+                <span style={{ fontSize: 12, color: '#3f3f46' }}>{savedEdits.length} סרטונים</span>
               </div>
-              {videos.length === 0 ? (
+              {savedEdits.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '48px 20px' }}>
                   <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#27272a" strokeWidth="1.5" style={{ marginBottom: 12 }}><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
                   <p style={{ color: '#3f3f46', fontSize: 14 }}>עדיין לא יצרת סרטונים</p>
                   <p style={{ color: '#27272a', fontSize: 12, marginTop: 4 }}>לחץ על "צור סרטון" כדי להתחיל</p>
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {videos.map((v, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 12, padding: '14px 18px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(168,85,247,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+                  {savedEdits.map((edit, i) => {
+                    const d = edit.edit_data || {}
+                    const thumb = d.thumbnail || d.frames?.[0] || null
+                    return (
+                      <div key={edit.id || i} style={{ background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 14, overflow: 'hidden', transition: 'all 200ms ease' }}>
+                        {/* Thumbnail */}
+                        <div style={{ aspectRatio: '9/16', maxHeight: 200, background: '#111', position: 'relative', overflow: 'hidden' }}>
+                          {thumb ? (
+                            <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#27272a" strokeWidth="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                            </div>
+                          )}
+                          <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.7)', borderRadius: 4, padding: '2px 6px', fontSize: 10, color: '#fff', fontWeight: 600 }}>20s</div>
+                          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,0.8))', padding: '16px 10px 8px' }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#f0f0ff', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>{d.product_name || `סרטון ${i + 1}`}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: 14, color: '#e4e4e7' }}>{v.name || `סרטון ${i + 1}`}</div>
-                          <div style={{ color: '#3f3f46', fontSize: 11, marginTop: 2 }}>{v.date || ''}</div>
+                        {/* Info + buttons */}
+                        <div style={{ padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <span style={{ fontSize: 11, color: '#52525b' }}>{edit.created_at ? new Date(edit.created_at).toLocaleDateString('he-IL') : ''}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
+                              <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600 }}>שמור</span>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button onClick={() => { const params = new URLSearchParams({ editId: edit.id }); window.location.href = `/studio?${params}` }}
+                              style={{ flex: 1, padding: '7px 0', background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: 8, color: '#a855f7', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'Heebo,sans-serif' }}>
+                              המשך עריכה
+                            </button>
+                            {d.videos?.[0] && (
+                              <a href={d.videos[0]} target="_blank" rel="noreferrer"
+                                style={{ flex: 1, padding: '7px 0', background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 8, color: '#22c55e', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'Heebo,sans-serif', textAlign: 'center', textDecoration: 'none', display: 'block' }}>
+                                הורד MP4
+                              </a>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      <div style={{ fontSize: 12, color: v.status === 'done' ? '#22c55e' : '#f59e0b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: v.status === 'done' ? '#22c55e' : '#f59e0b' }} />
-                        {v.status === 'done' ? 'הושלם' : 'בתהליך'}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>

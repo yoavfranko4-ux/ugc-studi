@@ -104,23 +104,50 @@ function generateMusicBuffer(ctx, trackId, durationSec) {
   return buffer
 }
 
-// Draw subtitles with style on a Canvas context
+// Split subtitle into short segments: max 3 words per line, max 2 lines visible
+function splitSubtitle(text, maxWordsPerLine = 3) {
+  if (!text) return []
+  const words = text.split(/\s+/).filter(Boolean)
+  const lines = []
+  for (let i = 0; i < words.length; i += maxWordsPerLine) {
+    lines.push(words.slice(i, i + maxWordsPerLine).join(' '))
+  }
+  return lines
+}
+
+// Get the 2 subtitle lines visible at a given time within a scene (word-level timing)
+function getSubtitleLinesAtTime(text, timeInScene, sceneDuration) {
+  const allLines = splitSubtitle(text, 3)
+  if (allLines.length === 0) return []
+  const timePerLine = sceneDuration / allLines.length
+  const currentLineIdx = Math.min(Math.floor(timeInScene / timePerLine), allLines.length - 1)
+  // Show current line + next line (max 2)
+  return allLines.slice(currentLineIdx, currentLineIdx + 2)
+}
+
+// Draw styled subtitle lines on canvas (export size)
 function drawSubtitleOnCtx(ctx, lines, canvasW, canvasH, style) {
+  if (!lines.length) return
+  const maxW = canvasW * 0.85
   const isMinimal = style === 'minimal'
   const fontSize = isMinimal ? 36 : 48
   ctx.font = `bold ${fontSize}px Heebo, sans-serif`
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-  const lineHeight = isMinimal ? 42 : 58
+  const lineHeight = isMinimal ? 44 : 60
   const startY = canvasH * 0.82 - ((lines.length - 1) * lineHeight) / 2
   const x = canvasW / 2
   lines.forEach((line, i) => {
     const y = startY + i * lineHeight
+    // Truncate if wider than 85% of canvas
+    let displayLine = line
+    while (ctx.measureText(displayLine).width > maxW && displayLine.length > 2) {
+      displayLine = displayLine.slice(0, -1)
+    }
     if (style === 'classic') {
       ctx.strokeStyle = 'black'; ctx.lineWidth = 8; ctx.lineJoin = 'round'; ctx.miterLimit = 2
-      ctx.strokeText(line, x, y); ctx.fillStyle = 'white'; ctx.fillText(line, x, y)
+      ctx.strokeText(displayLine, x, y); ctx.fillStyle = 'white'; ctx.fillText(displayLine, x, y)
     } else if (style === 'bold') {
-      const metrics = ctx.measureText(line)
-      const tw = metrics.width + 28, th = fontSize + 16
+      const tw = Math.min(ctx.measureText(displayLine).width + 28, maxW + 28), th = fontSize + 16
       ctx.fillStyle = 'rgba(255,255,255,0.92)'
       const rx = x - tw / 2, ry = y - th / 2, r = 10
       ctx.beginPath()
@@ -129,34 +156,39 @@ function drawSubtitleOnCtx(ctx, lines, canvasW, canvasH, style) {
       ctx.quadraticCurveTo(rx + tw, ry + th, rx + tw - r, ry + th); ctx.lineTo(rx + r, ry + th)
       ctx.quadraticCurveTo(rx, ry + th, rx, ry + th - r); ctx.lineTo(rx, ry + r)
       ctx.quadraticCurveTo(rx, ry, rx + r, ry); ctx.closePath(); ctx.fill()
-      ctx.fillStyle = '#111'; ctx.fillText(line, x, y)
+      ctx.fillStyle = '#111'; ctx.fillText(displayLine, x, y)
     } else if (style === 'minimal') {
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(line, x, y)
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(displayLine, x, y)
     } else if (style === 'neon') {
       ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 24
-      ctx.fillStyle = 'white'; ctx.fillText(line, x, y); ctx.fillText(line, x, y)
+      ctx.fillStyle = 'white'; ctx.fillText(displayLine, x, y); ctx.fillText(displayLine, x, y)
       ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'
     }
   })
 }
 
-// Draw subtitles (preview size) on a canvas overlay
+// Draw styled subtitle lines on canvas (preview size)
 function drawSubtitlePreview(ctx, lines, canvasW, canvasH, style) {
+  if (!lines.length) return
+  const maxW = canvasW * 0.85
   const isMinimal = style === 'minimal'
   const fontSize = isMinimal ? 16 : 22
   ctx.font = `bold ${fontSize}px Heebo, sans-serif`
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-  const lineHeight = isMinimal ? 20 : 28
+  const lineHeight = isMinimal ? 22 : 30
   const startY = canvasH * 0.82 - ((lines.length - 1) * lineHeight) / 2
   const x = canvasW / 2
   lines.forEach((line, i) => {
     const y = startY + i * lineHeight
+    let displayLine = line
+    while (ctx.measureText(displayLine).width > maxW && displayLine.length > 2) {
+      displayLine = displayLine.slice(0, -1)
+    }
     if (style === 'classic') {
       ctx.strokeStyle = 'black'; ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.miterLimit = 2
-      ctx.strokeText(line, x, y); ctx.fillStyle = 'white'; ctx.fillText(line, x, y)
+      ctx.strokeText(displayLine, x, y); ctx.fillStyle = 'white'; ctx.fillText(displayLine, x, y)
     } else if (style === 'bold') {
-      const metrics = ctx.measureText(line)
-      const tw = metrics.width + 16, th = fontSize + 10
+      const tw = Math.min(ctx.measureText(displayLine).width + 16, maxW + 16), th = fontSize + 10
       ctx.fillStyle = 'rgba(255,255,255,0.92)'
       const rx = x - tw / 2, ry = y - th / 2, r = 6
       ctx.beginPath()
@@ -165,15 +197,25 @@ function drawSubtitlePreview(ctx, lines, canvasW, canvasH, style) {
       ctx.quadraticCurveTo(rx + tw, ry + th, rx + tw - r, ry + th); ctx.lineTo(rx + r, ry + th)
       ctx.quadraticCurveTo(rx, ry + th, rx, ry + th - r); ctx.lineTo(rx, ry + r)
       ctx.quadraticCurveTo(rx, ry, rx + r, ry); ctx.closePath(); ctx.fill()
-      ctx.fillStyle = '#111'; ctx.fillText(line, x, y)
+      ctx.fillStyle = '#111'; ctx.fillText(displayLine, x, y)
     } else if (style === 'minimal') {
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(line, x, y)
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(displayLine, x, y)
     } else if (style === 'neon') {
       ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 12
-      ctx.fillStyle = 'white'; ctx.fillText(line, x, y); ctx.fillText(line, x, y)
+      ctx.fillStyle = 'white'; ctx.fillText(displayLine, x, y); ctx.fillText(displayLine, x, y)
       ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'
     }
   })
+}
+
+// Draw video frame on canvas with cover mode (fill entire frame, crop edges)
+function drawVideoCover(ctx, vid, cw, ch) {
+  const vw = vid.videoWidth || vid.width || cw
+  const vh = vid.videoHeight || vid.height || ch
+  const scale = Math.max(cw / vw, ch / vh)
+  const sw = cw / scale, sh = ch / scale
+  const sx = (vw - sw) / 2, sy = (vh - sh) / 2
+  ctx.drawImage(vid, sx, sy, sw, sh, 0, 0, cw, ch)
 }
 
 const AVATARS = [
@@ -285,9 +327,7 @@ export default function Home() {
     canvas.width = container.offsetWidth
     canvas.height = container.offsetHeight
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    const words = subtitle.split(/\s+/)
-    const lines = []
-    for (let i = 0; i < words.length; i += 4) lines.push(words.slice(i, i + 4).join(' '))
+    const lines = getSubtitleLinesAtTime(subtitle, 0, 5)
     drawSubtitlePreview(ctx, lines, canvas.width, canvas.height, subtitleStyle)
   }, [currentScene, result, step, subtitleStyle])
 
@@ -426,7 +466,7 @@ export default function Home() {
     } catch {}
   }, [bgMusic, musicPreviewing])
 
-  // Play all clips sequentially with voiceover + music
+  // Play all clips sequentially with voiceover + music — synced with rAF
   const playAll = useCallback(async () => {
     if (!result?.videos) return
     if (playing) {
@@ -437,8 +477,11 @@ export default function Home() {
       return
     }
     setPlaying(true); playingRef.current = true
-    // Start voiceover
-    if (audioRef.current && audioBlobUrl.current) { audioRef.current.currentTime = 0; audioRef.current.play().catch(() => {}) }
+
+    // Start voiceover at time 0, synced with first clip
+    if (audioRef.current && audioBlobUrl.current) {
+      audioRef.current.currentTime = 0
+    }
     // Start generated music
     if (bgMusic !== 'none') {
       try {
@@ -450,251 +493,217 @@ export default function Home() {
         musicSourceRef.current = source
       } catch {}
     }
+
+    let firstClip = true
     for (const sceneIdx of clipOrder) {
       if (!playingRef.current) break
       const url = videoBlobUrls[sceneIdx] || result.videos[sceneIdx]
       if (!url || !videoRef.current) continue
       setCurrentScene(sceneIdx)
-      videoRef.current.src = url; videoRef.current.load()
+      videoRef.current.src = url
+      videoRef.current.currentTime = 0
+
       await new Promise(resolve => {
-        const timeout = setTimeout(resolve, 8000)
-        const onEnd = () => { clearTimeout(timeout); videoRef.current.removeEventListener('ended', onEnd); resolve() }
+        const safety = setTimeout(resolve, 6500)
+        const onCanPlay = async () => {
+          videoRef.current.removeEventListener('canplay', onCanPlay)
+          try {
+            await videoRef.current.play()
+            // Start voiceover exactly when first clip starts playing
+            if (firstClip && audioRef.current && audioBlobUrl.current) {
+              audioRef.current.play().catch(() => {})
+              firstClip = false
+            }
+          } catch { clearTimeout(safety); resolve(); return }
+          // Use rAF to update subtitle overlay in sync
+          const subtitle = result.story?.scenes?.[sceneIdx]?.subtitle || ''
+          const startTime = performance.now()
+          const tick = () => {
+            if (!playingRef.current || videoRef.current.paused || videoRef.current.ended) return
+            const elapsed = (performance.now() - startTime) / 1000
+            const canvas = canvasRef.current
+            if (canvas) {
+              const ctx = canvas.getContext('2d')
+              const container = canvas.parentElement
+              canvas.width = container.offsetWidth
+              canvas.height = container.offsetHeight
+              ctx.clearRect(0, 0, canvas.width, canvas.height)
+              const lines = getSubtitleLinesAtTime(subtitle, elapsed, 5)
+              drawSubtitlePreview(ctx, lines, canvas.width, canvas.height, subtitleStyle)
+            }
+            requestAnimationFrame(tick)
+          }
+          requestAnimationFrame(tick)
+        }
+        const onEnd = () => { clearTimeout(safety); videoRef.current.removeEventListener('ended', onEnd); resolve() }
         videoRef.current.addEventListener('ended', onEnd)
-        videoRef.current.play().catch(() => { clearTimeout(timeout); resolve() })
+        if (videoRef.current.readyState >= 3) { onCanPlay() }
+        else { videoRef.current.addEventListener('canplay', onCanPlay) }
       })
     }
     setPlaying(false); playingRef.current = false
     if (audioRef.current) audioRef.current.pause()
     if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
     if (musicCtxRef.current) { try { musicCtxRef.current.close() } catch {} }
-  }, [result, clipOrder, bgMusic, playing])
+  }, [result, clipOrder, bgMusic, playing, videoBlobUrls, subtitleStyle])
 
-  // === Canvas-based export with voiceover + music mixed into AudioContext ===
+  // === Export: 720x1280, cover mode, 100ms timeslice, time-synced subtitles ===
   const exportMp4 = async () => {
     if (!result?.videos?.length) return
     setExporting(true); setExportProgress('מכין ייצוא... 0%')
+    const EW = 720, EH = 1280
     try {
-      const orderedScenes = clipOrder.map(i => i).filter(i => result.videos[i])
+      const orderedScenes = clipOrder.filter(i => result.videos[i])
       if (orderedScenes.length === 0) throw new Error('אין סרטונים לייצוא')
       const totalClips = orderedScenes.length
 
-      // Step 1: Preload voiceover audio buffer BEFORE anything else
+      // Preload voiceover AudioBuffer
       setExportProgress('טוען קריינות... 5%')
       let voiceAudioBuffer = null
       if (audioBlobUrl.current) {
         try {
-          const tmpCtx = new AudioContext()
-          const audioResp = await fetch(audioBlobUrl.current)
-          const audioArrayBuf = await audioResp.arrayBuffer()
-          voiceAudioBuffer = await tmpCtx.decodeAudioData(audioArrayBuf)
-          tmpCtx.close()
-        } catch (e) { console.warn('Voiceover preload failed:', e.message) }
+          const tmp = new AudioContext()
+          const buf = await (await fetch(audioBlobUrl.current)).arrayBuffer()
+          voiceAudioBuffer = await tmp.decodeAudioData(buf); tmp.close()
+        } catch {}
       } else if (result.audioBase64) {
-        // Rebuild from base64 if blob URL was lost
         try {
-          const tmpCtx = new AudioContext()
-          const binary = atob(result.audioBase64)
-          const bytes = new Uint8Array(binary.length)
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-          voiceAudioBuffer = await tmpCtx.decodeAudioData(bytes.buffer)
-          tmpCtx.close()
-        } catch (e) { console.warn('Voiceover base64 decode failed:', e.message) }
+          const tmp = new AudioContext()
+          const b = atob(result.audioBase64), u = new Uint8Array(b.length)
+          for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i)
+          voiceAudioBuffer = await tmp.decodeAudioData(u.buffer); tmp.close()
+        } catch {}
       }
 
-      // Step 2: Prepare video blob URLs
+      // Prepare blob URLs
       setExportProgress('מוריד סרטונים... 10%')
       const blobUrls = []
       for (let i = 0; i < totalClips; i++) {
-        const preloaded = videoBlobUrls[orderedScenes[i]]
-        if (preloaded && preloaded.startsWith('blob:')) {
-          blobUrls.push(preloaded)
-        } else {
-          try {
-            const resp = await fetch(result.videos[orderedScenes[i]])
-            const blob = await resp.blob()
-            blobUrls.push(URL.createObjectURL(blob))
-          } catch {
-            blobUrls.push(result.videos[orderedScenes[i]])
-          }
+        const pre = videoBlobUrls[orderedScenes[i]]
+        if (pre?.startsWith('blob:')) { blobUrls.push(pre) }
+        else {
+          try { const r = await fetch(result.videos[orderedScenes[i]]); blobUrls.push(URL.createObjectURL(await r.blob())) }
+          catch { blobUrls.push(result.videos[orderedScenes[i]]) }
         }
-        setExportProgress(`מוריד סרטונים... ${10 + Math.round(((i + 1) / totalClips) * 10)}%`)
+        setExportProgress(`מוריד... ${10 + Math.round(((i+1)/totalClips)*10)}%`)
       }
 
-      // Step 3: Set up canvas + audio context + MediaRecorder
-      setExportProgress('מכין ייצוא... 20%')
-      const offCanvas = document.createElement('canvas'); offCanvas.width = 1080; offCanvas.height = 1920
+      // Canvas + audio setup
+      setExportProgress('מכין ייצוא... 22%')
+      const offCanvas = document.createElement('canvas'); offCanvas.width = EW; offCanvas.height = EH
       const ctx = offCanvas.getContext('2d')
-
       let mimeType = 'video/webm;codecs=vp9'
       if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) mimeType = 'video/webm;codecs=h264'
       if (MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/mp4'
+      const stream = offCanvas.captureStream(30)
+      const aCtx = new AudioContext()
+      const aDest = aCtx.createMediaStreamDestination()
+      aDest.stream.getAudioTracks().forEach(t => stream.addTrack(t))
 
-      const canvasStream = offCanvas.captureStream(30)
-
-      // Create AudioContext and MediaStreamDestination for mixing all audio
-      const exportAudioCtx = new AudioContext()
-      const audioDest = exportAudioCtx.createMediaStreamDestination()
-      // Merge audio tracks into the canvas stream
-      audioDest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t))
-
-      // Step 4: Start voiceover playback into the audioDest
+      // Voiceover
       if (voiceAudioBuffer) {
-        const voiceSource = exportAudioCtx.createBufferSource()
-        voiceSource.buffer = voiceAudioBuffer
-        const voiceGain = exportAudioCtx.createGain()
-        voiceGain.gain.value = 0.85
-        voiceSource.connect(voiceGain)
-        voiceGain.connect(audioDest)
-        voiceSource.start(exportAudioCtx.currentTime)
+        const s = aCtx.createBufferSource(); s.buffer = voiceAudioBuffer
+        const g = aCtx.createGain(); g.gain.value = 0.85
+        s.connect(g); g.connect(aDest); s.start()
       }
-
-      // Step 5: Start background music into the audioDest
+      // Music
       if (bgMusic !== 'none') {
-        const totalDuration = totalClips * 5 + 2
-        const musicBuf = generateMusicBuffer(exportAudioCtx, bgMusic, totalDuration)
-        const musicSource = exportAudioCtx.createBufferSource()
-        musicSource.buffer = musicBuf
-        const musicGain = exportAudioCtx.createGain()
-        musicGain.gain.value = 0.3
-        musicSource.connect(musicGain)
-        musicGain.connect(audioDest)
-        musicSource.start(exportAudioCtx.currentTime)
+        const buf = generateMusicBuffer(aCtx, bgMusic, totalClips * 5 + 2)
+        const s = aCtx.createBufferSource(); s.buffer = buf
+        const g = aCtx.createGain(); g.gain.value = 0.3
+        s.connect(g); g.connect(aDest); s.start()
       }
-
       // SFX helper
-      const playSfx = (type) => {
+      const sfx = (type) => {
         if (!sfxEnabled) return
         try {
-          const t = exportAudioCtx.currentTime
+          const t = aCtx.currentTime
           if (type === 'whoosh') {
-            const osc = exportAudioCtx.createOscillator(), g = exportAudioCtx.createGain(), f = exportAudioCtx.createBiquadFilter()
-            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(800, t); osc.frequency.exponentialRampToValueAtTime(200, t + 0.3)
-            f.type = 'bandpass'; f.frequency.value = 600; f.Q.value = 2
-            g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35)
-            osc.connect(f); f.connect(g); g.connect(audioDest)
-            osc.start(t); osc.stop(t + 0.4)
+            const o = aCtx.createOscillator(), g = aCtx.createGain(), f = aCtx.createBiquadFilter()
+            o.type='sawtooth'; o.frequency.setValueAtTime(800,t); o.frequency.exponentialRampToValueAtTime(200,t+.3)
+            f.type='bandpass'; f.frequency.value=600; f.Q.value=2; g.gain.setValueAtTime(.25,t); g.gain.exponentialRampToValueAtTime(.001,t+.35)
+            o.connect(f); f.connect(g); g.connect(aDest); o.start(t); o.stop(t+.4)
           } else if (type === 'pop') {
-            const osc = exportAudioCtx.createOscillator(), g = exportAudioCtx.createGain()
-            osc.type = 'sine'; osc.frequency.setValueAtTime(600, t); osc.frequency.exponentialRampToValueAtTime(200, t + 0.08)
-            g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.12)
-            osc.connect(g); g.connect(audioDest)
-            osc.start(t); osc.stop(t + 0.15)
+            const o = aCtx.createOscillator(), g = aCtx.createGain()
+            o.type='sine'; o.frequency.setValueAtTime(600,t); o.frequency.exponentialRampToValueAtTime(200,t+.08)
+            g.gain.setValueAtTime(.3,t); g.gain.exponentialRampToValueAtTime(.001,t+.12)
+            o.connect(g); g.connect(aDest); o.start(t); o.stop(t+.15)
           } else if (type === 'ding') {
-            const osc = exportAudioCtx.createOscillator(), g = exportAudioCtx.createGain()
-            osc.type = 'sine'; osc.frequency.setValueAtTime(1200, t)
-            g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.8)
-            osc.connect(g); g.connect(audioDest)
-            osc.start(t); osc.stop(t + 1)
+            const o = aCtx.createOscillator(), g = aCtx.createGain()
+            o.type='sine'; o.frequency.setValueAtTime(1200,t); g.gain.setValueAtTime(.35,t); g.gain.exponentialRampToValueAtTime(.001,t+.8)
+            o.connect(g); g.connect(aDest); o.start(t); o.stop(t+1)
           }
         } catch {}
       }
 
-      // Step 6: Start MediaRecorder on the combined stream
-      const mediaRecorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 5000000 })
+      // MediaRecorder — 100ms timeslice for speed
+      const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4000000 })
       const chunks = []
-      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
-      const recordDone = new Promise(resolve => { mediaRecorder.onstop = resolve })
-      mediaRecorder.start(200) // collect data every 200ms for responsiveness
+      rec.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
+      const recDone = new Promise(r => { rec.onstop = r })
+      rec.start(100)
 
-      // Step 7: Render each clip to canvas in sequence
-      for (let clipIdx = 0; clipIdx < blobUrls.length; clipIdx++) {
-        const sceneIdx = orderedScenes[clipIdx]
-        const url = blobUrls[clipIdx]
-        const basePct = 25 + Math.round((clipIdx / totalClips) * 65)
-        setExportProgress(`מעבד סצנה ${clipIdx + 1}/${totalClips}... ${basePct}%`)
+      // Render each clip with cover mode + time-synced subtitles
+      for (let ci = 0; ci < blobUrls.length; ci++) {
+        const si = orderedScenes[ci]
+        setExportProgress(`מעבד סצנה ${ci+1}/${totalClips}... ${25+Math.round((ci/totalClips)*65)}%`)
+        if (ci > 0) sfx('whoosh'); sfx('pop')
+        const transFr = transition === 'cut' ? 0 : 12
 
-        if (clipIdx > 0) playSfx('whoosh')
-        playSfx('pop')
-
-        const transitionFrames = transition === 'cut' ? 0 : 15
-
-        await new Promise((resolve) => {
-          let resolved = false
-          const done = () => { if (!resolved) { resolved = true; resolve() } }
-          const safety = setTimeout(done, 7000)
-          const vid = document.createElement('video')
-          vid.crossOrigin = 'anonymous'
-          vid.src = url
-          vid.muted = true
-          vid.playsInline = true
-          vid.preload = 'auto'
-
-          vid.onended = () => { clearTimeout(safety); done() }
-          vid.onerror = () => { clearTimeout(safety); done() }
-
-          const startDrawing = async () => {
-            try { await vid.play() } catch { done(); return }
-            const subtitle = result.story?.scenes?.[sceneIdx]?.subtitle || ''
-            const words = subtitle.split(/\s+/)
-            const lines = []
-            for (let w = 0; w < words.length; w += 4) lines.push(words.slice(w, w + 4).join(' '))
+        await new Promise(resolve => {
+          let done = false
+          const finish = () => { if (!done) { done = true; resolve() } }
+          const timer = setTimeout(finish, 6500)
+          const v = document.createElement('video')
+          v.crossOrigin = 'anonymous'; v.src = blobUrls[ci]; v.muted = true; v.playsInline = true; v.preload = 'auto'
+          v.onended = () => { clearTimeout(timer); finish() }
+          v.onerror = () => { clearTimeout(timer); finish() }
+          const go = async () => {
+            try { await v.play() } catch { finish(); return }
+            const sub = result.story?.scenes?.[si]?.subtitle || ''
             let fc = 0
+            const startT = performance.now()
             const draw = () => {
-              if (resolved || vid.paused || vid.ended) { clearTimeout(safety); done(); return }
+              if (done || v.paused || v.ended) { clearTimeout(timer); finish(); return }
               fc++
-              const inTrans = fc <= transitionFrames
+              const elapsed = (performance.now() - startT) / 1000
+              const inT = fc <= transFr
               let alpha = 1, scale = 1
-              if (inTrans && transition === 'fade') alpha = fc / transitionFrames
-              if (inTrans && transition === 'zoom') { scale = 1.15 - 0.15 * (fc / transitionFrames); alpha = fc / transitionFrames }
-
-              ctx.globalAlpha = 1
-              ctx.fillStyle = '#000'
-              ctx.fillRect(0, 0, 1080, 1920)
+              if (inT && transition === 'fade') alpha = fc / transFr
+              if (inT && transition === 'zoom') { scale = 1.15 - .15*(fc/transFr); alpha = fc/transFr }
+              ctx.globalAlpha = 1; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, EW, EH)
               ctx.globalAlpha = alpha
               if (scale !== 1) {
-                ctx.save()
-                ctx.translate(540, 960)
-                ctx.scale(scale, scale)
-                ctx.drawImage(vid, -540, -960, 1080, 1920)
-                ctx.restore()
-              } else {
-                ctx.drawImage(vid, 0, 0, 1080, 1920)
-              }
+                ctx.save(); ctx.translate(EW/2, EH/2); ctx.scale(scale, scale); ctx.translate(-EW/2, -EH/2)
+                drawVideoCover(ctx, v, EW, EH); ctx.restore()
+              } else { drawVideoCover(ctx, v, EW, EH) }
               ctx.globalAlpha = 1
-              drawSubtitleOnCtx(ctx, lines, 1080, 1920, subtitleStyle)
+              const lines = getSubtitleLinesAtTime(sub, elapsed, 5)
+              drawSubtitleOnCtx(ctx, lines, EW, EH, subtitleStyle)
               requestAnimationFrame(draw)
             }
             requestAnimationFrame(draw)
           }
-
-          // Use canplay for faster start
-          if (vid.readyState >= 3) { startDrawing() }
-          else { vid.oncanplay = startDrawing }
+          if (v.readyState >= 3) go(); else v.oncanplay = go
         })
-
-        setExportProgress(`מעבד סצנה ${clipIdx + 1}/${totalClips}... ${25 + Math.round(((clipIdx + 1) / totalClips) * 65)}%`)
+        setExportProgress(`מעבד סצנה ${ci+1}/${totalClips}... ${25+Math.round(((ci+1)/totalClips)*65)}%`)
       }
 
-      // Final ding + brief pause
-      playSfx('ding')
-      await new Promise(r => setTimeout(r, 800))
-
-      // Step 8: Finalize
-      setExportProgress('מסיים ייצוא... 95%')
-      mediaRecorder.stop()
-      await recordDone
-      try { exportAudioCtx.close() } catch {}
+      sfx('ding'); await new Promise(r => setTimeout(r, 600))
+      setExportProgress('מסיים... 95%')
+      rec.stop(); await recDone
+      try { aCtx.close() } catch {}
 
       const blob = new Blob(chunks, { type: mimeType })
-      if (blob.size < 1000) throw new Error('ייצוא נכשל — קובץ ריק')
-
-      const blobUrl = URL.createObjectURL(blob)
+      if (blob.size < 1000) throw new Error('ייצוא נכשל')
+      const url = URL.createObjectURL(blob)
       const ext = mimeType.includes('mp4') ? 'mp4' : 'webm'
-      const a = document.createElement('a')
-      a.style.display = 'none'
-      a.href = blobUrl
-      a.download = `ugc-video.${ext}`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(blobUrl)
-      setExportProgress('הייצוא הושלם! 100%')
+      const a = document.createElement('a'); a.style.display='none'; a.href=url; a.download=`ugc-video.${ext}`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+      setExportProgress('הושלם! 100%')
       setTimeout(() => setExportProgress(''), 3000)
-    } catch (e) {
-      console.error('Export error:', e)
-      alert('שגיאה בייצוא: ' + e.message)
-      setExportProgress('')
-    } finally { setExporting(false) }
+    } catch (e) { console.error('Export error:', e); alert('שגיאה: ' + e.message); setExportProgress('') }
+    finally { setExporting(false) }
   }
 
   // === Save Edit to Supabase ===
@@ -705,6 +714,7 @@ export default function Home() {
       if (!supabase) { setSaveMsg('Supabase לא מוגדר'); setSavingEdit(false); return }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { setSaveMsg('יש להתחבר כדי לשמור'); setSavingEdit(false); return }
+      const thumbnail = result.frames?.[0] || result.videos?.[0] || null
       const editData = {
         product_name: productName || 'ללא שם',
         clip_order: clipOrder,
@@ -716,6 +726,7 @@ export default function Home() {
         frames: result.frames,
         story: result.story,
         hebrew_voice: result.hebrewVoice,
+        thumbnail: thumbnail,
       }
       const { error } = await supabase.from('saved_edits').insert({
         user_id: user.id,
@@ -1005,7 +1016,7 @@ export default function Home() {
         {/* Center: Full-width Preview */}
         <div style={{ ...cardS, marginBottom: 0, padding: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#000', aspectRatio: '9/16', maxHeight: 'calc(100vh - 280px)', height: '100%', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
-            <video ref={videoRef} playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+            <video ref={videoRef} playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
             <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
             {!playing && (
               <button onClick={playAll} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 72, height: 72, borderRadius: '50%', background: 'rgba(168,85,247,0.8)', border: '2px solid rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)', transition: 'all 200ms ease' }}>
