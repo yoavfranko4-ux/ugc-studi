@@ -38,10 +38,13 @@ export async function POST(req) {
 
   try {
     const body = await req.json()
-    const { videoUrls, audioBase64, subtitles, bgMusic, subtitleStyle } = body
+    const { videoClipsB64, videoUrls, audioBase64, subtitles, bgMusic, subtitleStyle } = body
 
-    if (!videoUrls?.length || !videoUrls.some(Boolean)) {
-      return Response.json({ error: 'No video URLs provided' }, { status: 400 })
+    // Accept either base64 clips (preferred, avoids expired URLs) or URLs (legacy)
+    const hasB64Clips = videoClipsB64?.length > 0
+    const hasUrls = videoUrls?.length > 0 && videoUrls.some(Boolean)
+    if (!hasB64Clips && !hasUrls) {
+      return Response.json({ error: 'No video clips provided' }, { status: 400 })
     }
 
     const ffmpeg = await findFfmpeg()
@@ -49,20 +52,34 @@ export async function POST(req) {
 
     await mkdir(jobDir, { recursive: true })
 
-    // 1. Download all video clips in parallel
-    console.log('[Export] Downloading', videoUrls.length, 'clips...')
+    // 1. Write video clips to /tmp
     const clipPaths = []
-    await Promise.all(videoUrls.filter(Boolean).map(async (url, i) => {
-      const clipPath = path.join(jobDir, `clip${i}.mp4`)
-      const resp = await fetch(url)
-      if (!resp.ok) throw new Error(`Failed to download clip ${i}: HTTP ${resp.status}`)
-      const buf = Buffer.from(await resp.arrayBuffer())
-      await writeFile(clipPath, buf)
-      clipPaths[i] = clipPath
-      console.log(`[Export] Clip ${i}: ${(buf.length / 1024 / 1024).toFixed(1)}MB`)
-    }))
+    if (hasB64Clips) {
+      // Write base64 clips directly — no network fetch needed
+      console.log('[Export] Writing', videoClipsB64.length, 'base64 clips...')
+      for (let i = 0; i < videoClipsB64.length; i++) {
+        if (!videoClipsB64[i]) continue
+        const clipPath = path.join(jobDir, `clip${i}.mp4`)
+        const buf = Buffer.from(videoClipsB64[i], 'base64')
+        await writeFile(clipPath, buf)
+        clipPaths[i] = clipPath
+        console.log(`[Export] Clip ${i}: ${(buf.length / 1024 / 1024).toFixed(1)}MB`)
+      }
+    } else {
+      // Legacy: download from URLs
+      console.log('[Export] Downloading', videoUrls.length, 'clips from URLs...')
+      await Promise.all(videoUrls.filter(Boolean).map(async (url, i) => {
+        const clipPath = path.join(jobDir, `clip${i}.mp4`)
+        const resp = await fetch(url)
+        if (!resp.ok) throw new Error(`Failed to download clip ${i}: HTTP ${resp.status}`)
+        const buf = Buffer.from(await resp.arrayBuffer())
+        await writeFile(clipPath, buf)
+        clipPaths[i] = clipPath
+        console.log(`[Export] Clip ${i}: ${(buf.length / 1024 / 1024).toFixed(1)}MB`)
+      }))
+    }
     const validClipPaths = clipPaths.filter(Boolean)
-    if (validClipPaths.length === 0) throw new Error('No clips downloaded successfully')
+    if (validClipPaths.length === 0) throw new Error('No clips written successfully')
 
     // 2. Write voiceover audio if provided
     let voicePath = null

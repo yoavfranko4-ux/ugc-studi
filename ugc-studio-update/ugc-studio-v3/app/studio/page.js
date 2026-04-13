@@ -634,13 +634,43 @@ export default function Home() {
   // === Server-side FFmpeg export via /api/export ===
   const exportMp4 = async () => {
     if (!result?.videos?.length) return
-    setExporting(true); setExportProgress('מכין ייצוא בשרת... 0%')
+    setExporting(true); setExportProgress('מכין ייצוא... 0%')
     try {
       const orderedScenes = clipOrder.filter(i => result.videos[i])
       if (orderedScenes.length === 0) throw new Error('אין סרטונים לייצוא')
 
-      // Build ordered video URLs
-      const videoUrls = orderedScenes.map(i => result.videos[i])
+      // Convert preloaded video blobs to base64 (avoids expired fal.ai URLs)
+      setExportProgress('מכין קליפים... 5%')
+      const videoClipsB64 = []
+      for (let idx = 0; idx < orderedScenes.length; idx++) {
+        const si = orderedScenes[idx]
+        const blobUrl = videoBlobUrls[si]
+        if (blobUrl?.startsWith('blob:')) {
+          const resp = await fetch(blobUrl)
+          const buf = await resp.arrayBuffer()
+          const bytes = new Uint8Array(buf)
+          let binary = ''
+          for (let j = 0; j < bytes.length; j += 8192) {
+            binary += String.fromCharCode(...bytes.slice(j, j + 8192))
+          }
+          videoClipsB64.push(btoa(binary))
+        } else {
+          // Fallback: try fetching from original URL
+          try {
+            const resp = await fetch(result.videos[si])
+            const buf = await resp.arrayBuffer()
+            const bytes = new Uint8Array(buf)
+            let binary = ''
+            for (let j = 0; j < bytes.length; j += 8192) {
+              binary += String.fromCharCode(...bytes.slice(j, j + 8192))
+            }
+            videoClipsB64.push(btoa(binary))
+          } catch {
+            throw new Error(`קליפ ${idx + 1} לא זמין — נסה ליצור מחדש`)
+          }
+        }
+        setExportProgress(`מכין קליפים... ${5 + Math.round(((idx + 1) / orderedScenes.length) * 10)}%`)
+      }
 
       // Build subtitles array with timestamps
       let timeOffset = 0
@@ -651,13 +681,13 @@ export default function Home() {
         return sub
       })
 
-      setExportProgress('שולח לשרת... 15%')
+      setExportProgress('שולח לשרת... 20%')
 
       const resp = await fetch('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          videoUrls,
+          videoClipsB64,
           audioBase64: result.audioBase64 || null,
           subtitles,
           bgMusic,
