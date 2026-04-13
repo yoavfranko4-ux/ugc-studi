@@ -183,23 +183,26 @@ export default function DashboardPage() {
                   <span style={{ fontSize: 12, color: '#3f3f46' }}>{savedEdits.length} פרויקטים</span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {savedEdits.map((edit, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 12, padding: '14px 18px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(34,197,94,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                  {savedEdits.map((edit, i) => {
+                    const d = edit.edit_data || {}
+                    return (
+                      <div key={edit.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 12, padding: '14px 18px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(34,197,94,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 14, color: '#e4e4e7' }}>{d.product_name || `פרויקט ${i + 1}`}</div>
+                            <div style={{ color: '#3f3f46', fontSize: 11, marginTop: 2 }}>{edit.created_at ? new Date(edit.created_at).toLocaleDateString('he-IL') : ''}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: 14, color: '#e4e4e7' }}>{edit.product_name || `פרויקט ${i + 1}`}</div>
-                          <div style={{ color: '#3f3f46', fontSize: 11, marginTop: 2 }}>{edit.updated_at ? new Date(edit.updated_at).toLocaleDateString('he-IL') : ''}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 11, color: '#52525b' }}>{d.subtitle_style || '—'} / {d.bg_music || '—'}</span>
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
                         </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 11, color: '#52525b' }}>{edit.subtitle_style} / {edit.bg_music}</span>
-                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}

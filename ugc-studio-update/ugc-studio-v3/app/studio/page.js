@@ -469,18 +469,42 @@ export default function Home() {
     if (musicCtxRef.current) { try { musicCtxRef.current.close() } catch {} }
   }, [result, clipOrder, bgMusic, playing])
 
-  // === Canvas-based export (fixed: fetch-to-blob for CORS, AudioBuffer for voiceover) ===
+  // === Canvas-based export with voiceover + music mixed into AudioContext ===
   const exportMp4 = async () => {
     if (!result?.videos?.length) return
-    setExporting(true); setExportProgress('מכין קבצים...')
+    setExporting(true); setExportProgress('מכין ייצוא... 0%')
     try {
       const orderedScenes = clipOrder.map(i => i).filter(i => result.videos[i])
       if (orderedScenes.length === 0) throw new Error('אין סרטונים לייצוא')
+      const totalClips = orderedScenes.length
 
-      // Use preloaded blob URLs if available, otherwise fetch
-      setExportProgress('מכין סרטונים... 0%')
+      // Step 1: Preload voiceover audio buffer BEFORE anything else
+      setExportProgress('טוען קריינות... 5%')
+      let voiceAudioBuffer = null
+      if (audioBlobUrl.current) {
+        try {
+          const tmpCtx = new AudioContext()
+          const audioResp = await fetch(audioBlobUrl.current)
+          const audioArrayBuf = await audioResp.arrayBuffer()
+          voiceAudioBuffer = await tmpCtx.decodeAudioData(audioArrayBuf)
+          tmpCtx.close()
+        } catch (e) { console.warn('Voiceover preload failed:', e.message) }
+      } else if (result.audioBase64) {
+        // Rebuild from base64 if blob URL was lost
+        try {
+          const tmpCtx = new AudioContext()
+          const binary = atob(result.audioBase64)
+          const bytes = new Uint8Array(binary.length)
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+          voiceAudioBuffer = await tmpCtx.decodeAudioData(bytes.buffer)
+          tmpCtx.close()
+        } catch (e) { console.warn('Voiceover base64 decode failed:', e.message) }
+      }
+
+      // Step 2: Prepare video blob URLs
+      setExportProgress('מוריד סרטונים... 10%')
       const blobUrls = []
-      for (let i = 0; i < orderedScenes.length; i++) {
+      for (let i = 0; i < totalClips; i++) {
         const preloaded = videoBlobUrls[orderedScenes[i]]
         if (preloaded && preloaded.startsWith('blob:')) {
           blobUrls.push(preloaded)
@@ -493,163 +517,196 @@ export default function Home() {
             blobUrls.push(result.videos[orderedScenes[i]])
           }
         }
-        setExportProgress(`מכין סרטונים... ${Math.round(((i + 1) / orderedScenes.length) * 20)}%`)
+        setExportProgress(`מוריד סרטונים... ${10 + Math.round(((i + 1) / totalClips) * 10)}%`)
       }
 
-      setExportProgress('מייצא וידאו...')
+      // Step 3: Set up canvas + audio context + MediaRecorder
+      setExportProgress('מכין ייצוא... 20%')
       const offCanvas = document.createElement('canvas'); offCanvas.width = 1080; offCanvas.height = 1920
       const ctx = offCanvas.getContext('2d')
 
-      // Find supported mime type
       let mimeType = 'video/webm;codecs=vp9'
       if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) mimeType = 'video/webm;codecs=h264'
       if (MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/mp4'
 
-      const stream = offCanvas.captureStream(30)
+      const canvasStream = offCanvas.captureStream(30)
 
-      // Audio setup — use AudioBuffer approach (avoids createMediaElementSource one-time limit)
+      // Create AudioContext and MediaStreamDestination for mixing all audio
       const exportAudioCtx = new AudioContext()
-      const dest = exportAudioCtx.createMediaStreamDestination()
-      dest.stream.getAudioTracks().forEach(t => stream.addTrack(t))
+      const audioDest = exportAudioCtx.createMediaStreamDestination()
+      // Merge audio tracks into the canvas stream
+      audioDest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t))
 
-      // Add voiceover via decodeAudioData
-      if (audioBlobUrl.current) {
-        try {
-          const audioResp = await fetch(audioBlobUrl.current)
-          const audioArrayBuf = await audioResp.arrayBuffer()
-          const audioBuf = await exportAudioCtx.decodeAudioData(audioArrayBuf)
-          const voiceSource = exportAudioCtx.createBufferSource()
-          voiceSource.buffer = audioBuf
-          voiceSource.connect(dest)
-          voiceSource.start()
-        } catch (e) { console.warn('Voiceover decode failed:', e.message) }
+      // Step 4: Start voiceover playback into the audioDest
+      if (voiceAudioBuffer) {
+        const voiceSource = exportAudioCtx.createBufferSource()
+        voiceSource.buffer = voiceAudioBuffer
+        const voiceGain = exportAudioCtx.createGain()
+        voiceGain.gain.value = 0.85
+        voiceSource.connect(voiceGain)
+        voiceGain.connect(audioDest)
+        voiceSource.start(exportAudioCtx.currentTime)
       }
 
-      // Add background music
+      // Step 5: Start background music into the audioDest
       if (bgMusic !== 'none') {
-        const totalDuration = orderedScenes.length * 5 + 2
+        const totalDuration = totalClips * 5 + 2
         const musicBuf = generateMusicBuffer(exportAudioCtx, bgMusic, totalDuration)
         const musicSource = exportAudioCtx.createBufferSource()
         musicSource.buffer = musicBuf
-        const musicGain = exportAudioCtx.createGain(); musicGain.gain.value = 0.3
-        musicSource.connect(musicGain); musicGain.connect(dest); musicSource.start()
+        const musicGain = exportAudioCtx.createGain()
+        musicGain.gain.value = 0.3
+        musicSource.connect(musicGain)
+        musicGain.connect(audioDest)
+        musicSource.start(exportAudioCtx.currentTime)
       }
 
-      // Add SFX sounds to export audio dest
-      const playSfxToExport = (type) => {
+      // SFX helper
+      const playSfx = (type) => {
         if (!sfxEnabled) return
         try {
+          const t = exportAudioCtx.currentTime
           if (type === 'whoosh') {
-            const osc = exportAudioCtx.createOscillator(), gain = exportAudioCtx.createGain(), filter = exportAudioCtx.createBiquadFilter()
-            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(800, exportAudioCtx.currentTime)
-            osc.frequency.exponentialRampToValueAtTime(200, exportAudioCtx.currentTime + 0.3)
-            filter.type = 'bandpass'; filter.frequency.value = 600; filter.Q.value = 2
-            gain.gain.setValueAtTime(0.25, exportAudioCtx.currentTime)
-            gain.gain.exponentialRampToValueAtTime(0.001, exportAudioCtx.currentTime + 0.35)
-            osc.connect(filter); filter.connect(gain); gain.connect(dest)
-            osc.start(exportAudioCtx.currentTime); osc.stop(exportAudioCtx.currentTime + 0.4)
+            const osc = exportAudioCtx.createOscillator(), g = exportAudioCtx.createGain(), f = exportAudioCtx.createBiquadFilter()
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(800, t); osc.frequency.exponentialRampToValueAtTime(200, t + 0.3)
+            f.type = 'bandpass'; f.frequency.value = 600; f.Q.value = 2
+            g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35)
+            osc.connect(f); f.connect(g); g.connect(audioDest)
+            osc.start(t); osc.stop(t + 0.4)
           } else if (type === 'pop') {
-            const osc = exportAudioCtx.createOscillator(), gain = exportAudioCtx.createGain()
-            osc.type = 'sine'; osc.frequency.setValueAtTime(600, exportAudioCtx.currentTime)
-            osc.frequency.exponentialRampToValueAtTime(200, exportAudioCtx.currentTime + 0.08)
-            gain.gain.setValueAtTime(0.3, exportAudioCtx.currentTime)
-            gain.gain.exponentialRampToValueAtTime(0.001, exportAudioCtx.currentTime + 0.12)
-            osc.connect(gain); gain.connect(dest)
-            osc.start(exportAudioCtx.currentTime); osc.stop(exportAudioCtx.currentTime + 0.15)
+            const osc = exportAudioCtx.createOscillator(), g = exportAudioCtx.createGain()
+            osc.type = 'sine'; osc.frequency.setValueAtTime(600, t); osc.frequency.exponentialRampToValueAtTime(200, t + 0.08)
+            g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.12)
+            osc.connect(g); g.connect(audioDest)
+            osc.start(t); osc.stop(t + 0.15)
           } else if (type === 'ding') {
-            const osc = exportAudioCtx.createOscillator(), gain = exportAudioCtx.createGain()
-            osc.type = 'sine'; osc.frequency.setValueAtTime(1200, exportAudioCtx.currentTime)
-            gain.gain.setValueAtTime(0.35, exportAudioCtx.currentTime)
-            gain.gain.exponentialRampToValueAtTime(0.001, exportAudioCtx.currentTime + 0.8)
-            osc.connect(gain); gain.connect(dest)
-            osc.start(exportAudioCtx.currentTime); osc.stop(exportAudioCtx.currentTime + 1)
+            const osc = exportAudioCtx.createOscillator(), g = exportAudioCtx.createGain()
+            osc.type = 'sine'; osc.frequency.setValueAtTime(1200, t)
+            g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.8)
+            osc.connect(g); g.connect(audioDest)
+            osc.start(t); osc.stop(t + 1)
           }
         } catch {}
       }
 
-      const mediaRecorder = new MediaRecorder(stream, { mimeType })
+      // Step 6: Start MediaRecorder on the combined stream
+      const mediaRecorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 5000000 })
       const chunks = []
       mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
-      const donePromise = new Promise(resolve => { mediaRecorder.onstop = resolve })
-      mediaRecorder.start()
+      const recordDone = new Promise(resolve => { mediaRecorder.onstop = resolve })
+      mediaRecorder.start(200) // collect data every 200ms for responsiveness
 
+      // Step 7: Render each clip to canvas in sequence
       for (let clipIdx = 0; clipIdx < blobUrls.length; clipIdx++) {
         const sceneIdx = orderedScenes[clipIdx]
         const url = blobUrls[clipIdx]
-        const pct = 20 + Math.round(((clipIdx + 1) / blobUrls.length) * 70)
-        setExportProgress(`מייצא סצנה ${clipIdx + 1}/${blobUrls.length}... ${pct}%`)
+        const basePct = 25 + Math.round((clipIdx / totalClips) * 65)
+        setExportProgress(`מעבד סצנה ${clipIdx + 1}/${totalClips}... ${basePct}%`)
 
-        // SFX between scenes
-        if (clipIdx > 0) playSfxToExport('whoosh')
-        playSfxToExport('pop')
+        if (clipIdx > 0) playSfx('whoosh')
+        playSfx('pop')
 
         const transitionFrames = transition === 'cut' ? 0 : 15
 
         await new Promise((resolve) => {
           let resolved = false
           const done = () => { if (!resolved) { resolved = true; resolve() } }
-          const timeout = setTimeout(done, 8000) // 8s safety per 5s clip
+          const safety = setTimeout(done, 7000)
           const vid = document.createElement('video')
-          vid.crossOrigin = 'anonymous'; vid.src = url; vid.muted = true; vid.playsInline = true
-          vid.onended = () => { clearTimeout(timeout); done() }
-          vid.onerror = () => { clearTimeout(timeout); done() }
-          vid.oncanplay = async () => {
+          vid.crossOrigin = 'anonymous'
+          vid.src = url
+          vid.muted = true
+          vid.playsInline = true
+          vid.preload = 'auto'
+
+          vid.onended = () => { clearTimeout(safety); done() }
+          vid.onerror = () => { clearTimeout(safety); done() }
+
+          const startDrawing = async () => {
             try { await vid.play() } catch { done(); return }
             const subtitle = result.story?.scenes?.[sceneIdx]?.subtitle || ''
-            const words = subtitle.split(/\s+/); const lines = []
+            const words = subtitle.split(/\s+/)
+            const lines = []
             for (let w = 0; w < words.length; w += 4) lines.push(words.slice(w, w + 4).join(' '))
-            let frameCount = 0
-            const drawFrame = () => {
-              if (resolved || vid.paused || vid.ended) { clearTimeout(timeout); done(); return }
-              frameCount++
-              const inTransition = frameCount <= transitionFrames
+            let fc = 0
+            const draw = () => {
+              if (resolved || vid.paused || vid.ended) { clearTimeout(safety); done(); return }
+              fc++
+              const inTrans = fc <= transitionFrames
               let alpha = 1, scale = 1
-              if (inTransition && transition === 'fade') alpha = frameCount / transitionFrames
-              if (inTransition && transition === 'zoom') { scale = 1.15 - 0.15 * (frameCount / transitionFrames); alpha = frameCount / transitionFrames }
-              ctx.globalAlpha = 1; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, offCanvas.width, offCanvas.height)
+              if (inTrans && transition === 'fade') alpha = fc / transitionFrames
+              if (inTrans && transition === 'zoom') { scale = 1.15 - 0.15 * (fc / transitionFrames); alpha = fc / transitionFrames }
+
+              ctx.globalAlpha = 1
+              ctx.fillStyle = '#000'
+              ctx.fillRect(0, 0, 1080, 1920)
               ctx.globalAlpha = alpha
               if (scale !== 1) {
-                ctx.save(); ctx.translate(offCanvas.width / 2, offCanvas.height / 2); ctx.scale(scale, scale)
-                ctx.drawImage(vid, -offCanvas.width / 2, -offCanvas.height / 2, offCanvas.width, offCanvas.height); ctx.restore()
-              } else { ctx.drawImage(vid, 0, 0, offCanvas.width, offCanvas.height) }
+                ctx.save()
+                ctx.translate(540, 960)
+                ctx.scale(scale, scale)
+                ctx.drawImage(vid, -540, -960, 1080, 1920)
+                ctx.restore()
+              } else {
+                ctx.drawImage(vid, 0, 0, 1080, 1920)
+              }
               ctx.globalAlpha = 1
-              drawSubtitleOnCtx(ctx, lines, offCanvas.width, offCanvas.height, subtitleStyle)
-              requestAnimationFrame(drawFrame)
+              drawSubtitleOnCtx(ctx, lines, 1080, 1920, subtitleStyle)
+              requestAnimationFrame(draw)
             }
-            requestAnimationFrame(drawFrame)
+            requestAnimationFrame(draw)
           }
+
+          // Use canplay for faster start
+          if (vid.readyState >= 3) { startDrawing() }
+          else { vid.oncanplay = startDrawing }
         })
+
+        setExportProgress(`מעבד סצנה ${clipIdx + 1}/${totalClips}... ${25 + Math.round(((clipIdx + 1) / totalClips) * 65)}%`)
       }
 
-      // Ding at end
-      playSfxToExport('ding')
-      await new Promise(r => setTimeout(r, 1000))
+      // Final ding + brief pause
+      playSfx('ding')
+      await new Promise(r => setTimeout(r, 800))
 
-      setExportProgress('מסיים... 95%')
-      mediaRecorder.stop(); await donePromise
+      // Step 8: Finalize
+      setExportProgress('מסיים ייצוא... 95%')
+      mediaRecorder.stop()
+      await recordDone
       try { exportAudioCtx.close() } catch {}
-      // Revoke blob URLs
-      blobUrls.forEach(u => { try { URL.revokeObjectURL(u) } catch {} })
 
       const blob = new Blob(chunks, { type: mimeType })
+      if (blob.size < 1000) throw new Error('ייצוא נכשל — קובץ ריק')
+
       const blobUrl = URL.createObjectURL(blob)
       const ext = mimeType.includes('mp4') ? 'mp4' : 'webm'
-      const a = document.createElement('a'); a.style.display = 'none'; a.href = blobUrl; a.download = `ugc-video.${ext}`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(blobUrl)
+      const a = document.createElement('a')
+      a.style.display = 'none'
+      a.href = blobUrl
+      a.download = `ugc-video.${ext}`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
+      setExportProgress('הייצוא הושלם! 100%')
+      setTimeout(() => setExportProgress(''), 3000)
+    } catch (e) {
+      console.error('Export error:', e)
+      alert('שגיאה בייצוא: ' + e.message)
       setExportProgress('')
-    } catch (e) { alert('שגיאה בייצוא: ' + e.message); setExportProgress('') } finally { setExporting(false) }
+    } finally { setExporting(false) }
   }
 
   // === Save Edit to Supabase ===
   const saveEdit = async () => {
-    if (!supabase || !result) return
+    if (!result) return
     setSavingEdit(true); setSaveMsg('')
     try {
+      if (!supabase) { setSaveMsg('Supabase לא מוגדר'); setSavingEdit(false); return }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { setSaveMsg('יש להתחבר כדי לשמור'); setSavingEdit(false); return }
       const editData = {
-        user_id: user.id,
-        product_name: productName,
+        product_name: productName || 'ללא שם',
         clip_order: clipOrder,
         subtitle_style: subtitleStyle,
         bg_music: bgMusic,
@@ -658,15 +715,29 @@ export default function Home() {
         videos: result.videos,
         frames: result.frames,
         story: result.story,
-        audio_base64: result.audioBase64,
         hebrew_voice: result.hebrewVoice,
-        updated_at: new Date().toISOString(),
       }
-      const { error } = await supabase.from('saved_edits').upsert(editData, { onConflict: 'user_id,product_name' })
-      if (error) throw error
-      setSaveMsg('נשמר בהצלחה!')
-      setTimeout(() => setSaveMsg(''), 3000)
-    } catch (e) { setSaveMsg('שגיאה: ' + e.message) } finally { setSavingEdit(false) }
+      const { error } = await supabase.from('saved_edits').insert({
+        user_id: user.id,
+        edit_data: editData,
+      })
+      if (error) {
+        console.warn('Save edit error:', error.message)
+        // Fallback: save to localStorage
+        try {
+          const key = `saved_edit_${user.id}_${Date.now()}`
+          localStorage.setItem(key, JSON.stringify(editData))
+          setSaveMsg('נשמר מקומית (DB לא זמין)')
+        } catch { setSaveMsg('שגיאה בשמירה') }
+      } else {
+        setSaveMsg('נשמר בהצלחה!')
+      }
+      setTimeout(() => setSaveMsg(''), 4000)
+    } catch (e) {
+      console.warn('Save edit error:', e.message)
+      setSaveMsg('שגיאה: ' + e.message)
+      setTimeout(() => setSaveMsg(''), 4000)
+    } finally { setSavingEdit(false) }
   }
 
   // ===== FORM STEP =====
@@ -932,8 +1003,8 @@ export default function Home() {
         </div>
 
         {/* Center: Full-width Preview */}
-        <div style={{ ...cardS, marginBottom: 0, padding: 0, overflow: 'hidden' }}>
-          <div style={{ background: '#000', aspectRatio: '9/16', maxHeight: 640, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
+        <div style={{ ...cardS, marginBottom: 0, padding: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#000', aspectRatio: '9/16', maxHeight: 'calc(100vh - 280px)', height: '100%', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
             <video ref={videoRef} playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
             <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
             {!playing && (
@@ -954,54 +1025,106 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Bottom: Full-width CapCut-style Timeline — always visible */}
-      <div style={{ background: 'rgba(15,15,20,0.95)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '10px 16px 12px', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#a855f7', letterSpacing: 0.5 }}>ציר זמן</span>
+      {/* Bottom: Multi-track NLE Timeline — DaVinci/CapCut style */}
+      <div style={{ background: 'rgba(12,12,16,0.98)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '8px 16px 10px', flexShrink: 0 }}>
+        {/* Time ruler */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4, paddingLeft: 72 }}>
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#3f3f46', fontWeight: 500, fontFamily: 'monospace' }}>
+            <span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span><span>00:20</span>
           </div>
-          <div style={{ fontSize: 10, color: '#3f3f46' }}>גרור כדי לשנות סדר</div>
         </div>
-        {/* Clip cards */}
-        <div style={{ display: 'flex', gap: 6 }}>
-          {clipOrder.map((sceneIdx, orderIdx) => {
-            const scene = result?.story?.scenes?.[sceneIdx]
-            const videoUrl = videoBlobUrls[sceneIdx] || result?.videos?.[sceneIdx]
-            const isActive = currentScene === sceneIdx
-            const isDragging = dragIdx === orderIdx
-            return (
-              <div key={orderIdx} draggable
-                onDragStart={(e) => handleDragStart(e, orderIdx)}
-                onDragOver={(e) => handleDragOver(e, orderIdx)}
-                onDragEnd={handleDragEnd}
-                onClick={() => loadScene(sceneIdx)}
-                style={{ flex: '1 1 0', minWidth: 0, background: isActive ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${isActive ? 'rgba(168,85,247,0.5)' : isDragging ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 10, overflow: 'hidden', cursor: 'grab', opacity: isDragging ? 0.5 : 1, transition: 'all 200ms ease', boxShadow: isActive ? '0 0 16px rgba(168,85,247,0.2)' : 'none' }}>
-                <div style={{ aspectRatio: '16/9', background: BG, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {videoUrl
-                    ? <video src={videoUrl} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onLoadedMetadata={e => { e.target.currentTime = 1 }} />
-                    : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#27272a" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/></svg>
-                  }
-                  <div style={{ position: 'absolute', top: 3, left: 3, background: 'rgba(0,0,0,0.7)', borderRadius: 3, padding: '1px 5px', fontSize: 8, color: '#fff', fontWeight: 600 }}>5s</div>
-                  <div style={{ position: 'absolute', top: 3, right: 3, width: 16, height: 16, borderRadius: 4, background: isActive ? '#a855f7' : 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#fff', fontWeight: 700 }}>{orderIdx + 1}</div>
-                  <div style={{ position: 'absolute', bottom: 2, left: 3, right: 3, textAlign: 'center', color: 'white', fontSize: 8, fontWeight: 700, textShadow: '0 0 3px #000, 0 0 3px #000', fontFamily: 'Heebo,sans-serif', lineHeight: 1.3, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{scene?.subtitle}</div>
+
+        {/* Track 1: Video clips */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4, gap: 0 }}>
+          <div style={{ width: 68, flexShrink: 0, fontSize: 9, color: '#a855f7', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+            Video
+          </div>
+          <div style={{ flex: 1, display: 'flex', gap: 2, height: 48 }}>
+            {clipOrder.map((sceneIdx, orderIdx) => {
+              const scene = result?.story?.scenes?.[sceneIdx]
+              const videoUrl = videoBlobUrls[sceneIdx] || result?.videos?.[sceneIdx]
+              const isActive = currentScene === sceneIdx
+              const isDragging = dragIdx === orderIdx
+              return (
+                <div key={orderIdx} draggable
+                  onDragStart={(e) => handleDragStart(e, orderIdx)}
+                  onDragOver={(e) => handleDragOver(e, orderIdx)}
+                  onDragEnd={handleDragEnd}
+                  onClick={() => loadScene(sceneIdx)}
+                  style={{ flex: '1 1 0', minWidth: 0, background: isActive ? 'rgba(168,85,247,0.15)' : 'rgba(168,85,247,0.06)', border: `1.5px solid ${isActive ? 'rgba(168,85,247,0.6)' : isDragging ? 'rgba(168,85,247,0.4)' : 'rgba(168,85,247,0.12)'}`, borderRadius: 6, overflow: 'hidden', cursor: 'grab', opacity: isDragging ? 0.5 : 1, transition: 'all 150ms ease', display: 'flex', alignItems: 'center', gap: 0, position: 'relative' }}>
+                  <div style={{ width: 48, height: '100%', flexShrink: 0, background: BG, position: 'relative', overflow: 'hidden' }}>
+                    {videoUrl
+                      ? <video src={videoUrl} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onLoadedMetadata={e => { e.target.currentTime = 1 }} />
+                      : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#27272a" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/></svg></div>
+                    }
+                  </div>
+                  <div style={{ flex: 1, padding: '2px 6px', overflow: 'hidden' }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: isActive ? '#d4b4ff' : '#8b5cf6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scene?.type || sceneLabels[sceneIdx]}</div>
+                    <div style={{ fontSize: 7, color: '#52525b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'Heebo,sans-serif', direction: 'rtl' }}>{scene?.subtitle?.slice(0, 30)}</div>
+                  </div>
+                  <div style={{ position: 'absolute', top: 2, right: 4, fontSize: 7, color: '#52525b', fontWeight: 600, fontFamily: 'monospace' }}>5.0s</div>
+                  <div style={{ position: 'absolute', top: 2, left: 50, width: 14, height: 14, borderRadius: 3, background: isActive ? '#a855f7' : 'rgba(168,85,247,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#fff', fontWeight: 700 }}>{orderIdx + 1}</div>
                 </div>
-                <div style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-                  <span style={{ fontSize: 9, fontWeight: 600, color: isActive ? '#a855f7' : '#52525b' }}>{scene?.type || sceneLabels[sceneIdx]}</span>
-                </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
-        {/* Progress bar */}
-        <div style={{ marginTop: 8, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.04)', display: 'flex', overflow: 'hidden' }}>
+
+        {/* Track 2: Voiceover waveform bar */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4, gap: 0 }}>
+          <div style={{ width: 68, flexShrink: 0, fontSize: 9, color: '#22c55e', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+            Voice
+          </div>
+          <div style={{ flex: 1, height: 22, background: audioBlobUrl.current ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.02)', border: `1px solid ${audioBlobUrl.current ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 5, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
+            {audioBlobUrl.current ? (
+              <>
+                {/* Fake waveform visualization */}
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 1, padding: '0 4px' }}>
+                  {Array.from({ length: 80 }, (_, i) => {
+                    const h = 4 + Math.sin(i * 0.4) * 4 + Math.random() * 4
+                    return <div key={i} style={{ flex: 1, height: h, background: 'rgba(34,197,94,0.4)', borderRadius: 1, minWidth: 1 }} />
+                  })}
+                </div>
+                <span style={{ position: 'relative', zIndex: 1, fontSize: 8, color: '#22c55e', fontWeight: 600, padding: '0 6px', background: 'rgba(12,12,16,0.7)', borderRadius: 3 }}>קריינות עברית ~20s</span>
+              </>
+            ) : (
+              <span style={{ fontSize: 8, color: '#3f3f46', padding: '0 8px' }}>אין קריינות</span>
+            )}
+          </div>
+        </div>
+
+        {/* Track 3: Background music bar */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4, gap: 0 }}>
+          <div style={{ width: 68, flexShrink: 0, fontSize: 9, color: '#f59e0b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            Music
+          </div>
+          <div style={{ flex: 1, height: 18, background: bgMusic !== 'none' ? 'rgba(245,158,11,0.06)' : 'rgba(255,255,255,0.02)', border: `1px solid ${bgMusic !== 'none' ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 5, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+            {bgMusic !== 'none' ? (
+              <>
+                <div style={{ position: 'absolute', display: 'flex', alignItems: 'center', gap: 1, padding: '0 4px', opacity: 0.3 }}>
+                  {Array.from({ length: 60 }, (_, i) => {
+                    const h = 2 + Math.sin(i * 0.6 + 1) * 3 + Math.random() * 2
+                    return <div key={i} style={{ width: 2, height: h, background: 'rgba(245,158,11,0.5)', borderRadius: 1 }} />
+                  })}
+                </div>
+                <span style={{ position: 'relative', zIndex: 1, fontSize: 8, color: '#f59e0b', fontWeight: 600, padding: '0 6px' }}>
+                  {MUSIC_TRACKS.find(t => t.id === bgMusic)?.emoji} {MUSIC_TRACKS.find(t => t.id === bgMusic)?.label} — 20s
+                </span>
+              </>
+            ) : (
+              <span style={{ fontSize: 8, color: '#3f3f46', padding: '0 8px' }}>אין מוזיקה</span>
+            )}
+          </div>
+        </div>
+
+        {/* Playhead / progress indicator */}
+        <div style={{ marginLeft: 72, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.04)', display: 'flex', overflow: 'hidden' }}>
           {clipOrder.map((sceneIdx, i) => (
-            <div key={i} style={{ flex: 1, background: currentScene === sceneIdx ? 'linear-gradient(90deg, #7c3aed, #a855f7)' : 'rgba(168,85,247,0.15)', borderRight: i < clipOrder.length - 1 ? '1px solid rgba(0,0,0,0.3)' : 'none', transition: 'background 300ms ease' }} />
+            <div key={i} style={{ flex: 1, background: currentScene === sceneIdx ? 'linear-gradient(90deg, #7c3aed, #a855f7)' : 'rgba(168,85,247,0.1)', borderRight: i < clipOrder.length - 1 ? '1px solid rgba(0,0,0,0.3)' : 'none', transition: 'background 300ms ease' }} />
           ))}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, fontSize: 9, color: '#3f3f46', fontWeight: 500 }}>
-          <span>0s</span><span>5s</span><span>10s</span><span>15s</span><span>20s</span>
         </div>
       </div>
 
