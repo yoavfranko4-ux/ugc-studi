@@ -1,35 +1,16 @@
+import { fal } from '@fal-ai/client'
+
 export const maxDuration = 300; // 5 minutes
 
-const FAL_KEY = process.env.FAL_API_KEY;
-
-async function pollKling(requestId, maxWait = 280000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    const res = await fetch(`https://queue.fal.run/fal-ai/kling-video/requests/${requestId}/status`, {
-      headers: { Authorization: `Key ${FAL_KEY}` }
-    });
-    const data = await res.json();
-    if (data.status === 'COMPLETED') {
-      const result = await fetch(`https://queue.fal.run/fal-ai/kling-video/requests/${requestId}`, {
-        headers: { Authorization: `Key ${FAL_KEY}` }
-      });
-      return await result.json();
-    }
-    if (data.status === 'FAILED') throw new Error('Kling job failed');
-    await new Promise(r => setTimeout(r, 5000));
-  }
-  throw new Error('Timeout');
-}
+fal.config({ credentials: process.env.FAL_API_KEY });
 
 export async function POST(req) {
   const { imageUrl, prompt, sceneIndex, duration } = await req.json();
   const klingDuration = duration === '10' ? '10' : '5';
   console.log(`Kling scene ${sceneIndex}: starting, duration=${klingDuration}s`);
   try {
-    const res = await fetch('https://queue.fal.run/fal-ai/kling-video/v3/pro/image-to-video', {
-      method: 'POST',
-      headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const result = await fal.subscribe('fal-ai/kling-video/v3/pro/image-to-video', {
+      input: {
         image_url: imageUrl,
         prompt,
         duration: klingDuration,
@@ -38,13 +19,10 @@ export async function POST(req) {
         cfg_scale: 0.45,
         // Prevent cinematic/ad look — force amateur handheld feel
         negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
-      })
+      },
+      pollInterval: 5000
     });
-    const json = await res.json();
-    console.log(`Kling ${sceneIndex} submit:`, JSON.stringify(json).slice(0, 150));
-    if (!json.request_id) throw new Error('No request_id: ' + JSON.stringify(json));
-    const result = await pollKling(json.request_id);
-    const videoUrl = result?.video?.url || null;
+    const videoUrl = result.data.video?.url || null;
     console.log(`Kling ${sceneIndex}: ${videoUrl ? 'OK' : 'FAIL'}`);
     return Response.json({ videoUrl, sceneIndex });
   } catch (e) {

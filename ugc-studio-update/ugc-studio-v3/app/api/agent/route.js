@@ -1,9 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { fal } from '@fal-ai/client'
 import { supabase } from '../../../lib/supabase'
 
 export const maxDuration = 300;
 
 const FAL_KEY = process.env.FAL_API_KEY;
+fal.config({ credentials: FAL_KEY });
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -14,20 +16,15 @@ async function generateNBFrame(prompt, imageUrls) {
   const validUrls = imageUrls.filter(Boolean);
   console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
   const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real avatar not model, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`;
-  const endpoint = validUrls.length === 0
-    ? 'https://fal.run/fal-ai/nano-banana-2'
-    : 'https://fal.run/fal-ai/nano-banana-2/edit';
-  const body = validUrls.length === 0
+  const endpointId = validUrls.length === 0
+    ? 'fal-ai/nano-banana-2'
+    : 'fal-ai/nano-banana-2/edit';
+  const input = validUrls.length === 0
     ? { prompt: enhancedPrompt, image_size: 'portrait_4_3' }
     : { prompt: enhancedPrompt, image_urls: validUrls };
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  const json = await res.json();
-  console.log('NB response:', JSON.stringify(json).slice(0, 400));
-  const imageUrl = json.images?.[0]?.url || json.images?.[0] || null;
+  const result = await fal.run(endpointId, { input });
+  console.log('NB response:', JSON.stringify(result.data).slice(0, 400));
+  const imageUrl = result.data.images?.[0]?.url || result.data.images?.[0] || null;
   console.log('NB image URL:', imageUrl?.slice(0, 100));
   return imageUrl;
 }
@@ -243,31 +240,16 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
       if (!frames[i]) { videos.push(null); continue; }
       try {
         console.log(`[Job ${jobId}] Kling scene ${i+1}: starting...`);
-        const kRes = await fetch('https://fal.run/fal-ai/kling-video/v1.6/standard/image-to-video', {
-          method: 'POST',
-          headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        const result = await fal.subscribe('fal-ai/kling-video/v1.6/standard/image-to-video', {
+          input: {
             prompt: scenes[i].kling_prompt,
             image_url: frames[i],
             duration: '5',
             aspect_ratio: '9:16'
-          })
+          },
+          pollInterval: 5000
         });
-        const kData = await kRes.json();
-        let videoUrl = kData.video?.url || kData.url;
-        if (!videoUrl && kData.request_id) {
-          for (let p = 0; p < 72; p++) {
-            await new Promise(r => setTimeout(r, 5000));
-            const poll = await fetch(
-              `https://fal.run/fal-ai/kling-video/v1.6/standard/image-to-video/requests/${kData.request_id}`,
-              { headers: { Authorization: `Key ${FAL_KEY}` } }
-            );
-            const pd = await poll.json();
-            if (pd.video?.url) { videoUrl = pd.video.url; break; }
-            if (pd.output?.video?.url) { videoUrl = pd.output.video.url; break; }
-            if (pd.status === 'FAILED') { console.error(`[Job ${jobId}] Kling scene ${i+1} FAILED`); break; }
-          }
-        }
+        const videoUrl = result.data.video?.url || null;
         console.log(`[Job ${jobId}] Kling scene ${i+1}:`, videoUrl ? 'OK' : 'no URL');
         videos.push(videoUrl || null);
       } catch (e) {
