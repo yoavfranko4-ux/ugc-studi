@@ -2,6 +2,180 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 
+// === Subtitle Styles ===
+const SUBTITLE_STYLES = [
+  { id: 'classic', label: 'Classic', desc: 'לבן עם צל שחור' },
+  { id: 'bold', label: 'Bold', desc: 'שחור על רקע לבן' },
+  { id: 'minimal', label: 'Minimal', desc: 'טקסט לבן קטן' },
+  { id: 'neon', label: 'Neon', desc: 'לבן עם glow סגול' },
+]
+
+// === Background Music Tracks (Web Audio generated) ===
+const MUSIC_TRACKS = [
+  { id: 'none', label: 'ללא מוזיקה', emoji: '🔇' },
+  { id: 'upbeat', label: 'Upbeat TikTok', emoji: '🎵', bpm: 130, key: 'C' },
+  { id: 'chill', label: 'Chill Vibes', emoji: '🌊', bpm: 85, key: 'Am' },
+  { id: 'motivational', label: 'Motivational', emoji: '💪', bpm: 110, key: 'G' },
+  { id: 'dramatic', label: 'Dramatic', emoji: '🎭', bpm: 70, key: 'Dm' },
+]
+
+// === Scene Transitions ===
+const TRANSITIONS = [
+  { id: 'cut', label: 'Cut', desc: 'חיתוך ישר' },
+  { id: 'fade', label: 'Fade', desc: 'דהייה' },
+  { id: 'zoom', label: 'Zoom', desc: 'זום קל' },
+]
+
+// === Web Audio SFX ===
+function createAudioContext() {
+  return new (window.AudioContext || window.webkitAudioContext)()
+}
+function playWhoosh(ctx) {
+  const osc = ctx.createOscillator(), gain = ctx.createGain(), filter = ctx.createBiquadFilter()
+  osc.type = 'sawtooth'; osc.frequency.setValueAtTime(800, ctx.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.3)
+  filter.type = 'bandpass'; filter.frequency.setValueAtTime(1000, ctx.currentTime)
+  filter.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.3); filter.Q.value = 2
+  gain.gain.setValueAtTime(0.3, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
+  osc.connect(filter); filter.connect(gain); gain.connect(ctx.destination)
+  osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.4)
+}
+function playPop(ctx) {
+  const osc = ctx.createOscillator(), gain = ctx.createGain()
+  osc.type = 'sine'; osc.frequency.setValueAtTime(600, ctx.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.08)
+  gain.gain.setValueAtTime(0.4, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12)
+  osc.connect(gain); gain.connect(ctx.destination)
+  osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.15)
+}
+function playDing(ctx) {
+  const osc = ctx.createOscillator(), gain = ctx.createGain()
+  osc.type = 'sine'; osc.frequency.setValueAtTime(1200, ctx.currentTime)
+  gain.gain.setValueAtTime(0.4, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8)
+  osc.connect(gain); gain.connect(ctx.destination)
+  osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 1)
+}
+
+// Generate background music buffer via Web Audio oscillators
+function generateMusicBuffer(ctx, trackId, durationSec) {
+  const sampleRate = ctx.sampleRate, length = sampleRate * durationSec
+  const buffer = ctx.createBuffer(2, length, sampleRate)
+  const left = buffer.getChannelData(0), right = buffer.getChannelData(1)
+  const noteFreqs = {
+    C: [261.63, 329.63, 392.00], Am: [220.00, 261.63, 329.63],
+    G: [196.00, 246.94, 293.66], Dm: [293.66, 349.23, 440.00],
+  }
+  const track = MUSIC_TRACKS.find(t => t.id === trackId)
+  if (!track || trackId === 'none') return buffer
+  const bpm = track.bpm, beatLen = (60 / bpm) * sampleRate
+  const freqs = noteFreqs[track.key] || noteFreqs.C
+  for (let i = 0; i < length; i++) {
+    const t = i / sampleRate, beatPhase = (i % beatLen) / beatLen
+    let val = 0
+    if (trackId === 'upbeat') {
+      val += 0.08 * Math.sin(2 * Math.PI * freqs[0] * t)
+      val += 0.06 * Math.sin(2 * Math.PI * freqs[1] * t)
+      val += 0.04 * Math.sin(2 * Math.PI * freqs[2] * t)
+      val += 0.05 * (beatPhase < 0.1 ? 1 - beatPhase * 10 : 0)
+      val += 0.03 * ((beatPhase > 0.5 && beatPhase < 0.55) ? 1 : 0)
+    } else if (trackId === 'chill') {
+      const slow = Math.sin(2 * Math.PI * 0.2 * t)
+      val += 0.06 * Math.sin(2 * Math.PI * freqs[0] * t) * (0.5 + 0.5 * slow)
+      val += 0.04 * Math.sin(2 * Math.PI * freqs[1] * t * 0.5)
+      val += 0.03 * Math.sin(2 * Math.PI * freqs[2] * t * 0.25)
+    } else if (trackId === 'motivational') {
+      val += 0.07 * Math.sin(2 * Math.PI * freqs[0] * t)
+      val += 0.05 * Math.sin(2 * Math.PI * freqs[1] * t)
+      val += 0.06 * Math.sin(2 * Math.PI * freqs[2] * t)
+      val += 0.06 * (beatPhase < 0.08 ? 1 - beatPhase * 12 : 0)
+    } else if (trackId === 'dramatic') {
+      val += 0.08 * Math.sin(2 * Math.PI * freqs[0] * 0.5 * t)
+      val += 0.06 * Math.sin(2 * Math.PI * freqs[1] * 0.5 * t)
+      val += 0.04 * Math.sin(2 * Math.PI * freqs[2] * 0.5 * t)
+      val += 0.02 * Math.sin(2 * Math.PI * 80 * t)
+    }
+    const fadeIn = Math.min(1, t / 1.0), fadeOut = Math.min(1, (durationSec - t) / 1.5)
+    val *= fadeIn * fadeOut * 0.7
+    left[i] = val; right[i] = val * 0.95 + 0.01 * Math.sin(2 * Math.PI * 0.5 * t) * val
+  }
+  return buffer
+}
+
+// Draw subtitles with style on a Canvas context
+function drawSubtitleOnCtx(ctx, lines, canvasW, canvasH, style) {
+  const isMinimal = style === 'minimal'
+  const fontSize = isMinimal ? 36 : 48
+  ctx.font = `bold ${fontSize}px Heebo, sans-serif`
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+  const lineHeight = isMinimal ? 42 : 58
+  const startY = canvasH * 0.82 - ((lines.length - 1) * lineHeight) / 2
+  const x = canvasW / 2
+  lines.forEach((line, i) => {
+    const y = startY + i * lineHeight
+    if (style === 'classic') {
+      ctx.strokeStyle = 'black'; ctx.lineWidth = 8; ctx.lineJoin = 'round'; ctx.miterLimit = 2
+      ctx.strokeText(line, x, y); ctx.fillStyle = 'white'; ctx.fillText(line, x, y)
+    } else if (style === 'bold') {
+      const metrics = ctx.measureText(line)
+      const tw = metrics.width + 28, th = fontSize + 16
+      ctx.fillStyle = 'rgba(255,255,255,0.92)'
+      const rx = x - tw / 2, ry = y - th / 2, r = 10
+      ctx.beginPath()
+      ctx.moveTo(rx + r, ry); ctx.lineTo(rx + tw - r, ry)
+      ctx.quadraticCurveTo(rx + tw, ry, rx + tw, ry + r); ctx.lineTo(rx + tw, ry + th - r)
+      ctx.quadraticCurveTo(rx + tw, ry + th, rx + tw - r, ry + th); ctx.lineTo(rx + r, ry + th)
+      ctx.quadraticCurveTo(rx, ry + th, rx, ry + th - r); ctx.lineTo(rx, ry + r)
+      ctx.quadraticCurveTo(rx, ry, rx + r, ry); ctx.closePath(); ctx.fill()
+      ctx.fillStyle = '#111'; ctx.fillText(line, x, y)
+    } else if (style === 'minimal') {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(line, x, y)
+    } else if (style === 'neon') {
+      ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 24
+      ctx.fillStyle = 'white'; ctx.fillText(line, x, y); ctx.fillText(line, x, y)
+      ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'
+    }
+  })
+}
+
+// Draw subtitles (preview size) on a canvas overlay
+function drawSubtitlePreview(ctx, lines, canvasW, canvasH, style) {
+  const isMinimal = style === 'minimal'
+  const fontSize = isMinimal ? 16 : 22
+  ctx.font = `bold ${fontSize}px Heebo, sans-serif`
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+  const lineHeight = isMinimal ? 20 : 28
+  const startY = canvasH * 0.82 - ((lines.length - 1) * lineHeight) / 2
+  const x = canvasW / 2
+  lines.forEach((line, i) => {
+    const y = startY + i * lineHeight
+    if (style === 'classic') {
+      ctx.strokeStyle = 'black'; ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.miterLimit = 2
+      ctx.strokeText(line, x, y); ctx.fillStyle = 'white'; ctx.fillText(line, x, y)
+    } else if (style === 'bold') {
+      const metrics = ctx.measureText(line)
+      const tw = metrics.width + 16, th = fontSize + 10
+      ctx.fillStyle = 'rgba(255,255,255,0.92)'
+      const rx = x - tw / 2, ry = y - th / 2, r = 6
+      ctx.beginPath()
+      ctx.moveTo(rx + r, ry); ctx.lineTo(rx + tw - r, ry)
+      ctx.quadraticCurveTo(rx + tw, ry, rx + tw, ry + r); ctx.lineTo(rx + tw, ry + th - r)
+      ctx.quadraticCurveTo(rx + tw, ry + th, rx + tw - r, ry + th); ctx.lineTo(rx + r, ry + th)
+      ctx.quadraticCurveTo(rx, ry + th, rx, ry + th - r); ctx.lineTo(rx, ry + r)
+      ctx.quadraticCurveTo(rx, ry, rx + r, ry); ctx.closePath(); ctx.fill()
+      ctx.fillStyle = '#111'; ctx.fillText(line, x, y)
+    } else if (style === 'minimal') {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(line, x, y)
+    } else if (style === 'neon') {
+      ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 12
+      ctx.fillStyle = 'white'; ctx.fillText(line, x, y); ctx.fillText(line, x, y)
+      ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'
+    }
+  })
+}
+
 const AVATARS = [
   { id: 1, url: '/avatars/avatar-1.jpg', name: 'Maya' },
   { id: 2, url: '/avatars/avatar-2.jpg', name: 'Noa' },
@@ -50,20 +224,25 @@ export default function Home() {
   const [currentScene, setCurrentScene] = useState(0)
   const [logs, setLogs] = useState([])
   const [exporting, setExporting] = useState(false)
+  const [exportProgress, setExportProgress] = useState('')
+  // Editor state
   const [clipOrder, setClipOrder] = useState([0, 1, 2, 3])
   const [dragIdx, setDragIdx] = useState(null)
-  const [musicUrl, setMusicUrl] = useState(null)
-  const [musicName, setMusicName] = useState('')
+  const [subtitleStyle, setSubtitleStyle] = useState('classic')
+  const [sfxEnabled, setSfxEnabled] = useState(true)
+  const [bgMusic, setBgMusic] = useState('none')
+  const [transition, setTransition] = useState('cut')
   const [playing, setPlaying] = useState(false)
-  const [exportProgress, setExportProgress] = useState('')
+  const [musicPreviewing, setMusicPreviewing] = useState(false)
   const videoRef = useRef(null)
   const audioRef = useRef(null)
   const canvasRef = useRef(null)
-  const musicRef = useRef(null)
   const audioBlobUrl = useRef(null)
   const playingRef = useRef(false)
+  const musicSourceRef = useRef(null)
+  const musicCtxRef = useRef(null)
 
-  // Assign video and audio src after done step mounts the refs
+  // Assign video and audio src after done step mounts
   useEffect(() => {
     if (step !== 'done' || !result) return
     if (videoRef.current && result.videos?.[currentScene]) {
@@ -76,6 +255,7 @@ export default function Home() {
     }
   }, [step, result])
 
+  // Draw subtitles on canvas overlay with selected style
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !result?.story?.scenes?.[currentScene]) return
@@ -89,19 +269,15 @@ export default function Home() {
     const words = subtitle.split(/\s+/)
     const lines = []
     for (let i = 0; i < words.length; i += 4) lines.push(words.slice(i, i + 4).join(' '))
-    ctx.font = 'bold 22px Heebo, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    const lineHeight = 28
-    const startY = canvas.height * 0.82 - ((lines.length - 1) * lineHeight) / 2
-    const x = canvas.width / 2
-    lines.forEach((line, i) => {
-      const y = startY + i * lineHeight
-      ctx.strokeStyle = 'black'; ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.miterLimit = 2
-      ctx.strokeText(line, x, y)
-      ctx.fillStyle = 'white'; ctx.fillText(line, x, y)
-    })
-  }, [currentScene, result, step])
+    drawSubtitlePreview(ctx, lines, canvas.width, canvas.height, subtitleStyle)
+  }, [currentScene, result, step, subtitleStyle])
+
+  // Stop music preview on track change
+  useEffect(() => {
+    if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
+    if (musicCtxRef.current) { try { musicCtxRef.current.close() } catch {} }
+    musicSourceRef.current = null; musicCtxRef.current = null; setMusicPreviewing(false)
+  }, [bgMusic])
 
   const avatarUrl = customAvatar || selectedAvatar?.url
   const addLog = (msg, type='') => setLogs(p => [...p, {msg, type, t: new Date().toLocaleTimeString('he-IL')}])
@@ -160,7 +336,6 @@ export default function Home() {
       if (!jobId) throw new Error('No jobId returned')
       addLog(`Job ${jobId.slice(0, 8)}... נוצר, ממתין לתוצאות...`)
 
-      // Animate progress steps while polling
       const steps = ['script', 'frames', 'videos', 'voice']
       let stepIdx = 0
       const progressInterval = setInterval(() => {
@@ -171,28 +346,16 @@ export default function Home() {
           else if (i === stepIdx) status[steps[i]] = 'active'
         }
         setAgentStatus(status)
-      }, 45000) // advance step roughly every 45s
+      }, 45000)
 
-      // Poll for job completion
       const pollResult = await new Promise((resolve, reject) => {
         const poll = setInterval(async () => {
           try {
             const statusRes = await fetch(`/api/agent/status?jobId=${jobId}`)
             const statusData = await statusRes.json()
-            if (statusData.status === 'done') {
-              clearInterval(poll)
-              clearInterval(progressInterval)
-              resolve(statusData.result)
-            } else if (statusData.status === 'error') {
-              clearInterval(poll)
-              clearInterval(progressInterval)
-              reject(new Error(statusData.error || 'Job failed'))
-            }
-            // status === 'pending' — keep polling
-          } catch (err) {
-            // Network error during poll — keep trying
-            addLog('שגיאת רשת בבדיקת סטטוס, מנסה שוב...', 'err')
-          }
+            if (statusData.status === 'done') { clearInterval(poll); clearInterval(progressInterval); resolve(statusData.result) }
+            else if (statusData.status === 'error') { clearInterval(poll); clearInterval(progressInterval); reject(new Error(statusData.error || 'Job failed')) }
+          } catch { addLog('שגיאת רשת בבדיקת סטטוס, מנסה שוב...', 'err') }
         }, 3000)
       })
 
@@ -207,11 +370,7 @@ export default function Home() {
       }
       setResult(data)
       const hasVideos = data.videos?.some(v => v)
-      if (hasVideos) {
-        setStep('done')
-      } else {
-        addLog('לא נוצרו סרטונים — נשאר בדף הלוגים', 'err')
-      }
+      if (hasVideos) { setStep('done') } else { addLog('לא נוצרו סרטונים — נשאר בדף הלוגים', 'err') }
     } catch (e) { addLog(e.message, 'err'); alert('שגיאה: ' + e.message); setStep('form') }
   }
 
@@ -221,126 +380,238 @@ export default function Home() {
     if (url && videoRef.current) { videoRef.current.src = url; videoRef.current.load() }
   }
 
-  // Drag-and-drop reorder
-  const handleDragStart = (e, idx) => {
-    setDragIdx(idx)
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', idx)
-  }
+  // Drag-and-drop
+  const handleDragStart = (e, idx) => { setDragIdx(idx); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', idx) }
   const handleDragOver = (e, idx) => {
     e.preventDefault()
     if (dragIdx === null || dragIdx === idx) return
-    const newOrder = [...clipOrder]
-    const [moved] = newOrder.splice(dragIdx, 1)
-    newOrder.splice(idx, 0, moved)
-    setClipOrder(newOrder)
-    setDragIdx(idx)
+    const newOrder = [...clipOrder]; const [moved] = newOrder.splice(dragIdx, 1); newOrder.splice(idx, 0, moved)
+    setClipOrder(newOrder); setDragIdx(idx)
   }
   const handleDragEnd = () => setDragIdx(null)
 
-  // Music upload
-  const handleMusicUpload = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    setMusicName(file.name)
-    const reader = new FileReader()
-    reader.onload = ev => {
-      setMusicUrl(ev.target.result)
-      if (musicRef.current) { musicRef.current.src = ev.target.result; musicRef.current.load() }
+  // Toggle music preview
+  const toggleMusicPreview = useCallback(() => {
+    if (musicPreviewing) {
+      if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
+      if (musicCtxRef.current) { try { musicCtxRef.current.close() } catch {} }
+      musicSourceRef.current = null; musicCtxRef.current = null; setMusicPreviewing(false); return
     }
-    reader.readAsDataURL(file)
-  }
+    if (bgMusic === 'none') return
+    try {
+      const ctx = createAudioContext(); musicCtxRef.current = ctx
+      const buf = generateMusicBuffer(ctx, bgMusic, 8)
+      const source = ctx.createBufferSource(); source.buffer = buf; source.connect(ctx.destination)
+      source.onended = () => setMusicPreviewing(false); source.start()
+      musicSourceRef.current = source; setMusicPreviewing(true)
+    } catch {}
+  }, [bgMusic, musicPreviewing])
 
-  // Play all clips in order with voiceover + music
+  // Play all clips sequentially with voiceover + music
   const playAll = useCallback(async () => {
     if (!result?.videos) return
     if (playing) {
-      playingRef.current = false
-      setPlaying(false)
+      playingRef.current = false; setPlaying(false)
       if (videoRef.current) videoRef.current.pause()
       if (audioRef.current) audioRef.current.pause()
-      if (musicRef.current) musicRef.current.pause()
+      if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
       return
     }
-    setPlaying(true)
-    playingRef.current = true
-    // Start voiceover and music
-    if (audioRef.current && audioBlobUrl.current) {
-      audioRef.current.currentTime = 0
-      audioRef.current.play().catch(() => {})
+    setPlaying(true); playingRef.current = true
+    // Start voiceover
+    if (audioRef.current && audioBlobUrl.current) { audioRef.current.currentTime = 0; audioRef.current.play().catch(() => {}) }
+    // Start generated music
+    if (bgMusic !== 'none') {
+      try {
+        const ctx = createAudioContext(); musicCtxRef.current = ctx
+        const buf = generateMusicBuffer(ctx, bgMusic, 22)
+        const source = ctx.createBufferSource(); source.buffer = buf
+        const gain = ctx.createGain(); gain.gain.value = 0.25
+        source.connect(gain); gain.connect(ctx.destination); source.start()
+        musicSourceRef.current = source
+      } catch {}
     }
-    if (musicRef.current && musicUrl) {
-      musicRef.current.currentTime = 0
-      musicRef.current.volume = 0.25
-      musicRef.current.play().catch(() => {})
-    }
-    // Play clips sequentially in order
     for (const sceneIdx of clipOrder) {
       if (!playingRef.current) break
       const url = result.videos[sceneIdx]
       if (!url || !videoRef.current) continue
       setCurrentScene(sceneIdx)
-      videoRef.current.src = url
-      videoRef.current.load()
+      videoRef.current.src = url; videoRef.current.load()
       await new Promise(resolve => {
-        const onEnd = () => { videoRef.current.removeEventListener('ended', onEnd); resolve() }
+        const timeout = setTimeout(resolve, 8000)
+        const onEnd = () => { clearTimeout(timeout); videoRef.current.removeEventListener('ended', onEnd); resolve() }
         videoRef.current.addEventListener('ended', onEnd)
-        videoRef.current.play().catch(resolve)
+        videoRef.current.play().catch(() => { clearTimeout(timeout); resolve() })
       })
     }
-    setPlaying(false)
-    playingRef.current = false
+    setPlaying(false); playingRef.current = false
     if (audioRef.current) audioRef.current.pause()
-    if (musicRef.current) musicRef.current.pause()
-  }, [result, clipOrder, musicUrl, playing])
+    if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
+    if (musicCtxRef.current) { try { musicCtxRef.current.close() } catch {} }
+  }, [result, clipOrder, bgMusic, playing])
 
-  // Server-side export via fal.ai ffmpeg
+  // === Canvas-based export (fixed: fetch-to-blob for CORS, AudioBuffer for voiceover) ===
   const exportMp4 = async () => {
     if (!result?.videos?.length) return
-    setExporting(true)
-    setExportProgress('מאחד קליפים...')
+    setExporting(true); setExportProgress('מכין קבצים...')
     try {
-      // Reorder videos according to timeline
-      const orderedVideos = clipOrder.map(i => result.videos[i]).filter(Boolean)
-      if (orderedVideos.length === 0) throw new Error('אין סרטונים לייצוא')
+      const orderedScenes = clipOrder.map(i => i).filter(i => result.videos[i])
+      if (orderedScenes.length === 0) throw new Error('אין סרטונים לייצוא')
 
-      // Build audio URL from base64
-      let voiceAudioUrl = null
-      if (audioBlobUrl.current) {
-        voiceAudioUrl = audioBlobUrl.current
+      // Pre-fetch video URLs as blob URLs to avoid CORS canvas tainting
+      setExportProgress('מוריד סרטונים...')
+      const blobUrls = []
+      for (let i = 0; i < orderedScenes.length; i++) {
+        try {
+          const resp = await fetch(result.videos[orderedScenes[i]])
+          const blob = await resp.blob()
+          blobUrls.push(URL.createObjectURL(blob))
+        } catch {
+          blobUrls.push(result.videos[orderedScenes[i]]) // fallback to direct URL
+        }
       }
 
-      setExportProgress('מעבד וידאו + אודיו בשרת...')
-      const res = await fetch('/api/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videoUrls: orderedVideos,
-          audioUrl: voiceAudioUrl,
-          musicUrl: musicUrl || null
-        })
-      })
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
-      if (!data.videoUrl) throw new Error('לא התקבל URL לסרטון')
+      setExportProgress('מייצא וידאו...')
+      const offCanvas = document.createElement('canvas'); offCanvas.width = 1080; offCanvas.height = 1920
+      const ctx = offCanvas.getContext('2d')
 
-      setExportProgress('מוריד...')
-      // Download the final video
-      const a = document.createElement('a')
-      a.style.display = 'none'
-      a.href = data.videoUrl
-      a.download = 'ugc-video.mp4'
-      a.target = '_blank'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
+      // Find supported mime type
+      let mimeType = 'video/webm;codecs=vp9'
+      if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) mimeType = 'video/webm;codecs=h264'
+      if (MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/mp4'
+
+      const stream = offCanvas.captureStream(30)
+
+      // Audio setup — use AudioBuffer approach (avoids createMediaElementSource one-time limit)
+      const exportAudioCtx = new AudioContext()
+      const dest = exportAudioCtx.createMediaStreamDestination()
+      dest.stream.getAudioTracks().forEach(t => stream.addTrack(t))
+
+      // Add voiceover via decodeAudioData
+      if (audioBlobUrl.current) {
+        try {
+          const audioResp = await fetch(audioBlobUrl.current)
+          const audioArrayBuf = await audioResp.arrayBuffer()
+          const audioBuf = await exportAudioCtx.decodeAudioData(audioArrayBuf)
+          const voiceSource = exportAudioCtx.createBufferSource()
+          voiceSource.buffer = audioBuf
+          voiceSource.connect(dest)
+          voiceSource.start()
+        } catch (e) { console.warn('Voiceover decode failed:', e.message) }
+      }
+
+      // Add background music
+      if (bgMusic !== 'none') {
+        const totalDuration = orderedScenes.length * 5 + 2
+        const musicBuf = generateMusicBuffer(exportAudioCtx, bgMusic, totalDuration)
+        const musicSource = exportAudioCtx.createBufferSource()
+        musicSource.buffer = musicBuf
+        const musicGain = exportAudioCtx.createGain(); musicGain.gain.value = 0.3
+        musicSource.connect(musicGain); musicGain.connect(dest); musicSource.start()
+      }
+
+      // Add SFX sounds to export audio dest
+      const playSfxToExport = (type) => {
+        if (!sfxEnabled) return
+        try {
+          if (type === 'whoosh') {
+            const osc = exportAudioCtx.createOscillator(), gain = exportAudioCtx.createGain(), filter = exportAudioCtx.createBiquadFilter()
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(800, exportAudioCtx.currentTime)
+            osc.frequency.exponentialRampToValueAtTime(200, exportAudioCtx.currentTime + 0.3)
+            filter.type = 'bandpass'; filter.frequency.value = 600; filter.Q.value = 2
+            gain.gain.setValueAtTime(0.25, exportAudioCtx.currentTime)
+            gain.gain.exponentialRampToValueAtTime(0.001, exportAudioCtx.currentTime + 0.35)
+            osc.connect(filter); filter.connect(gain); gain.connect(dest)
+            osc.start(exportAudioCtx.currentTime); osc.stop(exportAudioCtx.currentTime + 0.4)
+          } else if (type === 'pop') {
+            const osc = exportAudioCtx.createOscillator(), gain = exportAudioCtx.createGain()
+            osc.type = 'sine'; osc.frequency.setValueAtTime(600, exportAudioCtx.currentTime)
+            osc.frequency.exponentialRampToValueAtTime(200, exportAudioCtx.currentTime + 0.08)
+            gain.gain.setValueAtTime(0.3, exportAudioCtx.currentTime)
+            gain.gain.exponentialRampToValueAtTime(0.001, exportAudioCtx.currentTime + 0.12)
+            osc.connect(gain); gain.connect(dest)
+            osc.start(exportAudioCtx.currentTime); osc.stop(exportAudioCtx.currentTime + 0.15)
+          } else if (type === 'ding') {
+            const osc = exportAudioCtx.createOscillator(), gain = exportAudioCtx.createGain()
+            osc.type = 'sine'; osc.frequency.setValueAtTime(1200, exportAudioCtx.currentTime)
+            gain.gain.setValueAtTime(0.35, exportAudioCtx.currentTime)
+            gain.gain.exponentialRampToValueAtTime(0.001, exportAudioCtx.currentTime + 0.8)
+            osc.connect(gain); gain.connect(dest)
+            osc.start(exportAudioCtx.currentTime); osc.stop(exportAudioCtx.currentTime + 1)
+          }
+        } catch {}
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType })
+      const chunks = []
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
+      const donePromise = new Promise(resolve => { mediaRecorder.onstop = resolve })
+      mediaRecorder.start()
+
+      for (let clipIdx = 0; clipIdx < blobUrls.length; clipIdx++) {
+        const sceneIdx = orderedScenes[clipIdx]
+        const url = blobUrls[clipIdx]
+        setExportProgress(`מייצא סצנה ${clipIdx + 1}/${blobUrls.length}...`)
+
+        // SFX between scenes
+        if (clipIdx > 0) playSfxToExport('whoosh')
+        playSfxToExport('pop')
+
+        const transitionFrames = transition === 'cut' ? 0 : 15
+
+        await new Promise((resolve) => {
+          let resolved = false
+          const done = () => { if (!resolved) { resolved = true; resolve() } }
+          const timeout = setTimeout(done, 8000) // 8s safety per 5s clip
+          const vid = document.createElement('video')
+          vid.crossOrigin = 'anonymous'; vid.src = url; vid.muted = true; vid.playsInline = true
+          vid.onended = () => { clearTimeout(timeout); done() }
+          vid.onerror = () => { clearTimeout(timeout); done() }
+          vid.oncanplay = async () => {
+            try { await vid.play() } catch { done(); return }
+            const subtitle = result.story?.scenes?.[sceneIdx]?.subtitle || ''
+            const words = subtitle.split(/\s+/); const lines = []
+            for (let w = 0; w < words.length; w += 4) lines.push(words.slice(w, w + 4).join(' '))
+            let frameCount = 0
+            const drawFrame = () => {
+              if (resolved || vid.paused || vid.ended) { clearTimeout(timeout); done(); return }
+              frameCount++
+              const inTransition = frameCount <= transitionFrames
+              let alpha = 1, scale = 1
+              if (inTransition && transition === 'fade') alpha = frameCount / transitionFrames
+              if (inTransition && transition === 'zoom') { scale = 1.15 - 0.15 * (frameCount / transitionFrames); alpha = frameCount / transitionFrames }
+              ctx.globalAlpha = 1; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, offCanvas.width, offCanvas.height)
+              ctx.globalAlpha = alpha
+              if (scale !== 1) {
+                ctx.save(); ctx.translate(offCanvas.width / 2, offCanvas.height / 2); ctx.scale(scale, scale)
+                ctx.drawImage(vid, -offCanvas.width / 2, -offCanvas.height / 2, offCanvas.width, offCanvas.height); ctx.restore()
+              } else { ctx.drawImage(vid, 0, 0, offCanvas.width, offCanvas.height) }
+              ctx.globalAlpha = 1
+              drawSubtitleOnCtx(ctx, lines, offCanvas.width, offCanvas.height, subtitleStyle)
+              requestAnimationFrame(drawFrame)
+            }
+            requestAnimationFrame(drawFrame)
+          }
+        })
+      }
+
+      // Ding at end
+      playSfxToExport('ding')
+      await new Promise(r => setTimeout(r, 1000))
+
+      setExportProgress('מסיים...')
+      mediaRecorder.stop(); await donePromise
+      try { exportAudioCtx.close() } catch {}
+      // Revoke blob URLs
+      blobUrls.forEach(u => { try { URL.revokeObjectURL(u) } catch {} })
+
+      const blob = new Blob(chunks, { type: mimeType })
+      const blobUrl = URL.createObjectURL(blob)
+      const ext = mimeType.includes('mp4') ? 'mp4' : 'webm'
+      const a = document.createElement('a'); a.style.display = 'none'; a.href = blobUrl; a.download = `ugc-video.${ext}`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(blobUrl)
       setExportProgress('')
-    } catch (e) {
-      alert('שגיאה בייצוא: ' + e.message)
-      setExportProgress('')
-    } finally {
-      setExporting(false)
-    }
+    } catch (e) { alert('שגיאה בייצוא: ' + e.message); setExportProgress('') } finally { setExporting(false) }
   }
 
   // ===== FORM STEP =====
@@ -393,7 +664,6 @@ export default function Home() {
               </div>
             )
           })}
-          {/* Custom upload */}
           <div style={{ position: 'relative', border: `2px solid ${customAvatar ? 'rgba(34,197,94,0.5)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 14, overflow: 'hidden', cursor: 'pointer', aspectRatio: '3/4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, background: customAvatar ? 'transparent' : 'rgba(255,255,255,0.02)', backgroundImage: customAvatar ? `url(${customAvatar})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center', transition: 'all 300ms ease' }}>
             <input type="file" accept="image/*" onChange={handleAvatarUpload} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
             {!customAvatar && <>
@@ -457,9 +727,8 @@ export default function Home() {
         <p style={{ color: '#52525b', fontSize: 14 }}>יוצר סיפור מחובר עם 4 סצנות — 8-12 דקות</p>
       </div>
 
-      {/* Progress Steps */}
       <div style={cardS}>
-        {AGENT_STEPS.map((s, idx) => {
+        {AGENT_STEPS.map((s) => {
           const st = agentStatus[s.id]
           const colors = { active: '#a855f7', done: '#22c55e', error: '#ef4444' }
           const c = colors[st] || '#27272a'
@@ -472,15 +741,12 @@ export default function Home() {
                   : s.icon}
               </div>
               <div style={{ flex: 1, fontWeight: 600, fontSize: 14, color: st ? '#e4e4e7' : '#52525b' }}>{s.label}</div>
-              <div style={{ fontSize: 12, color: c, fontWeight: 600 }}>
-                {st === 'active' ? 'בתהליך...' : st === 'done' ? 'הושלם' : st === 'error' ? 'שגיאה' : 'ממתין'}
-              </div>
+              <div style={{ fontSize: 12, color: c, fontWeight: 600 }}>{st === 'active' ? 'בתהליך...' : st === 'done' ? 'הושלם' : st === 'error' ? 'שגיאה' : 'ממתין'}</div>
             </div>
           )
         })}
       </div>
 
-      {/* Logs */}
       <div style={{ ...cardS, maxHeight: 180, overflowY: 'auto' }}>
         <div style={{ ...secTitle, marginBottom: 10 }}>לוגים</div>
         <div style={{ fontFamily: 'monospace', fontSize: 11 }}>
@@ -497,178 +763,181 @@ export default function Home() {
   )
 
   // ===== DONE STEP — CapCut-style editor =====
+  const sceneLabels = ['כאב', 'מוצר', 'שימוש', 'תוצאה']
+
   return (
-    <div style={{ ...pageStyle, maxWidth: 1200 }}>
-      {/* Header bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+    <div style={{ ...pageStyle, maxWidth: 1300, padding: '20px 20px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setClipOrder([0,1,2,3]); setMusicUrl(null); setMusicName('') }} style={ghostBtn}>
+          <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setClipOrder([0,1,2,3]) }} style={ghostBtn}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             מודעה חדשה
           </button>
-          <h2 style={{ fontSize: 22, fontWeight: 900, color: '#f0f0ff', margin: 0 }}>עריכת סרטון</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 900, color: '#f0f0ff', margin: 0 }}>עריכת סרטון</h2>
         </div>
-        <button onClick={exportMp4} disabled={exporting} style={{ ...bigBtn, width: 'auto', padding: '12px 32px', margin: 0, fontSize: 15 }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {exporting ? <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>}
-            {exporting ? (exportProgress || 'מייצא...') : 'ייצוא MP4'}
-          </span>
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={playAll} style={{ ...ghostBtn, color: playing ? '#ef4444' : '#a855f7', borderColor: playing ? 'rgba(239,68,68,0.3)' : 'rgba(168,85,247,0.3)' }}>
+            {playing ? '⏹ עצור' : '▶ הפעל הכל'}
+          </button>
+          <button onClick={exportMp4} disabled={exporting} style={{ ...bigBtn, width: 'auto', padding: '10px 28px', margin: 0, fontSize: 14 }}>
+            {exporting ? <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />{exportProgress || 'מייצא...'}</span> : <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>ייצוא MP4</span>}
+          </button>
+        </div>
       </div>
 
-      {/* Main editor area */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 20, marginBottom: 20 }}>
-        {/* Left: Preview */}
-        <div>
-          <div style={{ ...cardS, padding: 0, overflow: 'hidden', position: 'relative' }}>
-            <div style={{ background: '#000', aspectRatio: '9/16', maxHeight: 520, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <video ref={videoRef} playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
-              <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
-              {/* Play All overlay button */}
-              {!playing && (
-                <button onClick={playAll} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 64, height: 64, borderRadius: '50%', background: 'rgba(168,85,247,0.85)', border: '2px solid rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)', transition: 'all 200ms ease' }}>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="white" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      {/* Main layout: Left sidebar + Center preview */}
+      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, marginBottom: 16 }}>
+        {/* Left Sidebar */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 640, overflowY: 'auto' }}>
+          {/* Subtitle Style */}
+          <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
+            <div style={{ ...secTitle, marginBottom: 10, fontSize: 12 }}>כתוביות</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {SUBTITLE_STYLES.map(s => (
+                <button key={s.id} onClick={() => setSubtitleStyle(s.id)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: subtitleStyle === s.id ? 'rgba(168,85,247,0.08)' : 'transparent', border: `1px solid ${subtitleStyle === s.id ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 12, color: subtitleStyle === s.id ? '#d4d4ff' : '#71717a', fontFamily: 'Heebo,sans-serif', transition: 'all 0.2s' }}>
+                  <span style={{ fontWeight: 600, minWidth: 50 }}>{s.label}</span>
+                  <span style={{ fontSize: 11, color: '#52525b' }}>{s.desc}</span>
                 </button>
-              )}
-              {playing && (
-                <button onClick={playAll} style={{ position: 'absolute', top: 16, right: 16, width: 40, height: 40, borderRadius: 10, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-                </button>
-              )}
+              ))}
             </div>
           </div>
-        </div>
 
-        {/* Right: Audio controls + details */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Voiceover */}
-          <div style={cardS}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
-              <div style={secTitle}>קריינות</div>
+          {/* Music */}
+          <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
+            <div style={{ ...secTitle, marginBottom: 10, fontSize: 12, color: '#22c55e' }}>מוזיקת רקע</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {MUSIC_TRACKS.map(t => (
+                <button key={t.id} onClick={() => setBgMusic(t.id)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px', background: bgMusic === t.id ? 'rgba(34,197,94,0.06)' : 'transparent', border: `1px solid ${bgMusic === t.id ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 12, color: bgMusic === t.id ? '#86efac' : '#71717a', fontFamily: 'Heebo,sans-serif', transition: 'all 0.2s' }}>
+                  <span>{t.emoji}</span>
+                  <span style={{ flex: 1, textAlign: 'right' }}>{t.label}</span>
+                </button>
+              ))}
             </div>
-            <audio ref={audioRef} controls style={{ width: '100%', borderRadius: 8, height: 36 }} />
-            <div style={{ marginTop: 10, background: 'rgba(255,255,255,0.02)', borderRadius: 10, padding: '10px 12px', fontSize: 12, color: '#a1a1aa', direction: 'rtl', lineHeight: 1.7, fontFamily: 'Heebo,sans-serif', maxHeight: 80, overflowY: 'auto' }}>{result?.hebrewVoice}</div>
-          </div>
-
-          {/* Music track */}
-          <div style={cardS}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-              <div style={{ ...secTitle, color: '#22c55e' }}>מוזיקת רקע</div>
-            </div>
-            {musicUrl ? (
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <div style={{ flex: 1, fontSize: 12, color: '#a1a1aa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{musicName}</div>
-                  <button onClick={() => { setMusicUrl(null); setMusicName(''); if (musicRef.current) musicRef.current.src = '' }} style={{ ...ghostBtn, padding: '4px 10px', fontSize: 11, color: '#ef4444', borderColor: 'rgba(239,68,68,0.2)' }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                    הסר
-                  </button>
-                </div>
-                <audio ref={musicRef} controls style={{ width: '100%', borderRadius: 8, height: 36 }} />
-              </div>
-            ) : (
-              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '16px 12px', border: '2px dashed rgba(34,197,94,0.2)', borderRadius: 12, cursor: 'pointer', background: 'rgba(34,197,94,0.03)', transition: 'all 200ms ease', fontSize: 13, color: '#52525b' }}>
-                <input type="file" accept="audio/*" onChange={handleMusicUpload} style={{ display: 'none' }} />
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                העלה קובץ מוזיקה
-              </label>
+            {bgMusic !== 'none' && (
+              <button onClick={toggleMusicPreview} style={{ ...ghostBtn, width: '100%', marginTop: 6, fontSize: 11, justifyContent: 'center', padding: '6px 10px', color: musicPreviewing ? '#ef4444' : '#22c55e', borderColor: musicPreviewing ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)' }}>
+                {musicPreviewing ? '⏹ עצור' : '▶ השמע'}
+              </button>
             )}
           </div>
 
-          {/* Scene details for current scene */}
-          <div style={cardS}>
-            <div style={secTitle}>סצנה {currentScene + 1} — {result?.story?.scenes?.[currentScene]?.type}</div>
-            {result?.story?.scenes?.[currentScene] && (
-              <div>
-                <div style={{ fontSize: 11, color: '#52525b', marginBottom: 6, lineHeight: 1.7 }}><span style={{ color: '#8b5cf6', fontWeight: 600 }}>NB:</span> {result.story.scenes[currentScene].nb_prompt}</div>
-                <div style={{ fontSize: 11, color: '#52525b', marginBottom: 6, lineHeight: 1.7 }}><span style={{ color: '#7c3aed', fontWeight: 600 }}>Kling:</span> {result.story.scenes[currentScene].kling_prompt}</div>
-                <div style={{ fontSize: 12, color: '#22c55e', fontWeight: 600, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>{result.story.scenes[currentScene].subtitle}</div>
-              </div>
-            )}
+          {/* SFX + Transitions */}
+          <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
+            <div style={{ ...secTitle, marginBottom: 10, fontSize: 12 }}>אפקטים ומעברים</div>
+            <button onClick={() => setSfxEnabled(v => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: sfxEnabled ? 'rgba(168,85,247,0.06)' : 'transparent', border: `1px solid ${sfxEnabled ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 12, color: sfxEnabled ? '#d4d4ff' : '#52525b', fontFamily: 'Heebo,sans-serif', width: '100%', marginBottom: 8, transition: 'all 0.2s' }}>
+              <span>🔊</span><span style={{ flex: 1, textAlign: 'right' }}>אפקטי סאונד</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: sfxEnabled ? '#a855f7' : '#3f3f46' }}>{sfxEnabled ? 'ON' : 'OFF'}</span>
+            </button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {TRANSITIONS.map(t => (
+                <button key={t.id} onClick={() => setTransition(t.id)}
+                  style={{ flex: 1, padding: '7px 6px', background: transition === t.id ? 'rgba(168,85,247,0.08)' : 'transparent', border: `1px solid ${transition === t.id ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 11, color: transition === t.id ? '#d4d4ff' : '#52525b', fontFamily: 'Heebo,sans-serif', textAlign: 'center', transition: 'all 0.2s' }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Download individual scenes */}
-          <div style={cardS}>
-            <div style={secTitle}>הורדות בודדות</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          {/* Script / voiceover */}
+          <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
+            <div style={{ ...secTitle, marginBottom: 10, fontSize: 12 }}>קריינות</div>
+            <audio ref={audioRef} controls style={{ width: '100%', borderRadius: 8, height: 32 }} />
+            <div style={{ marginTop: 8, fontSize: 11, color: '#a1a1aa', direction: 'rtl', lineHeight: 1.7, fontFamily: 'Heebo,sans-serif', maxHeight: 80, overflowY: 'auto' }}>{result?.hebrewVoice}</div>
+          </div>
+
+          {/* Scene detail for current */}
+          <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
+            <div style={{ ...secTitle, marginBottom: 8, fontSize: 12 }}>סצנה {currentScene + 1} — {result?.story?.scenes?.[currentScene]?.type}</div>
+            <div style={{ fontSize: 10, color: '#52525b', lineHeight: 1.6, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
+              <div style={{ marginBottom: 4 }}><span style={{ color: '#22c55e', fontWeight: 600 }}>{result?.story?.scenes?.[currentScene]?.subtitle}</span></div>
+              <div><span style={{ color: '#8b5cf6', fontWeight: 500 }}>Kling:</span> {result?.story?.scenes?.[currentScene]?.kling_prompt?.slice(0, 120)}...</div>
+            </div>
+          </div>
+
+          {/* Downloads */}
+          <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
+            <div style={{ ...secTitle, marginBottom: 8, fontSize: 12 }}>הורדות בודדות</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
               {result?.videos?.map((url, i) => (
-                <div key={i} style={{ background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 8, padding: '8px 10px', textAlign: 'center', fontSize: 11 }}>
-                  <div style={{ color: '#52525b', marginBottom: 3 }}>סצנה {i+1}</div>
+                <div key={i} style={{ background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 6, padding: '6px 8px', textAlign: 'center', fontSize: 10 }}>
+                  <div style={{ color: '#52525b', marginBottom: 2 }}>{sceneLabels[i]}</div>
                   {url ? <a href={url} target="_blank" rel="noreferrer" style={{ color: '#a855f7', textDecoration: 'none', fontWeight: 600 }}>הורד</a> : <span style={{ color: '#27272a' }}>--</span>}
                 </div>
               ))}
             </div>
           </div>
         </div>
+
+        {/* Center: Full-width Preview */}
+        <div style={{ ...cardS, marginBottom: 0, padding: 0, overflow: 'hidden' }}>
+          <div style={{ background: '#000', aspectRatio: '9/16', maxHeight: 640, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
+            <video ref={videoRef} playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+            <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
+            {!playing && (
+              <button onClick={playAll} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 72, height: 72, borderRadius: '50%', background: 'rgba(168,85,247,0.8)', border: '2px solid rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)', transition: 'all 200ms ease' }}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="white" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              </button>
+            )}
+            {playing && (
+              <button onClick={playAll} style={{ position: 'absolute', top: 12, right: 12, width: 36, height: 36, borderRadius: 8, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              </button>
+            )}
+            {/* Current scene badge */}
+            <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(168,85,247,0.8)', borderRadius: 8, padding: '4px 10px', fontSize: 11, color: '#fff', fontWeight: 700, backdropFilter: 'blur(4px)' }}>
+              סצנה {currentScene + 1} — {result?.story?.scenes?.[currentScene]?.type}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Timeline — drag-and-drop clips */}
-      <div style={{ ...cardS, padding: '16px 20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-            <div style={secTitle}>ציר זמן</div>
-          </div>
-          <div style={{ fontSize: 11, color: '#52525b' }}>גרור כדי לשנות סדר</div>
+      {/* Bottom: Timeline with drag-and-drop */}
+      <div style={{ ...cardS, padding: '14px 16px', marginBottom: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div style={{ ...secTitle, marginBottom: 0, fontSize: 12 }}>ציר זמן</div>
+          <div style={{ fontSize: 10, color: '#3f3f46' }}>גרור כדי לשנות סדר</div>
         </div>
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
           {clipOrder.map((sceneIdx, orderIdx) => {
             const scene = result?.story?.scenes?.[sceneIdx]
             const videoUrl = result?.videos?.[sceneIdx]
             const isActive = currentScene === sceneIdx
             const isDragging = dragIdx === orderIdx
             return (
-              <div
-                key={orderIdx}
-                draggable
+              <div key={orderIdx} draggable
                 onDragStart={(e) => handleDragStart(e, orderIdx)}
                 onDragOver={(e) => handleDragOver(e, orderIdx)}
                 onDragEnd={handleDragEnd}
                 onClick={() => loadScene(sceneIdx)}
-                style={{
-                  flex: '1 1 0', minWidth: 140,
-                  background: isActive ? 'rgba(168,85,247,0.06)' : 'rgba(255,255,255,0.02)',
-                  border: `2px solid ${isActive ? 'rgba(168,85,247,0.5)' : isDragging ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.06)'}`,
-                  borderRadius: 12, overflow: 'hidden', cursor: 'grab',
-                  opacity: isDragging ? 0.6 : 1,
-                  transition: 'all 200ms ease',
-                  boxShadow: isActive ? '0 0 16px rgba(168,85,247,0.12)' : 'none'
-                }}
-              >
+                style={{ flex: '1 1 0', minWidth: 0, background: isActive ? 'rgba(168,85,247,0.06)' : 'rgba(255,255,255,0.02)', border: `2px solid ${isActive ? 'rgba(168,85,247,0.5)' : isDragging ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 10, overflow: 'hidden', cursor: 'grab', opacity: isDragging ? 0.5 : 1, transition: 'all 200ms ease' }}>
                 <div style={{ aspectRatio: '16/9', background: BG, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {videoUrl
                     ? <video src={videoUrl} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onLoadedMetadata={e => { e.target.currentTime = 1 }} />
-                    : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#27272a" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#27272a" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/></svg>
                   }
-                  {/* Duration badge */}
-                  <div style={{ position: 'absolute', top: 4, left: 4, background: 'rgba(0,0,0,0.7)', borderRadius: 4, padding: '2px 6px', fontSize: 9, color: '#fff', fontWeight: 600 }}>5s</div>
-                  {/* Scene number */}
-                  <div style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 6, background: isActive ? '#a855f7' : 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#fff', fontWeight: 700 }}>{orderIdx + 1}</div>
+                  <div style={{ position: 'absolute', top: 3, left: 3, background: 'rgba(0,0,0,0.7)', borderRadius: 3, padding: '1px 5px', fontSize: 8, color: '#fff', fontWeight: 600 }}>5s</div>
+                  <div style={{ position: 'absolute', top: 3, right: 3, width: 16, height: 16, borderRadius: 4, background: isActive ? '#a855f7' : 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#fff', fontWeight: 700 }}>{orderIdx + 1}</div>
+                  <div style={{ position: 'absolute', bottom: 2, left: 3, right: 3, textAlign: 'center', color: 'white', fontSize: 8, fontWeight: 700, textShadow: '0 0 3px #000, 0 0 3px #000', fontFamily: 'Heebo,sans-serif', lineHeight: 1.3, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{scene?.subtitle}</div>
                 </div>
-                <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: isActive ? '#a855f7' : '#71717a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {scene?.type || `סצנה ${sceneIdx + 1}`}
-                  </div>
+                <div style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                  <span style={{ fontSize: 9, fontWeight: 600, color: isActive ? '#a855f7' : '#52525b' }}>{scene?.type || sceneLabels[sceneIdx]}</span>
                 </div>
               </div>
             )
           })}
         </div>
-        {/* Timeline bar visual */}
-        <div style={{ marginTop: 10, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.04)', display: 'flex', overflow: 'hidden' }}>
+        {/* Timeline bar */}
+        <div style={{ marginTop: 8, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.04)', display: 'flex', overflow: 'hidden' }}>
           {clipOrder.map((sceneIdx, i) => (
             <div key={i} style={{ flex: 1, background: currentScene === sceneIdx ? '#a855f7' : 'rgba(168,85,247,0.15)', borderRight: i < clipOrder.length - 1 ? '1px solid rgba(0,0,0,0.3)' : 'none', transition: 'background 300ms ease' }} />
           ))}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 9, color: '#3f3f46' }}>
-          <span>0s</span>
-          <span>5s</span>
-          <span>10s</span>
-          <span>15s</span>
-          <span>20s</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, fontSize: 8, color: '#3f3f46' }}>
+          <span>0s</span><span>5s</span><span>10s</span><span>15s</span><span>20s</span>
         </div>
       </div>
 

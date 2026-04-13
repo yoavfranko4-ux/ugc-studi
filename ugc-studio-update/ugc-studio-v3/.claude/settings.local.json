@@ -28,7 +28,8 @@
       "Read(//c/Users/Naomi/AppData/Roaming/**)",
       "Read(//c//**)",
       "Read(//c/Users/Naomi/**)",
-      "Bash(\"/c/Program Files/nodejs/node.exe\" -e \"const fs=require\\('fs'\\); const src=fs.readFileSync\\('C:/Users/Naomi/ugc-studi/ugc-studio-update/ugc-studio-v3/app/studio/page.js','utf8'\\); console.log\\('File size:', src.length, 'chars'\\); const opens=\\(src.match\\(/\\\\{/g\\)||[]\\).length; const closes=\\(src.match\\(/\\\\}/g\\)||[]\\).length; console.log\\('Braces: {='+opens+' }='+closes\\); const po=\\(src.match\\(/\\\\\\(/g\\)||[]\\).length; const pc=\\(src.match\\(/\\\\\\)/g\\)||[]\\).length; console.log\\('Parens: \\(='+po+' \\)='+pc\\)\")"
+      "Bash(\"/c/Program Files/nodejs/node.exe\" -e \"const fs=require\\('fs'\\); const src=fs.readFileSync\\('C:/Users/Naomi/ugc-studi/ugc-studio-update/ugc-studio-v3/app/studio/page.js','utf8'\\); console.log\\('File size:', src.length, 'chars'\\); const opens=\\(src.match\\(/\\\\{/g\\)||[]\\).length; const closes=\\(src.match\\(/\\\\}/g\\)||[]\\).length; console.log\\('Braces: {='+opens+' }='+closes\\); const po=\\(src.match\\(/\\\\\\(/g\\)||[]\\).length; const pc=\\(src.match\\(/\\\\\\)/g\\)||[]\\).length; console.log\\('Parens: \\(='+po+' \\)='+pc\\)\")",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" -e \"const fs=require\\('fs'\\); const src=fs.readFileSync\\('C:/Users/Naomi/ugc-studi/ugc-studio-update/ugc-studio-v3/app/studio/page.js','utf8'\\); console.log\\('Lines:', src.split\\('\\\\\\\\n'\\).length\\); const o=\\(src.match\\(/\\\\{/g\\)||[]\\).length, c=\\(src.match\\(/\\\\}/g\\)||[]\\).length; console.log\\('Braces: {='+o+' }='+c\\); const po=\\(src.match\\(/\\\\\\(/g\\)||[]\\).length, pc=\\(src.match\\(/\\\\\\)/g\\)||[]\\).length; console.log\\('Parens: \\(='+po+' \\)='+pc\\); const so=\\(src.match\\(/\\\\[/g\\)||[]\\).length, sc=\\(src.match\\(/\\\\]/g\\)||[]\\).length; console.log\\('Brackets: [='+so+' ]='+sc\\)\")"
     ]
   }
 }
