@@ -631,190 +631,68 @@ export default function Home() {
     if (musicCtxRef.current) { try { musicCtxRef.current.close() } catch {} }
   }, [result, clipOrder, bgMusic, playing, videoBlobUrls, subtitleStyle])
 
-  // === Export: 480x854 (480p 9:16), cover mode, 100ms timeslice ===
+  // === Server-side FFmpeg export via /api/export ===
   const exportMp4 = async () => {
     if (!result?.videos?.length) return
-    setExporting(true); setExportProgress('מכין ייצוא... 0%')
-    const EW = 480, EH = 854
+    setExporting(true); setExportProgress('מכין ייצוא בשרת... 0%')
     try {
       const orderedScenes = clipOrder.filter(i => result.videos[i])
       if (orderedScenes.length === 0) throw new Error('אין סרטונים לייצוא')
-      const totalClips = orderedScenes.length
 
-      // Preload voiceover AudioBuffer
-      setExportProgress('טוען קריינות... 5%')
-      let voiceAudioBuffer = null
-      if (audioBlobUrl.current) {
-        try {
-          const tmp = new AudioContext()
-          const buf = await (await fetch(audioBlobUrl.current)).arrayBuffer()
-          voiceAudioBuffer = await tmp.decodeAudioData(buf); tmp.close()
-        } catch {}
-      } else if (result.audioBase64) {
-        try {
-          const tmp = new AudioContext()
-          const b = atob(result.audioBase64), u = new Uint8Array(b.length)
-          for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i)
-          voiceAudioBuffer = await tmp.decodeAudioData(u.buffer); tmp.close()
-        } catch {}
-      }
+      // Build ordered video URLs
+      const videoUrls = orderedScenes.map(i => result.videos[i])
 
-      // Prepare blob URLs — fetch all in parallel
-      setExportProgress('מוריד סרטונים... 10%')
-      const blobUrls = await Promise.all(orderedScenes.map(async (si) => {
-        const pre = videoBlobUrls[si]
-        if (pre?.startsWith('blob:')) return pre
-        try { const r = await fetch(result.videos[si]); return URL.createObjectURL(await r.blob()) }
-        catch { return result.videos[si] }
-      }))
-      setExportProgress('מוריד סרטונים... 20%')
+      // Build subtitles array with timestamps
+      let timeOffset = 0
+      const subtitles = orderedScenes.map(i => {
+        const text = result.story?.scenes?.[i]?.subtitle || ''
+        const sub = { text, start: timeOffset, duration: 5 }
+        timeOffset += 5
+        return sub
+      })
 
-      // Canvas + audio setup
-      setExportProgress('מכין ייצוא... 22%')
-      const offCanvas = document.createElement('canvas'); offCanvas.width = EW; offCanvas.height = EH
-      const ctx = offCanvas.getContext('2d')
-      let mimeType = 'video/webm;codecs=vp9'
-      if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) mimeType = 'video/webm;codecs=h264'
-      if (MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/mp4'
-      const stream = offCanvas.captureStream(30)
-      const aCtx = new AudioContext()
-      const aDest = aCtx.createMediaStreamDestination()
-      aDest.stream.getAudioTracks().forEach(t => stream.addTrack(t))
+      setExportProgress('שולח לשרת... 15%')
 
-      // Voiceover
-      if (voiceAudioBuffer) {
-        const s = aCtx.createBufferSource(); s.buffer = voiceAudioBuffer
-        const g = aCtx.createGain(); g.gain.value = 0.85
-        s.connect(g); g.connect(aDest); s.start()
-      }
-      // Music — generate and mix into audio destination
-      if (bgMusic !== 'none') {
-        const musicDur = totalClips * 5 + 2
-        const buf = generateMusicBuffer(aCtx, bgMusic, musicDur)
-        const s = aCtx.createBufferSource(); s.buffer = buf
-        const g = aCtx.createGain(); g.gain.value = 0.25
-        s.connect(g); g.connect(aDest)
-        s.start(aCtx.currentTime)
-      }
-      // SFX helper
-      const sfx = (type) => {
-        if (!sfxEnabled) return
-        try {
-          const t = aCtx.currentTime
-          if (type === 'whoosh') {
-            const o = aCtx.createOscillator(), g = aCtx.createGain(), f = aCtx.createBiquadFilter()
-            o.type='sawtooth'; o.frequency.setValueAtTime(800,t); o.frequency.exponentialRampToValueAtTime(200,t+.3)
-            f.type='bandpass'; f.frequency.value=600; f.Q.value=2; g.gain.setValueAtTime(.25,t); g.gain.exponentialRampToValueAtTime(.001,t+.35)
-            o.connect(f); f.connect(g); g.connect(aDest); o.start(t); o.stop(t+.4)
-          } else if (type === 'pop') {
-            const o = aCtx.createOscillator(), g = aCtx.createGain()
-            o.type='sine'; o.frequency.setValueAtTime(600,t); o.frequency.exponentialRampToValueAtTime(200,t+.08)
-            g.gain.setValueAtTime(.3,t); g.gain.exponentialRampToValueAtTime(.001,t+.12)
-            o.connect(g); g.connect(aDest); o.start(t); o.stop(t+.15)
-          } else if (type === 'ding') {
-            const o = aCtx.createOscillator(), g = aCtx.createGain()
-            o.type='sine'; o.frequency.setValueAtTime(1200,t); g.gain.setValueAtTime(.35,t); g.gain.exponentialRampToValueAtTime(.001,t+.8)
-            o.connect(g); g.connect(aDest); o.start(t); o.stop(t+1)
-          }
-        } catch {}
-      }
-
-      // MediaRecorder — 100ms timeslice for speed
-      const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 })
-      const chunks = []
-      rec.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
-      const recDone = new Promise(r => { rec.onstop = r })
-      rec.start(100)
-
-      // Render each clip — ensure video is playing and frames advancing
-      for (let ci = 0; ci < blobUrls.length; ci++) {
-        const si = orderedScenes[ci]
-        setExportProgress(`מעבד סצנה ${ci+1}/${totalClips}... ${25+Math.round((ci/totalClips)*65)}%`)
-        if (ci > 0) sfx('whoosh'); sfx('pop')
-
-        await new Promise((resolve) => {
-          let finished = false
-          const finish = () => { if (!finished) { finished = true; resolve() } }
-
-          const v = document.createElement('video')
-          v.crossOrigin = 'anonymous'
-          v.src = blobUrls[ci]
-          v.muted = true
-          v.playsInline = true
-          v.preload = 'auto'
-
-          // Safety: if clip takes longer than 7s, move on
-          const safetyTimer = setTimeout(finish, 7000)
-
-          v.onerror = () => { clearTimeout(safetyTimer); finish() }
-          v.onended = () => { clearTimeout(safetyTimer); finish() }
-
-          const startPlayback = async () => {
-            // Ensure video actually starts playing
-            try {
-              await v.play()
-            } catch {
-              finish(); return
-            }
-
-            // Wait until currentTime actually advances (confirms real playback)
-            let waited = 0
-            while (v.currentTime === 0 && waited < 500) {
-              await new Promise(r => setTimeout(r, 10))
-              waited += 10
-            }
-
-            const sub = result.story?.scenes?.[si]?.subtitle || ''
-            const clipStartTime = performance.now()
-
-            // rAF draw loop — runs continuously while video plays
-            const drawLoop = () => {
-              if (finished) return
-              // Check if video ended or is stuck
-              if (v.ended) { clearTimeout(safetyTimer); finish(); return }
-
-              const elapsed = (performance.now() - clipStartTime) / 1000
-
-              // Draw video frame with cover mode
-              ctx.globalAlpha = 1
-              ctx.fillStyle = '#000'
-              ctx.fillRect(0, 0, EW, EH)
-              drawVideoCover(ctx, v, EW, EH)
-
-              // Draw time-synced subtitles
-              const lines = getSubtitleLinesAtTime(sub, elapsed, 5)
-              drawSubtitleOnCtx(ctx, lines, EW, EH, subtitleStyle)
-
-              requestAnimationFrame(drawLoop)
-            }
-            requestAnimationFrame(drawLoop)
-          }
-
-          // Start as soon as enough data is buffered
-          if (v.readyState >= 3) {
-            startPlayback()
-          } else {
-            v.oncanplay = () => { v.oncanplay = null; startPlayback() }
-          }
+      const resp = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoUrls,
+          audioBase64: result.audioBase64 || null,
+          subtitles,
+          bgMusic,
+          subtitleStyle,
         })
-        setExportProgress(`מעבד סצנה ${ci+1}/${totalClips}... ${25+Math.round(((ci+1)/totalClips)*65)}%`)
+      })
+
+      setExportProgress('FFmpeg מעבד... 50%')
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }))
+        throw new Error(err.error || 'שגיאת שרת')
       }
 
-      sfx('ding'); await new Promise(r => setTimeout(r, 600))
-      setExportProgress('מסיים... 95%')
-      rec.stop(); await recDone
-      try { aCtx.close() } catch {}
+      setExportProgress('מוריד MP4... 90%')
+      const blob = await resp.blob()
+      if (blob.size < 1000) throw new Error('ייצוא נכשל — קובץ ריק')
 
-      const blob = new Blob(chunks, { type: mimeType })
-      if (blob.size < 1000) throw new Error('ייצוא נכשל')
       const url = URL.createObjectURL(blob)
-      const ext = mimeType.includes('mp4') ? 'mp4' : 'webm'
-      const a = document.createElement('a'); a.style.display='none'; a.href=url; a.download=`ugc-video.${ext}`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+      const a = document.createElement('a')
+      a.style.display = 'none'
+      a.href = url
+      a.download = 'ugc-video.mp4'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
       setExportProgress('הושלם! 100%')
       setTimeout(() => setExportProgress(''), 3000)
-    } catch (e) { console.error('Export error:', e); alert('שגיאה: ' + e.message); setExportProgress('') }
-    finally { setExporting(false) }
+    } catch (e) {
+      console.error('Export error:', e)
+      alert('שגיאה בייצוא: ' + e.message)
+      setExportProgress('')
+    } finally { setExporting(false) }
   }
 
   // === Save Edit to Supabase ===
