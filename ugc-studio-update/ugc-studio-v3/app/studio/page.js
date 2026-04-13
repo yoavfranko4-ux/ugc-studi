@@ -98,7 +98,7 @@ function generateMusicBuffer(ctx, trackId, durationSec) {
       val += 0.02 * Math.sin(2 * Math.PI * 80 * t)
     }
     const fadeIn = Math.min(1, t / 1.0), fadeOut = Math.min(1, (durationSec - t) / 1.5)
-    val *= fadeIn * fadeOut * 0.7
+    val *= fadeIn * fadeOut * 1.4
     left[i] = val; right[i] = val * 0.95 + 0.01 * Math.sin(2 * Math.PI * 0.5 * t) * val
   }
   return buffer
@@ -125,16 +125,21 @@ function getSubtitleLinesAtTime(text, timeInScene, sceneDuration) {
   return allLines.slice(currentLineIdx, currentLineIdx + 2)
 }
 
-// Draw styled subtitle lines on canvas (export size)
+// Draw styled subtitle lines on canvas (scales to any canvas size)
 function drawSubtitleOnCtx(ctx, lines, canvasW, canvasH, style) {
   if (!lines.length) return
-  const maxW = canvasW * 0.85
+  const maxW = canvasW * 0.80
   const isMinimal = style === 'minimal'
-  const fontSize = isMinimal ? 36 : 48
+  // Scale font proportionally: base 48px at 1080w, scale down for smaller canvases
+  const scale = canvasW / 1080
+  const fontSize = Math.round((isMinimal ? 36 : 48) * scale)
   ctx.font = `bold ${fontSize}px Heebo, sans-serif`
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-  const lineHeight = isMinimal ? 44 : 60
-  const startY = canvasH * 0.82 - ((lines.length - 1) * lineHeight) / 2
+  const lineHeight = Math.round((isMinimal ? 44 : 60) * scale)
+  // Position at 82% height but with at least 10% padding from bottom
+  const bottomPad = canvasH * 0.10
+  const targetY = canvasH - bottomPad - ((lines.length - 1) * lineHeight) / 2 - fontSize / 2
+  const startY = Math.min(canvasH * 0.82, targetY) - ((lines.length - 1) * lineHeight) / 2
   const x = canvasW / 2
   lines.forEach((line, i) => {
     const y = startY + i * lineHeight
@@ -682,12 +687,14 @@ export default function Home() {
         const g = aCtx.createGain(); g.gain.value = 0.85
         s.connect(g); g.connect(aDest); s.start()
       }
-      // Music
+      // Music — generate and mix into audio destination
       if (bgMusic !== 'none') {
-        const buf = generateMusicBuffer(aCtx, bgMusic, totalClips * 5 + 2)
+        const musicDur = totalClips * 5 + 2
+        const buf = generateMusicBuffer(aCtx, bgMusic, musicDur)
         const s = aCtx.createBufferSource(); s.buffer = buf
-        const g = aCtx.createGain(); g.gain.value = 0.3
-        s.connect(g); g.connect(aDest); s.start()
+        const g = aCtx.createGain(); g.gain.value = 0.25
+        s.connect(g); g.connect(aDest)
+        s.start(aCtx.currentTime)
       }
       // SFX helper
       const sfx = (type) => {
@@ -719,48 +726,76 @@ export default function Home() {
       const recDone = new Promise(r => { rec.onstop = r })
       rec.start(100)
 
-      // Render each clip with cover mode + time-synced subtitles
+      // Render each clip — ensure video is playing and frames advancing
       for (let ci = 0; ci < blobUrls.length; ci++) {
         const si = orderedScenes[ci]
         setExportProgress(`מעבד סצנה ${ci+1}/${totalClips}... ${25+Math.round((ci/totalClips)*65)}%`)
         if (ci > 0) sfx('whoosh'); sfx('pop')
-        const transFr = transition === 'cut' ? 0 : 12
 
-        await new Promise(resolve => {
-          let done = false
-          const finish = () => { if (!done) { done = true; resolve() } }
-          const timer = setTimeout(finish, 6500)
+        await new Promise((resolve) => {
+          let finished = false
+          const finish = () => { if (!finished) { finished = true; resolve() } }
+
           const v = document.createElement('video')
-          v.crossOrigin = 'anonymous'; v.src = blobUrls[ci]; v.muted = true; v.playsInline = true; v.preload = 'auto'
-          v.onended = () => { clearTimeout(timer); finish() }
-          v.onerror = () => { clearTimeout(timer); finish() }
-          const go = async () => {
-            try { await v.play() } catch { finish(); return }
+          v.crossOrigin = 'anonymous'
+          v.src = blobUrls[ci]
+          v.muted = true
+          v.playsInline = true
+          v.preload = 'auto'
+
+          // Safety: if clip takes longer than 7s, move on
+          const safetyTimer = setTimeout(finish, 7000)
+
+          v.onerror = () => { clearTimeout(safetyTimer); finish() }
+          v.onended = () => { clearTimeout(safetyTimer); finish() }
+
+          const startPlayback = async () => {
+            // Ensure video actually starts playing
+            try {
+              await v.play()
+            } catch {
+              finish(); return
+            }
+
+            // Wait until currentTime actually advances (confirms real playback)
+            let waited = 0
+            while (v.currentTime === 0 && waited < 500) {
+              await new Promise(r => setTimeout(r, 10))
+              waited += 10
+            }
+
             const sub = result.story?.scenes?.[si]?.subtitle || ''
-            let fc = 0
-            const startT = performance.now()
-            const draw = () => {
-              if (done || v.paused || v.ended) { clearTimeout(timer); finish(); return }
-              fc++
-              const elapsed = (performance.now() - startT) / 1000
-              const inT = fc <= transFr
-              let alpha = 1, scale = 1
-              if (inT && transition === 'fade') alpha = fc / transFr
-              if (inT && transition === 'zoom') { scale = 1.15 - .15*(fc/transFr); alpha = fc/transFr }
-              ctx.globalAlpha = 1; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, EW, EH)
-              ctx.globalAlpha = alpha
-              if (scale !== 1) {
-                ctx.save(); ctx.translate(EW/2, EH/2); ctx.scale(scale, scale); ctx.translate(-EW/2, -EH/2)
-                drawVideoCover(ctx, v, EW, EH); ctx.restore()
-              } else { drawVideoCover(ctx, v, EW, EH) }
+            const clipStartTime = performance.now()
+
+            // rAF draw loop — runs continuously while video plays
+            const drawLoop = () => {
+              if (finished) return
+              // Check if video ended or is stuck
+              if (v.ended) { clearTimeout(safetyTimer); finish(); return }
+
+              const elapsed = (performance.now() - clipStartTime) / 1000
+
+              // Draw video frame with cover mode
               ctx.globalAlpha = 1
+              ctx.fillStyle = '#000'
+              ctx.fillRect(0, 0, EW, EH)
+              drawVideoCover(ctx, v, EW, EH)
+
+              // Draw time-synced subtitles
               const lines = getSubtitleLinesAtTime(sub, elapsed, 5)
               drawSubtitleOnCtx(ctx, lines, EW, EH, subtitleStyle)
-              requestAnimationFrame(draw)
+
+              requestAnimationFrame(drawLoop)
             }
-            requestAnimationFrame(draw)
+            requestAnimationFrame(drawLoop)
           }
-          if (v.readyState >= 3) go(); else v.oncanplay = go
+
+          // Start as soon as enough data is buffered
+          if (v.readyState >= 3) {
+            startPlayback()
+          } else {
+            v.oncanplay = () => { v.oncanplay = null; startPlayback() }
+          }
         })
         setExportProgress(`מעבד סצנה ${ci+1}/${totalClips}... ${25+Math.round(((ci+1)/totalClips)*65)}%`)
       }
