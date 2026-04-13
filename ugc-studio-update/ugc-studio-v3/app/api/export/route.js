@@ -1,37 +1,19 @@
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { writeFile, mkdir, readFile, rm } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import path from 'path'
+import ffmpegStatic from 'ffmpeg-static'
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 
 export const maxDuration = 120
 
-// Find ffmpeg binary — try ffmpeg-static first (bundled), then system path
-async function findFfmpeg() {
-  // 1. ffmpeg-static npm package (bundles the binary, works without system install)
-  try {
-    const mod = await import('ffmpeg-static')
-    if (mod.default) {
-      console.log('[Export] Using ffmpeg-static:', mod.default)
-      return mod.default
-    }
-  } catch {}
-  // 2. System-installed ffmpeg (via nixpacks or apt)
-  try {
-    const { stdout } = await execAsync('which ffmpeg')
-    const p = stdout.trim()
-    if (p) { console.log('[Export] Using system ffmpeg:', p); return p }
-  } catch {}
-  // 3. Common nix paths
-  try {
-    const { stdout } = await execAsync('find /nix -name ffmpeg -type f 2>/dev/null | head -1')
-    const p = stdout.trim()
-    if (p) { console.log('[Export] Using nix ffmpeg:', p); return p }
-  } catch {}
-  // 4. Last resort
-  return 'ffmpeg'
+// Resolve ffmpeg binary path — ffmpeg-static provides the full path
+function getFfmpegPath() {
+  const p = ffmpegStatic
+  console.log('[Export] ffmpeg-static resolved to:', p)
+  return p
 }
 
 // Generate ASS subtitle file content from subtitles array
@@ -110,8 +92,8 @@ export async function POST(req) {
       return Response.json({ error: 'No video clips provided' }, { status: 400 })
     }
 
-    const ffmpeg = await findFfmpeg()
-    console.log('[Export] FFmpeg path:', ffmpeg)
+    const ffmpegPath = getFfmpegPath()
+    console.log('[Export] FFmpeg path:', ffmpegPath)
 
     await mkdir(jobDir, { recursive: true })
 
@@ -209,11 +191,10 @@ export async function POST(req) {
       outputPath
     ]
 
-    const cmd = `${ffmpeg} ${ffmpegArgs.map(a => `'${a}'`).join(' ')}`
-    console.log('[Export] Running FFmpeg...')
-    console.log('[Export] Command:', cmd.slice(0, 300))
+    console.log('[Export] Running FFmpeg with execFile...')
+    console.log('[Export] Args:', ffmpegArgs.join(' ').slice(0, 300))
 
-    const { stdout, stderr } = await execAsync(cmd, { timeout: 90000, maxBuffer: 10 * 1024 * 1024 })
+    const { stdout, stderr } = await execFileAsync(ffmpegPath, ffmpegArgs, { timeout: 90000, maxBuffer: 10 * 1024 * 1024 })
     if (stderr) console.log('[Export] FFmpeg stderr (last 500):', stderr.slice(-500))
 
     // 5. Read output and return as MP4
