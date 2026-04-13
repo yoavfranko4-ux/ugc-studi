@@ -2,19 +2,16 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { writeFile, mkdir, readFile, rm } from 'fs/promises'
 import { randomUUID } from 'crypto'
+import { createRequire } from 'module'
 import path from 'path'
-import ffmpegStatic from 'ffmpeg-static'
+
+const require = createRequire(import.meta.url)
+const ffmpegPath = require('ffmpeg-static')
 
 const execFileAsync = promisify(execFile)
 
+export const runtime = 'nodejs'
 export const maxDuration = 120
-
-// Resolve ffmpeg binary path — ffmpeg-static provides the full path
-function getFfmpegPath() {
-  const p = ffmpegStatic
-  console.log('[Export] ffmpeg-static resolved to:', p)
-  return p
-}
 
 // Generate ASS subtitle file content from subtitles array
 // Replicates the editor's word-level timing: split into 3-word segments,
@@ -92,7 +89,6 @@ export async function POST(req) {
       return Response.json({ error: 'No video clips provided' }, { status: 400 })
     }
 
-    const ffmpegPath = getFfmpegPath()
     console.log('[Export] FFmpeg path:', ffmpegPath)
 
     await mkdir(jobDir, { recursive: true })
