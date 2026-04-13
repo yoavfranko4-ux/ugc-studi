@@ -235,15 +235,6 @@ const AGENT_STEPS = [
 ]
 
 export default function Home() {
-  useEffect(() => {
-    const checkUser = async () => {
-      if (!supabase) return
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) window.location.replace('/login')
-    }
-    checkUser()
-  }, [])
-
   const [step, setStep] = useState('form')
   const [selectedAvatar, setSelectedAvatar] = useState(null)
   const [customAvatar, setCustomAvatar] = useState(null)
@@ -286,6 +277,63 @@ export default function Home() {
   const playingRef = useRef(false)
   const musicSourceRef = useRef(null)
   const musicCtxRef = useRef(null)
+  const autoExportRef = useRef(false)
+
+  // Auth check + restore saved edit from ?editId= query param
+  useEffect(() => {
+    const init = async () => {
+      if (!supabase) return
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { window.location.replace('/login'); return }
+
+      // Check for editId query param to restore a saved edit
+      const params = new URLSearchParams(window.location.search)
+      const editId = params.get('editId')
+      if (!editId) return
+
+      try {
+        const { data: edit, error } = await supabase
+          .from('saved_edits')
+          .select('*')
+          .eq('id', editId)
+          .single()
+        if (error || !edit?.edit_data) return
+
+        const d = edit.edit_data
+        // Restore all editor state
+        if (d.product_name) setProductName(d.product_name)
+        if (d.clip_order) setClipOrder(d.clip_order)
+        if (d.subtitle_style) setSubtitleStyle(d.subtitle_style)
+        if (d.bg_music) setBgMusic(d.bg_music)
+        if (d.sfx_enabled !== undefined) setSfxEnabled(d.sfx_enabled)
+        if (d.transition) setTransition(d.transition)
+
+        // Rebuild result object for the editor
+        const restoredResult = {
+          story: d.story || null,
+          frames: d.frames || [],
+          videos: d.videos || [],
+          audioBase64: d.audio_base64 || null,
+          hebrewVoice: d.hebrew_voice || '',
+        }
+        // Rebuild voiceover blob URL if we have audio data in the original result
+        // (audioBase64 is not saved in edit_data to save space, but hebrewVoice text is)
+        setResult(restoredResult)
+
+        // Check for autoExport flag
+        if (params.get('autoExport') === 'true') {
+          autoExportRef.current = true
+        }
+
+        // Jump straight to editor
+        setStep('done')
+
+        // Clean URL without reload
+        window.history.replaceState({}, '', '/studio')
+      } catch (e) { console.warn('Failed to restore saved edit:', e.message) }
+    }
+    init()
+  }, [])
 
   // Preload ALL video blobs on page load for instant playback
   useEffect(() => {
@@ -305,6 +353,11 @@ export default function Home() {
         if (videoRef.current && urls[currentScene]) {
           videoRef.current.src = urls[currentScene]
           videoRef.current.load()
+        }
+        // Auto-trigger export if came from dashboard "הורד MP4"
+        if (autoExportRef.current) {
+          autoExportRef.current = false
+          setTimeout(() => { exportMp4() }, 500)
         }
       }
     }

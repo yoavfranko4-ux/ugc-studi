@@ -223,10 +223,10 @@ export default function DashboardPage() {
                               המשך עריכה
                             </button>
                             {d.videos?.[0] && (
-                              <a href={d.videos[0]} target="_blank" rel="noreferrer"
-                                style={{ flex: 1, padding: '7px 0', background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 8, color: '#22c55e', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'Heebo,sans-serif', textAlign: 'center', textDecoration: 'none', display: 'block' }}>
+                              <button onClick={() => { window.location.href = `/studio?editId=${edit.id}&autoExport=true` }}
+                                style={{ flex: 1, padding: '7px 0', background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 8, color: '#22c55e', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'Heebo,sans-serif', textAlign: 'center' }}>
                                 הורד MP4
-                              </a>
+                              </button>
                             )}
                           </div>
                         </div>
