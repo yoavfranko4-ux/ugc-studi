@@ -268,6 +268,7 @@ export default function Home() {
   const [playing, setPlaying] = useState(false)
   const [musicPreviewing, setMusicPreviewing] = useState(false)
   const [videoBlobUrls, setVideoBlobUrls] = useState([])
+  const [videosReady, setVideosReady] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
   const videoRef = useRef(null)
@@ -316,8 +317,16 @@ export default function Home() {
           audioBase64: d.audio_base64 || null,
           hebrewVoice: d.hebrew_voice || '',
         }
-        // Rebuild voiceover blob URL if we have audio data in the original result
-        // (audioBase64 is not saved in edit_data to save space, but hebrewVoice text is)
+        // Rebuild voiceover blob URL from saved base64
+        if (d.audio_base64) {
+          try {
+            const binary = atob(d.audio_base64)
+            const bytes = new Uint8Array(binary.length)
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+            const blob = new Blob([bytes], { type: 'audio/mpeg' })
+            audioBlobUrl.current = URL.createObjectURL(blob)
+          } catch (e) { console.warn('Failed to restore voiceover audio:', e.message) }
+        }
         setResult(restoredResult)
 
         // Check for autoExport flag
@@ -335,11 +344,13 @@ export default function Home() {
     init()
   }, [])
 
-  // Preload ALL video blobs on page load for instant playback
+  // Preload ALL video blobs in parallel + wait for canplaythrough
   useEffect(() => {
     if (step !== 'done' || !result?.videos) return
     let cancelled = false
+    setVideosReady(false)
     const preload = async () => {
+      // Fetch all blobs in parallel
       const urls = await Promise.all(result.videos.map(async (url) => {
         if (!url) return null
         try {
@@ -348,17 +359,32 @@ export default function Home() {
           return URL.createObjectURL(blob)
         } catch { return url }
       }))
-      if (!cancelled) {
-        setVideoBlobUrls(urls)
-        if (videoRef.current && urls[currentScene]) {
-          videoRef.current.src = urls[currentScene]
-          videoRef.current.load()
-        }
-        // Auto-trigger export if came from dashboard "הורד MP4"
-        if (autoExportRef.current) {
-          autoExportRef.current = false
-          setTimeout(() => { exportMp4() }, 500)
-        }
+      if (cancelled) return
+      setVideoBlobUrls(urls)
+
+      // Preload each blob into a hidden video element and wait for canplaythrough
+      const readyPromises = urls.map(url => {
+        if (!url) return Promise.resolve()
+        return new Promise(resolve => {
+          const v = document.createElement('video')
+          v.preload = 'auto'; v.muted = true; v.playsInline = true; v.src = url
+          v.oncanplaythrough = () => resolve()
+          v.onerror = () => resolve()
+          setTimeout(resolve, 5000) // safety timeout
+        })
+      })
+      await Promise.all(readyPromises)
+      if (cancelled) return
+
+      setVideosReady(true)
+      if (videoRef.current && urls[currentScene]) {
+        videoRef.current.src = urls[currentScene]
+        videoRef.current.load()
+      }
+      // Auto-trigger export if came from dashboard
+      if (autoExportRef.current) {
+        autoExportRef.current = false
+        setTimeout(() => { exportMp4() }, 300)
       }
     }
     preload()
@@ -600,11 +626,11 @@ export default function Home() {
     if (musicCtxRef.current) { try { musicCtxRef.current.close() } catch {} }
   }, [result, clipOrder, bgMusic, playing, videoBlobUrls, subtitleStyle])
 
-  // === Export: 720x1280, cover mode, 100ms timeslice, time-synced subtitles ===
+  // === Export: 480x854 (480p 9:16), cover mode, 100ms timeslice ===
   const exportMp4 = async () => {
     if (!result?.videos?.length) return
     setExporting(true); setExportProgress('מכין ייצוא... 0%')
-    const EW = 720, EH = 1280
+    const EW = 480, EH = 854
     try {
       const orderedScenes = clipOrder.filter(i => result.videos[i])
       if (orderedScenes.length === 0) throw new Error('אין סרטונים לייצוא')
@@ -628,18 +654,15 @@ export default function Home() {
         } catch {}
       }
 
-      // Prepare blob URLs
+      // Prepare blob URLs — fetch all in parallel
       setExportProgress('מוריד סרטונים... 10%')
-      const blobUrls = []
-      for (let i = 0; i < totalClips; i++) {
-        const pre = videoBlobUrls[orderedScenes[i]]
-        if (pre?.startsWith('blob:')) { blobUrls.push(pre) }
-        else {
-          try { const r = await fetch(result.videos[orderedScenes[i]]); blobUrls.push(URL.createObjectURL(await r.blob())) }
-          catch { blobUrls.push(result.videos[orderedScenes[i]]) }
-        }
-        setExportProgress(`מוריד... ${10 + Math.round(((i+1)/totalClips)*10)}%`)
-      }
+      const blobUrls = await Promise.all(orderedScenes.map(async (si) => {
+        const pre = videoBlobUrls[si]
+        if (pre?.startsWith('blob:')) return pre
+        try { const r = await fetch(result.videos[si]); return URL.createObjectURL(await r.blob()) }
+        catch { return result.videos[si] }
+      }))
+      setExportProgress('מוריד סרטונים... 20%')
 
       // Canvas + audio setup
       setExportProgress('מכין ייצוא... 22%')
@@ -690,7 +713,7 @@ export default function Home() {
       }
 
       // MediaRecorder — 100ms timeslice for speed
-      const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4000000 })
+      const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 })
       const chunks = []
       rec.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
       const recDone = new Promise(r => { rec.onstop = r })
@@ -779,6 +802,7 @@ export default function Home() {
         frames: result.frames,
         story: result.story,
         hebrew_voice: result.hebrewVoice,
+        audio_base64: result.audioBase64 || null,
         thumbnail: thumbnail,
       }
       const { error } = await supabase.from('saved_edits').insert({
@@ -1071,7 +1095,13 @@ export default function Home() {
           <div style={{ background: '#000', aspectRatio: '9/16', maxHeight: 'calc(100vh - 280px)', height: '100%', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
             <video ref={videoRef} playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
             <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
-            {!playing && (
+            {!playing && !videosReady && (
+              <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, border: '3px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                <span style={{ color: '#71717a', fontSize: 12, fontWeight: 600 }}>טוען סרטונים...</span>
+              </div>
+            )}
+            {!playing && videosReady && (
               <button onClick={playAll} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 72, height: 72, borderRadius: '50%', background: 'rgba(168,85,247,0.8)', border: '2px solid rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)', transition: 'all 200ms ease' }}>
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="white" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               </button>
