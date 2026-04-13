@@ -53,6 +53,20 @@ export default function Home() {
   const videoRef = useRef(null)
   const audioRef = useRef(null)
   const canvasRef = useRef(null)
+  const audioBlobUrl = useRef(null)
+
+  // Assign video and audio src after done step mounts the refs
+  useEffect(() => {
+    if (step !== 'done' || !result) return
+    if (videoRef.current && result.videos?.[currentScene]) {
+      videoRef.current.src = result.videos[currentScene]
+      videoRef.current.load()
+    }
+    if (audioRef.current && audioBlobUrl.current) {
+      audioRef.current.src = audioBlobUrl.current
+      audioRef.current.load()
+    }
+  }, [step, result])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -66,16 +80,16 @@ export default function Home() {
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     const words = subtitle.split(/\s+/)
     const lines = []
-    for (let i = 0; i < words.length; i += 3) lines.push(words.slice(i, i + 3).join(' '))
-    ctx.font = 'bold 64px Heebo, sans-serif'
+    for (let i = 0; i < words.length; i += 4) lines.push(words.slice(i, i + 4).join(' '))
+    ctx.font = 'bold 22px Heebo, sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    const lineHeight = 40
-    const startY = canvas.height * 0.80 - ((lines.length - 1) * lineHeight) / 2
+    const lineHeight = 28
+    const startY = canvas.height * 0.82 - ((lines.length - 1) * lineHeight) / 2
     const x = canvas.width / 2
     lines.forEach((line, i) => {
       const y = startY + i * lineHeight
-      ctx.strokeStyle = 'black'; ctx.lineWidth = 16; ctx.lineJoin = 'round'; ctx.miterLimit = 2
+      ctx.strokeStyle = 'black'; ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.miterLimit = 2
       ctx.strokeText(line, x, y)
       ctx.fillStyle = 'white'; ctx.fillText(line, x, y)
     })
@@ -181,13 +195,12 @@ export default function Home() {
       addLog(data.audioBase64 ? 'קריינות מוכנה!' : 'קריינות נכשלה', data.audioBase64 ? 'ok' : 'err')
       if (data.audioBase64) {
         const blob = new Blob([Uint8Array.from(atob(data.audioBase64), c => c.charCodeAt(0))], { type: 'audio/mpeg' })
-        if (audioRef.current) audioRef.current.src = URL.createObjectURL(blob)
+        audioBlobUrl.current = URL.createObjectURL(blob)
       }
       setResult(data)
       const hasVideos = data.videos?.some(v => v)
       if (hasVideos) {
         setStep('done')
-        if (data.videos[0] && videoRef.current) { videoRef.current.src = data.videos[0]; videoRef.current.load() }
       } else {
         addLog('לא נוצרו סרטונים — נשאר בדף הלוגים', 'err')
       }
@@ -217,23 +230,27 @@ export default function Home() {
       for (let i = 0; i < result.videos.length; i++) {
         const url = result.videos[i]; if (!url) continue
         await new Promise((resolve) => {
+          let resolved = false
+          const done = () => { if (!resolved) { resolved = true; resolve() } }
+          const timeout = setTimeout(done, 30000) // 30s max per clip
           const vid = document.createElement('video'); vid.crossOrigin = 'anonymous'; vid.src = url; vid.muted = true; vid.playsInline = true
+          vid.onended = () => { clearTimeout(timeout); done() }
           vid.onloadeddata = async () => {
-            try { await vid.play() } catch { resolve(); return }
+            try { await vid.play() } catch { clearTimeout(timeout); done(); return }
             const subtitle = result.story?.scenes?.[i]?.subtitle || ''
             const words = subtitle.split(/\s+/); const lines = []
-            for (let w = 0; w < words.length; w += 3) lines.push(words.slice(w, w + 3).join(' '))
+            for (let w = 0; w < words.length; w += 4) lines.push(words.slice(w, w + 4).join(' '))
             const drawFrame = () => {
-              if (vid.paused || vid.ended) { resolve(); return }
+              if (resolved || vid.paused || vid.ended) { clearTimeout(timeout); done(); return }
               ctx.drawImage(vid, 0, 0, offCanvas.width, offCanvas.height)
-              ctx.font = 'bold 64px Heebo, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-              const lineHeight = 40; const startY = offCanvas.height * 0.80 - ((lines.length - 1) * lineHeight) / 2; const x = offCanvas.width / 2
-              lines.forEach((line, li) => { const y = startY + li * lineHeight; ctx.strokeStyle = 'black'; ctx.lineWidth = 16; ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.strokeText(line, x, y); ctx.fillStyle = 'white'; ctx.fillText(line, x, y) })
+              ctx.font = 'bold 48px Heebo, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+              const lineHeight = 58; const startY = offCanvas.height * 0.82 - ((lines.length - 1) * lineHeight) / 2; const x = offCanvas.width / 2
+              lines.forEach((line, li) => { const y = startY + li * lineHeight; ctx.strokeStyle = 'black'; ctx.lineWidth = 8; ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.strokeText(line, x, y); ctx.fillStyle = 'white'; ctx.fillText(line, x, y) })
               requestAnimationFrame(drawFrame)
             }
             requestAnimationFrame(drawFrame)
           }
-          vid.onerror = () => resolve()
+          vid.onerror = () => { clearTimeout(timeout); done() }
         })
       }
       mediaRecorder.stop(); await donePromise
