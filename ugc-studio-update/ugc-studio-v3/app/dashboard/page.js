@@ -8,6 +8,7 @@ export default function DashboardPage() {
   const [subscription, setSubscription] = useState(null)
   const [loading, setLoading] = useState(true)
   const [videos, setVideos] = useState([])
+  const [savedEdits, setSavedEdits] = useState([])
   const [contactMsg, setContactMsg] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
@@ -29,6 +30,16 @@ export default function DashboardPage() {
       try {
         const saved = localStorage.getItem(`videos_${user.id}`)
         if (saved) setVideos(JSON.parse(saved))
+      } catch {}
+
+      // Load saved edits from Supabase
+      try {
+        const { data: edits } = await supabase
+          .from('saved_edits')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+        if (edits) setSavedEdits(edits)
       } catch {}
 
       setLoading(false)
@@ -163,6 +174,35 @@ export default function DashboardPage() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7" style={{ transform: 'scaleX(-1)', transformOrigin: 'center' }} /></svg>
               </div>
             </button>
+
+            {/* Saved Projects */}
+            {savedEdits.length > 0 && (
+              <div style={glassCard}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: '#f0f0ff' }}>פרויקטים שמורים</h3>
+                  <span style={{ fontSize: 12, color: '#3f3f46' }}>{savedEdits.length} פרויקטים</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {savedEdits.map((edit, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 12, padding: '14px 18px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(34,197,94,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 14, color: '#e4e4e7' }}>{edit.product_name || `פרויקט ${i + 1}`}</div>
+                          <div style={{ color: '#3f3f46', fontSize: 11, marginTop: 2 }}>{edit.updated_at ? new Date(edit.updated_at).toLocaleDateString('he-IL') : ''}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, color: '#52525b' }}>{edit.subtitle_style} / {edit.bg_music}</span>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Video History */}
             <div style={glassCard}>

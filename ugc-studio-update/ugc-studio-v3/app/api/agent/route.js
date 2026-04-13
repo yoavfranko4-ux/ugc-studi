@@ -20,8 +20,8 @@ async function generateNBFrame(prompt, imageUrls) {
     ? 'fal-ai/nano-banana-2'
     : 'fal-ai/nano-banana-2/edit';
   const input = validUrls.length === 0
-    ? { prompt: enhancedPrompt, image_size: 'portrait_4_3' }
-    : { prompt: enhancedPrompt, image_urls: validUrls };
+    ? { prompt: enhancedPrompt, image_size: { width: 720, height: 1280 } }
+    : { prompt: enhancedPrompt, image_urls: validUrls, image_size: { width: 720, height: 1280 } };
   const result = await fal.run(endpointId, { input });
   console.log('NB response:', JSON.stringify(result.data).slice(0, 400));
   const imageUrl = result.data.images?.[0]?.url || result.data.images?.[0] || null;
@@ -213,38 +213,43 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
     if (scenes[0]) scenes[0].subtitle = hook;
     const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook);
 
-    // Voice
-    const voiceResult = await generateVoice(voiceover);
+    // Voice + Frames in parallel (voice doesn't depend on frames)
+    const generateAllFrames = async () => {
+      const frames = [];
+      let prevFrame = null;
+      for (let i = 0; i < 4; i++) {
+        try {
+          const imageUrls = [];
+          if (preparedAvatar) imageUrls.push(preparedAvatar);
+          if (prevFrame) imageUrls.push(prevFrame);
+          if (preparedProduct && (i === 1 || i === 2 || i === 3)) imageUrls.push(preparedProduct);
+          const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls);
+          frames.push(frameUrl);
+          if (frameUrl) prevFrame = frameUrl;
+        } catch (e) {
+          console.error(`[Job ${jobId}] Frame ${i+1} failed:`, e.message);
+          frames.push(null);
+        }
+      }
+      return frames;
+    };
+
+    const [voiceResult, frames] = await Promise.all([
+      generateVoice(voiceover),
+      generateAllFrames()
+    ]);
     const audioBase64 = voiceResult?.base64 || null;
 
-    // Frames
-    const frames = [];
-    let prevFrame = null;
-    for (let i = 0; i < 4; i++) {
-      try {
-        const imageUrls = [];
-        if (preparedAvatar) imageUrls.push(preparedAvatar);
-        if (prevFrame) imageUrls.push(prevFrame);
-        if (preparedProduct && (i === 1 || i === 2 || i === 3)) imageUrls.push(preparedProduct);
-        const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls);
-        frames.push(frameUrl);
-        if (frameUrl) prevFrame = frameUrl;
-      } catch (e) {
-        console.error(`[Job ${jobId}] Frame ${i+1} failed:`, e.message);
-        frames.push(null);
-      }
-    }
-
-    // Kling videos
-    const videos = [];
-    for (let i = 0; i < 4; i++) {
-      if (!frames[i]) { videos.push(null); continue; }
+    // Kling videos — run all 4 in parallel
+    console.log(`[Job ${jobId}] Starting all 4 Kling videos in parallel...`);
+    const videos = await Promise.all(frames.map(async (frameUrl, i) => {
+      if (!frameUrl) return null;
       try {
         console.log(`[Job ${jobId}] Kling scene ${i+1}: starting...`);
         const result = await fal.subscribe('fal-ai/kling-video/v3/pro/image-to-video', {
           input: {
             prompt: scenes[i].kling_prompt,
-            image_url: frames[i],
+            image_url: frameUrl,
             duration: '5',
             aspect_ratio: '9:16',
             cfg_scale: 0.45,
@@ -254,12 +259,12 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
         });
         const videoUrl = result.data.video?.url || null;
         console.log(`[Job ${jobId}] Kling scene ${i+1}:`, videoUrl ? 'OK' : 'no URL');
-        videos.push(videoUrl || null);
+        return videoUrl || null;
       } catch (e) {
         console.error(`[Job ${jobId}] Kling scene ${i+1} error:`, e.message);
-        videos.push(null);
+        return null;
       }
-    }
+    }));
 
     const result = {
       story: { scenes, hebrew_voice: voiceover },

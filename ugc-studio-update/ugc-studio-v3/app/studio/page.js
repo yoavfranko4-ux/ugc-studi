@@ -234,6 +234,9 @@ export default function Home() {
   const [transition, setTransition] = useState('cut')
   const [playing, setPlaying] = useState(false)
   const [musicPreviewing, setMusicPreviewing] = useState(false)
+  const [videoBlobUrls, setVideoBlobUrls] = useState([])
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [saveMsg, setSaveMsg] = useState('')
   const videoRef = useRef(null)
   const audioRef = useRef(null)
   const canvasRef = useRef(null)
@@ -242,17 +245,33 @@ export default function Home() {
   const musicSourceRef = useRef(null)
   const musicCtxRef = useRef(null)
 
-  // Assign video and audio src after done step mounts
+  // Preload ALL video blobs on page load for instant playback
   useEffect(() => {
-    if (step !== 'done' || !result) return
-    if (videoRef.current && result.videos?.[currentScene]) {
-      videoRef.current.src = result.videos[currentScene]
-      videoRef.current.load()
+    if (step !== 'done' || !result?.videos) return
+    let cancelled = false
+    const preload = async () => {
+      const urls = await Promise.all(result.videos.map(async (url) => {
+        if (!url) return null
+        try {
+          const resp = await fetch(url)
+          const blob = await resp.blob()
+          return URL.createObjectURL(blob)
+        } catch { return url }
+      }))
+      if (!cancelled) {
+        setVideoBlobUrls(urls)
+        if (videoRef.current && urls[currentScene]) {
+          videoRef.current.src = urls[currentScene]
+          videoRef.current.load()
+        }
+      }
     }
+    preload()
     if (audioRef.current && audioBlobUrl.current) {
       audioRef.current.src = audioBlobUrl.current
       audioRef.current.load()
     }
+    return () => { cancelled = true }
   }, [step, result])
 
   // Draw subtitles on canvas overlay with selected style
@@ -376,7 +395,7 @@ export default function Home() {
 
   const loadScene = (idx) => {
     setCurrentScene(idx)
-    const url = result?.videos?.[idx]
+    const url = videoBlobUrls[idx] || result?.videos?.[idx]
     if (url && videoRef.current) { videoRef.current.src = url; videoRef.current.load() }
   }
 
@@ -433,7 +452,7 @@ export default function Home() {
     }
     for (const sceneIdx of clipOrder) {
       if (!playingRef.current) break
-      const url = result.videos[sceneIdx]
+      const url = videoBlobUrls[sceneIdx] || result.videos[sceneIdx]
       if (!url || !videoRef.current) continue
       setCurrentScene(sceneIdx)
       videoRef.current.src = url; videoRef.current.load()
@@ -458,17 +477,23 @@ export default function Home() {
       const orderedScenes = clipOrder.map(i => i).filter(i => result.videos[i])
       if (orderedScenes.length === 0) throw new Error('אין סרטונים לייצוא')
 
-      // Pre-fetch video URLs as blob URLs to avoid CORS canvas tainting
-      setExportProgress('מוריד סרטונים...')
+      // Use preloaded blob URLs if available, otherwise fetch
+      setExportProgress('מכין סרטונים... 0%')
       const blobUrls = []
       for (let i = 0; i < orderedScenes.length; i++) {
-        try {
-          const resp = await fetch(result.videos[orderedScenes[i]])
-          const blob = await resp.blob()
-          blobUrls.push(URL.createObjectURL(blob))
-        } catch {
-          blobUrls.push(result.videos[orderedScenes[i]]) // fallback to direct URL
+        const preloaded = videoBlobUrls[orderedScenes[i]]
+        if (preloaded && preloaded.startsWith('blob:')) {
+          blobUrls.push(preloaded)
+        } else {
+          try {
+            const resp = await fetch(result.videos[orderedScenes[i]])
+            const blob = await resp.blob()
+            blobUrls.push(URL.createObjectURL(blob))
+          } catch {
+            blobUrls.push(result.videos[orderedScenes[i]])
+          }
         }
+        setExportProgress(`מכין סרטונים... ${Math.round(((i + 1) / orderedScenes.length) * 20)}%`)
       }
 
       setExportProgress('מייצא וידאו...')
@@ -551,7 +576,8 @@ export default function Home() {
       for (let clipIdx = 0; clipIdx < blobUrls.length; clipIdx++) {
         const sceneIdx = orderedScenes[clipIdx]
         const url = blobUrls[clipIdx]
-        setExportProgress(`מייצא סצנה ${clipIdx + 1}/${blobUrls.length}...`)
+        const pct = 20 + Math.round(((clipIdx + 1) / blobUrls.length) * 70)
+        setExportProgress(`מייצא סצנה ${clipIdx + 1}/${blobUrls.length}... ${pct}%`)
 
         // SFX between scenes
         if (clipIdx > 0) playSfxToExport('whoosh')
@@ -599,7 +625,7 @@ export default function Home() {
       playSfxToExport('ding')
       await new Promise(r => setTimeout(r, 1000))
 
-      setExportProgress('מסיים...')
+      setExportProgress('מסיים... 95%')
       mediaRecorder.stop(); await donePromise
       try { exportAudioCtx.close() } catch {}
       // Revoke blob URLs
@@ -612,6 +638,35 @@ export default function Home() {
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(blobUrl)
       setExportProgress('')
     } catch (e) { alert('שגיאה בייצוא: ' + e.message); setExportProgress('') } finally { setExporting(false) }
+  }
+
+  // === Save Edit to Supabase ===
+  const saveEdit = async () => {
+    if (!supabase || !result) return
+    setSavingEdit(true); setSaveMsg('')
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { setSaveMsg('יש להתחבר כדי לשמור'); setSavingEdit(false); return }
+      const editData = {
+        user_id: user.id,
+        product_name: productName,
+        clip_order: clipOrder,
+        subtitle_style: subtitleStyle,
+        bg_music: bgMusic,
+        sfx_enabled: sfxEnabled,
+        transition: transition,
+        videos: result.videos,
+        frames: result.frames,
+        story: result.story,
+        audio_base64: result.audioBase64,
+        hebrew_voice: result.hebrewVoice,
+        updated_at: new Date().toISOString(),
+      }
+      const { error } = await supabase.from('saved_edits').upsert(editData, { onConflict: 'user_id,product_name' })
+      if (error) throw error
+      setSaveMsg('נשמר בהצלחה!')
+      setTimeout(() => setSaveMsg(''), 3000)
+    } catch (e) { setSaveMsg('שגיאה: ' + e.message) } finally { setSavingEdit(false) }
   }
 
   // ===== FORM STEP =====
@@ -766,9 +821,9 @@ export default function Home() {
   const sceneLabels = ['כאב', 'מוצר', 'שימוש', 'תוצאה']
 
   return (
-    <div style={{ ...pageStyle, maxWidth: 1300, padding: '20px 20px' }}>
+    <div style={{ position: 'relative', zIndex: 1, maxWidth: 1300, margin: '0 auto', padding: '12px 20px 0 20px', height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setClipOrder([0,1,2,3]) }} style={ghostBtn}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
@@ -776,7 +831,12 @@ export default function Home() {
           </button>
           <h2 style={{ fontSize: 20, fontWeight: 900, color: '#f0f0ff', margin: 0 }}>עריכת סרטון</h2>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {saveMsg && <span style={{ fontSize: 12, color: saveMsg.startsWith('שגיאה') ? '#ef4444' : '#22c55e', fontWeight: 600 }}>{saveMsg}</span>}
+          <button onClick={saveEdit} disabled={savingEdit} style={{ ...ghostBtn, color: '#22c55e', borderColor: 'rgba(34,197,94,0.3)' }}>
+            {savingEdit ? <div style={{ width: 14, height: 14, border: '2px solid rgba(34,197,94,0.3)', borderTopColor: '#22c55e', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>}
+            שמור עריכה
+          </button>
           <button onClick={playAll} style={{ ...ghostBtn, color: playing ? '#ef4444' : '#a855f7', borderColor: playing ? 'rgba(239,68,68,0.3)' : 'rgba(168,85,247,0.3)' }}>
             {playing ? '⏹ עצור' : '▶ הפעל הכל'}
           </button>
@@ -787,9 +847,9 @@ export default function Home() {
       </div>
 
       {/* Main layout: Left sidebar + Center preview */}
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* Left Sidebar */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 640, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
           {/* Subtitle Style */}
           <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
             <div style={{ ...secTitle, marginBottom: 10, fontSize: 12 }}>כתוביות</div>
@@ -894,16 +954,20 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Bottom: Timeline with drag-and-drop */}
-      <div style={{ ...cardS, padding: '14px 16px', marginBottom: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <div style={{ ...secTitle, marginBottom: 0, fontSize: 12 }}>ציר זמן</div>
+      {/* Bottom: Full-width CapCut-style Timeline — always visible */}
+      <div style={{ background: 'rgba(15,15,20,0.95)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '10px 16px 12px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#a855f7', letterSpacing: 0.5 }}>ציר זמן</span>
+          </div>
           <div style={{ fontSize: 10, color: '#3f3f46' }}>גרור כדי לשנות סדר</div>
         </div>
+        {/* Clip cards */}
         <div style={{ display: 'flex', gap: 6 }}>
           {clipOrder.map((sceneIdx, orderIdx) => {
             const scene = result?.story?.scenes?.[sceneIdx]
-            const videoUrl = result?.videos?.[sceneIdx]
+            const videoUrl = videoBlobUrls[sceneIdx] || result?.videos?.[sceneIdx]
             const isActive = currentScene === sceneIdx
             const isDragging = dragIdx === orderIdx
             return (
@@ -912,7 +976,7 @@ export default function Home() {
                 onDragOver={(e) => handleDragOver(e, orderIdx)}
                 onDragEnd={handleDragEnd}
                 onClick={() => loadScene(sceneIdx)}
-                style={{ flex: '1 1 0', minWidth: 0, background: isActive ? 'rgba(168,85,247,0.06)' : 'rgba(255,255,255,0.02)', border: `2px solid ${isActive ? 'rgba(168,85,247,0.5)' : isDragging ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 10, overflow: 'hidden', cursor: 'grab', opacity: isDragging ? 0.5 : 1, transition: 'all 200ms ease' }}>
+                style={{ flex: '1 1 0', minWidth: 0, background: isActive ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${isActive ? 'rgba(168,85,247,0.5)' : isDragging ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 10, overflow: 'hidden', cursor: 'grab', opacity: isDragging ? 0.5 : 1, transition: 'all 200ms ease', boxShadow: isActive ? '0 0 16px rgba(168,85,247,0.2)' : 'none' }}>
                 <div style={{ aspectRatio: '16/9', background: BG, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {videoUrl
                     ? <video src={videoUrl} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onLoadedMetadata={e => { e.target.currentTime = 1 }} />
@@ -930,13 +994,13 @@ export default function Home() {
             )
           })}
         </div>
-        {/* Timeline bar */}
-        <div style={{ marginTop: 8, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.04)', display: 'flex', overflow: 'hidden' }}>
+        {/* Progress bar */}
+        <div style={{ marginTop: 8, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.04)', display: 'flex', overflow: 'hidden' }}>
           {clipOrder.map((sceneIdx, i) => (
-            <div key={i} style={{ flex: 1, background: currentScene === sceneIdx ? '#a855f7' : 'rgba(168,85,247,0.15)', borderRight: i < clipOrder.length - 1 ? '1px solid rgba(0,0,0,0.3)' : 'none', transition: 'background 300ms ease' }} />
+            <div key={i} style={{ flex: 1, background: currentScene === sceneIdx ? 'linear-gradient(90deg, #7c3aed, #a855f7)' : 'rgba(168,85,247,0.15)', borderRight: i < clipOrder.length - 1 ? '1px solid rgba(0,0,0,0.3)' : 'none', transition: 'background 300ms ease' }} />
           ))}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, fontSize: 8, color: '#3f3f46' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, fontSize: 9, color: '#3f3f46', fontWeight: 500 }}>
           <span>0s</span><span>5s</span><span>10s</span><span>15s</span><span>20s</span>
         </div>
       </div>
