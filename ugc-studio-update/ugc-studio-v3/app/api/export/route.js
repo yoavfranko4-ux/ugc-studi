@@ -8,18 +8,30 @@ const execAsync = promisify(exec)
 
 export const maxDuration = 120
 
-// Find ffmpeg binary — try system path first, then ffmpeg-static
+// Find ffmpeg binary — try ffmpeg-static first (bundled), then system path
 async function findFfmpeg() {
+  // 1. ffmpeg-static npm package (bundles the binary, works without system install)
+  try {
+    const mod = await import('ffmpeg-static')
+    if (mod.default) {
+      console.log('[Export] Using ffmpeg-static:', mod.default)
+      return mod.default
+    }
+  } catch {}
+  // 2. System-installed ffmpeg (via nixpacks or apt)
   try {
     const { stdout } = await execAsync('which ffmpeg')
     const p = stdout.trim()
-    if (p) return p
+    if (p) { console.log('[Export] Using system ffmpeg:', p); return p }
   } catch {}
+  // 3. Common nix paths
   try {
-    const mod = await import('ffmpeg-static')
-    if (mod.default) return mod.default
+    const { stdout } = await execAsync('find /nix -name ffmpeg -type f 2>/dev/null | head -1')
+    const p = stdout.trim()
+    if (p) { console.log('[Export] Using nix ffmpeg:', p); return p }
   } catch {}
-  return 'ffmpeg' // hope it's on PATH
+  // 4. Last resort
+  return 'ffmpeg'
 }
 
 // Generate ASS subtitle file content from subtitles array

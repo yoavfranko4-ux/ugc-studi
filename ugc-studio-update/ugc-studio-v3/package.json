@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "apt-get install -y ffmpeg 2>/dev/null || true && next build",
     "start": "next start -p ${PORT:-3000}",
     "lint": "next lint"
   },
