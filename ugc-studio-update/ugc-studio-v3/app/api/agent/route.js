@@ -55,17 +55,18 @@ async function generateScript(productName, productDesc, applicationArea, hook) {
 Description: ${productDesc}
 How to use: ${applicationArea}
 
-SCENE DURATIONS = [5, 5, 5, 5] = 20 seconds total. Scene 1: ~8 Hebrew words. Scene 2: ~8 Hebrew words. Scene 3: ~16 Hebrew words. Scene 4: ~8 Hebrew words.
+SCENE DURATIONS = [5, 5, 5, 5] = 20 seconds total. Scene 1: ~12 Hebrew words. Scene 2: ~12 Hebrew words. Scene 3: ~20 Hebrew words. Scene 4: ~12 Hebrew words. TOTAL = ~56 Hebrew words for ~20 seconds of voiceover.
 
 CRITICAL RULES:
 
 1. VOICEOVER TIMING — STRICT:
-- Scene 1: ~8 Hebrew words (fills 5s naturally)
-- Scene 2: ~8 Hebrew words (fills 5s naturally)
-- Scene 3: ~16 Hebrew words (fills 5s naturally)
-- Scene 4: ~8 Hebrew words (fills 5s naturally)
+- Scene 1: ~12 Hebrew words (fills 5s naturally — write MORE copy, longer sentences)
+- Scene 2: ~12 Hebrew words (fills 5s naturally — elaborate on the discovery)
+- Scene 3: ~20 Hebrew words (fills 5s naturally — describe the experience in detail)
+- Scene 4: ~12 Hebrew words (fills 5s naturally — strong CTA with urgency and emotion)
 - Write at NATURAL SPEAKING PACE — not too fast, not too slow. Each scene must feel complete.
-- voiceover MUST fill the full duration naturally — write enough words to fill each scene, do not leave silence gaps
+- voiceover MUST fill the full duration naturally — write LONGER, MORE DETAILED copy to fill each scene completely, do not leave silence gaps
+- AIM FOR ~20 SECONDS TOTAL of spoken Hebrew — write enough words so the voiceover covers the entire video
 
 2. HOOK (voiceover_scene1) — PRE-SET, DO NOT CHANGE:
 voiceover_scene1 is already set to: "${hook}"
@@ -108,10 +109,10 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "~8 Hebrew words — SPECIFIC visible problem",
-  "voiceover_scene2": "~8 Hebrew words — discovery of ${productName}",
-  "voiceover_scene3": "~16 Hebrew words — using product ON/IN person and feeling result",
-  "voiceover_scene4": "~8 Hebrew words — CTA with urgency",
+  "voiceover_scene1": "~12 Hebrew words — SPECIFIC visible problem, elaborate on the pain",
+  "voiceover_scene2": "~12 Hebrew words — discovery of ${productName}, why it caught attention",
+  "voiceover_scene3": "~20 Hebrew words — using product ON/IN person, describe the feeling and experience in detail",
+  "voiceover_scene4": "~12 Hebrew words — emotional CTA with urgency, tell them to try it now",
   "setting": "one-line description of the setting",
   "scenes": [
     {
@@ -240,12 +241,14 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
       if (!frames[i]) { videos.push(null); continue; }
       try {
         console.log(`[Job ${jobId}] Kling scene ${i+1}: starting...`);
-        const result = await fal.subscribe('fal-ai/kling-video/v1.6/standard/image-to-video', {
+        const result = await fal.subscribe('fal-ai/kling-video/v3/pro/image-to-video', {
           input: {
             prompt: scenes[i].kling_prompt,
             image_url: frames[i],
             duration: '5',
-            aspect_ratio: '9:16'
+            aspect_ratio: '9:16',
+            cfg_scale: 0.45,
+            negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
           },
           pollInterval: 5000
         });

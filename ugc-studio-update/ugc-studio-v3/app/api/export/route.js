@@ -72,13 +72,13 @@ async function falMergeAudioVideo(videoUrl, audioUrl) {
 }
 
 export async function POST(req) {
-  const { videoUrls, audioUrl } = await req.json();
+  const { videoUrls, audioUrl, musicUrl } = await req.json();
 
   try {
     const validUrls = videoUrls.filter(Boolean);
     if (validUrls.length === 0) return Response.json({ error: 'No videos' }, { status: 400 });
 
-    // 1. Merge all clips
+    // 1. Merge all clips in order
     let finalUrl;
     if (validUrls.length === 1) {
       finalUrl = validUrls[0];
@@ -87,10 +87,21 @@ export async function POST(req) {
       finalUrl = await falMergeVideos(validUrls);
     }
 
-    // 2. Lay audio over video
+    // 2. Lay voiceover audio over video
     if (audioUrl) {
-      console.log('Adding audio via fal.ai...');
+      console.log('Adding voiceover audio via fal.ai...');
       finalUrl = await falMergeAudioVideo(finalUrl, audioUrl);
+    }
+
+    // 3. Lay music track over video (on top of voiceover)
+    if (musicUrl) {
+      console.log('Adding music track via fal.ai...');
+      try {
+        finalUrl = await falMergeAudioVideo(finalUrl, musicUrl);
+      } catch (e) {
+        console.warn('Music merge failed (non-fatal):', e.message);
+        // Continue without music rather than failing the whole export
+      }
     }
 
     console.log('Export done. Final URL:', finalUrl);

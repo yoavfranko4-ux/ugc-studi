@@ -9,7 +9,26 @@
       "Bash(git commit:*)",
       "Bash(gh repo:*)",
       "Read(//tmp/**)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(npm install:*)",
+      "Bash(cmd.exe //c \"where node 2>NUL && where npm 2>NUL\")",
+      "Bash(powershell.exe -Command \"Get-Command npm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem -Path 'C:\\\\' -Filter 'node.exe' -Recurse -ErrorAction SilentlyContinue -Depth 5 | Select-Object -First 3 -ExpandProperty FullName\")",
+      "Bash(powershell.exe -NoProfile -Command \"[Environment]::GetEnvironmentVariable\\('PATH','User'\\)\")",
+      "Bash(powershell.exe -NoProfile -Command \"[Environment]::GetEnvironmentVariable\\('PATH','Machine'\\)\")",
+      "Bash(export PATH=\"$PATH:/c/Program Files/nodejs:/c/Users/Naomi/AppData/Roaming/npm:/c/Users/Naomi/AppData/Local/Programs/nodejs\")",
+      "Bash(npm --version)",
+      "Bash(cmd.exe //c \"npm --version\")",
+      "Bash(powershell.exe -NoProfile -Command \"npm --version\")",
+      "Bash(npx next:*)",
+      "Bash(node -e \"try { require\\('acorn'\\).parse\\(require\\('fs'\\).readFileSync\\('app/studio/page.js','utf8'\\), {ecmaVersion:2022, sourceType:'module', ecmaFeatures:{jsx:true}}\\); console.log\\('OK'\\) } catch\\(e\\) { console.log\\(e.message\\) }\")",
+      "Bash(node -e \"const fs=require\\('fs'\\); const src=fs.readFileSync\\('app/studio/page.js','utf8'\\); console.log\\('File size:', src.length, 'chars'\\); const opens=src.split\\('{'\\).length-1; const closes=src.split\\('}'\\).length-1; console.log\\('Braces: {='+opens+' }='+closes\\); const parens_o=src.split\\('\\('\\).length-1; const parens_c=src.split\\('\\)'\\).length-1; console.log\\('Parens: \\(='+parens_o+' \\)='+parens_c\\)\")",
+      "Bash(where node:*)",
+      "Read(//c/Program Files/nodejs/**)",
+      "Read(//c/Users/Naomi/AppData/Roaming/**)",
+      "Read(//c//**)",
+      "Read(//c/Users/Naomi/**)",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" -e \"const fs=require\\('fs'\\); const src=fs.readFileSync\\('C:/Users/Naomi/ugc-studi/ugc-studio-update/ugc-studio-v3/app/studio/page.js','utf8'\\); console.log\\('File size:', src.length, 'chars'\\); const opens=\\(src.match\\(/\\\\{/g\\)||[]\\).length; const closes=\\(src.match\\(/\\\\}/g\\)||[]\\).length; console.log\\('Braces: {='+opens+' }='+closes\\); const po=\\(src.match\\(/\\\\\\(/g\\)||[]\\).length; const pc=\\(src.match\\(/\\\\\\)/g\\)||[]\\).length; console.log\\('Parens: \\(='+po+' \\)='+pc\\)\")"
     ]
   }
 }

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 
 const AVATARS = [
@@ -50,10 +50,18 @@ export default function Home() {
   const [currentScene, setCurrentScene] = useState(0)
   const [logs, setLogs] = useState([])
   const [exporting, setExporting] = useState(false)
+  const [clipOrder, setClipOrder] = useState([0, 1, 2, 3])
+  const [dragIdx, setDragIdx] = useState(null)
+  const [musicUrl, setMusicUrl] = useState(null)
+  const [musicName, setMusicName] = useState('')
+  const [playing, setPlaying] = useState(false)
+  const [exportProgress, setExportProgress] = useState('')
   const videoRef = useRef(null)
   const audioRef = useRef(null)
   const canvasRef = useRef(null)
+  const musicRef = useRef(null)
   const audioBlobUrl = useRef(null)
+  const playingRef = useRef(false)
 
   // Assign video and audio src after done step mounts the refs
   useEffect(() => {
@@ -213,50 +221,126 @@ export default function Home() {
     if (url && videoRef.current) { videoRef.current.src = url; videoRef.current.load() }
   }
 
+  // Drag-and-drop reorder
+  const handleDragStart = (e, idx) => {
+    setDragIdx(idx)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', idx)
+  }
+  const handleDragOver = (e, idx) => {
+    e.preventDefault()
+    if (dragIdx === null || dragIdx === idx) return
+    const newOrder = [...clipOrder]
+    const [moved] = newOrder.splice(dragIdx, 1)
+    newOrder.splice(idx, 0, moved)
+    setClipOrder(newOrder)
+    setDragIdx(idx)
+  }
+  const handleDragEnd = () => setDragIdx(null)
+
+  // Music upload
+  const handleMusicUpload = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setMusicName(file.name)
+    const reader = new FileReader()
+    reader.onload = ev => {
+      setMusicUrl(ev.target.result)
+      if (musicRef.current) { musicRef.current.src = ev.target.result; musicRef.current.load() }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // Play all clips in order with voiceover + music
+  const playAll = useCallback(async () => {
+    if (!result?.videos) return
+    if (playing) {
+      playingRef.current = false
+      setPlaying(false)
+      if (videoRef.current) videoRef.current.pause()
+      if (audioRef.current) audioRef.current.pause()
+      if (musicRef.current) musicRef.current.pause()
+      return
+    }
+    setPlaying(true)
+    playingRef.current = true
+    // Start voiceover and music
+    if (audioRef.current && audioBlobUrl.current) {
+      audioRef.current.currentTime = 0
+      audioRef.current.play().catch(() => {})
+    }
+    if (musicRef.current && musicUrl) {
+      musicRef.current.currentTime = 0
+      musicRef.current.volume = 0.25
+      musicRef.current.play().catch(() => {})
+    }
+    // Play clips sequentially in order
+    for (const sceneIdx of clipOrder) {
+      if (!playingRef.current) break
+      const url = result.videos[sceneIdx]
+      if (!url || !videoRef.current) continue
+      setCurrentScene(sceneIdx)
+      videoRef.current.src = url
+      videoRef.current.load()
+      await new Promise(resolve => {
+        const onEnd = () => { videoRef.current.removeEventListener('ended', onEnd); resolve() }
+        videoRef.current.addEventListener('ended', onEnd)
+        videoRef.current.play().catch(resolve)
+      })
+    }
+    setPlaying(false)
+    playingRef.current = false
+    if (audioRef.current) audioRef.current.pause()
+    if (musicRef.current) musicRef.current.pause()
+  }, [result, clipOrder, musicUrl, playing])
+
+  // Server-side export via fal.ai ffmpeg
   const exportMp4 = async () => {
     if (!result?.videos?.length) return
     setExporting(true)
+    setExportProgress('מאחד קליפים...')
     try {
-      const offCanvas = document.createElement('canvas'); offCanvas.width = 1080; offCanvas.height = 1920
-      const ctx = offCanvas.getContext('2d')
-      let mimeType = 'video/mp4'
-      if (!MediaRecorder.isTypeSupported(mimeType)) { mimeType = 'video/webm;codecs=h264'; if (!MediaRecorder.isTypeSupported(mimeType)) { mimeType = 'video/webm;codecs=vp9'; if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm' } }
-      const stream = offCanvas.captureStream(30)
-      if (audioRef.current?.src) { try { const audioCtx = new AudioContext(); const source = audioCtx.createMediaElementSource(audioRef.current); const dest = audioCtx.createMediaStreamDestination(); source.connect(dest); source.connect(audioCtx.destination); dest.stream.getAudioTracks().forEach(t => stream.addTrack(t)) } catch {} }
-      const mediaRecorder = new MediaRecorder(stream, { mimeType }); const chunks = []
-      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
-      const donePromise = new Promise(resolve => { mediaRecorder.onstop = resolve })
-      mediaRecorder.start()
-      for (let i = 0; i < result.videos.length; i++) {
-        const url = result.videos[i]; if (!url) continue
-        await new Promise((resolve) => {
-          let resolved = false
-          const done = () => { if (!resolved) { resolved = true; resolve() } }
-          const timeout = setTimeout(done, 30000) // 30s max per clip
-          const vid = document.createElement('video'); vid.crossOrigin = 'anonymous'; vid.src = url; vid.muted = true; vid.playsInline = true
-          vid.onended = () => { clearTimeout(timeout); done() }
-          vid.onloadeddata = async () => {
-            try { await vid.play() } catch { clearTimeout(timeout); done(); return }
-            const subtitle = result.story?.scenes?.[i]?.subtitle || ''
-            const words = subtitle.split(/\s+/); const lines = []
-            for (let w = 0; w < words.length; w += 4) lines.push(words.slice(w, w + 4).join(' '))
-            const drawFrame = () => {
-              if (resolved || vid.paused || vid.ended) { clearTimeout(timeout); done(); return }
-              ctx.drawImage(vid, 0, 0, offCanvas.width, offCanvas.height)
-              ctx.font = 'bold 48px Heebo, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-              const lineHeight = 58; const startY = offCanvas.height * 0.82 - ((lines.length - 1) * lineHeight) / 2; const x = offCanvas.width / 2
-              lines.forEach((line, li) => { const y = startY + li * lineHeight; ctx.strokeStyle = 'black'; ctx.lineWidth = 8; ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.strokeText(line, x, y); ctx.fillStyle = 'white'; ctx.fillText(line, x, y) })
-              requestAnimationFrame(drawFrame)
-            }
-            requestAnimationFrame(drawFrame)
-          }
-          vid.onerror = () => { clearTimeout(timeout); done() }
-        })
+      // Reorder videos according to timeline
+      const orderedVideos = clipOrder.map(i => result.videos[i]).filter(Boolean)
+      if (orderedVideos.length === 0) throw new Error('אין סרטונים לייצוא')
+
+      // Build audio URL from base64
+      let voiceAudioUrl = null
+      if (audioBlobUrl.current) {
+        voiceAudioUrl = audioBlobUrl.current
       }
-      mediaRecorder.stop(); await donePromise
-      const blob = new Blob(chunks, { type: mimeType }); const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.style.display = 'none'; a.href = url; a.download = 'ugc-video.mp4'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
-    } catch (e) { alert('שגיאה בייצוא: ' + e.message) } finally { setExporting(false) }
+
+      setExportProgress('מעבד וידאו + אודיו בשרת...')
+      const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoUrls: orderedVideos,
+          audioUrl: voiceAudioUrl,
+          musicUrl: musicUrl || null
+        })
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      if (!data.videoUrl) throw new Error('לא התקבל URL לסרטון')
+
+      setExportProgress('מוריד...')
+      // Download the final video
+      const a = document.createElement('a')
+      a.style.display = 'none'
+      a.href = data.videoUrl
+      a.download = 'ugc-video.mp4'
+      a.target = '_blank'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setExportProgress('')
+    } catch (e) {
+      alert('שגיאה בייצוא: ' + e.message)
+      setExportProgress('')
+    } finally {
+      setExporting(false)
+    }
   }
 
   // ===== FORM STEP =====
@@ -412,81 +496,179 @@ export default function Home() {
     </div>
   )
 
-  // ===== DONE STEP =====
+  // ===== DONE STEP — CapCut-style editor =====
   return (
-    <div style={{ ...pageStyle, maxWidth: 1100 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
-        <h2 style={{ fontSize: 24, fontWeight: 900, color: '#f0f0ff' }}>הסרטון שלך מוכן!</h2>
-        <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0) }} style={ghostBtn}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-          מודעה חדשה
+    <div style={{ ...pageStyle, maxWidth: 1200 }}>
+      {/* Header bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setClipOrder([0,1,2,3]); setMusicUrl(null); setMusicName('') }} style={ghostBtn}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            מודעה חדשה
+          </button>
+          <h2 style={{ fontSize: 22, fontWeight: 900, color: '#f0f0ff', margin: 0 }}>עריכת סרטון</h2>
+        </div>
+        <button onClick={exportMp4} disabled={exporting} style={{ ...bigBtn, width: 'auto', padding: '12px 32px', margin: 0, fontSize: 15 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {exporting ? <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>}
+            {exporting ? (exportProgress || 'מייצא...') : 'ייצוא MP4'}
+          </span>
         </button>
       </div>
 
-      {/* Scene Timeline */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 24 }}>
-        {result?.story?.scenes?.map((scene, i) => (
-          <div key={i} onClick={() => loadScene(i)} style={{ background: CARD_BG, border: `2px solid ${currentScene === i ? 'rgba(168,85,247,0.5)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 14, overflow: 'hidden', cursor: 'pointer', transition: 'all 300ms ease', boxShadow: currentScene === i ? '0 0 20px rgba(168,85,247,0.15)' : 'none' }}>
-            <div style={{ aspectRatio: '9/16', maxHeight: 160, background: BG, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {result.videos[i]
-                ? <video src={result.videos[i]} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onLoadedMetadata={e => { e.target.currentTime = 1 }} />
-                : <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#27272a" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              }
-              <div style={{ position: 'absolute', bottom: '25%', left: 4, right: 4, textAlign: 'center', color: 'white', fontSize: 9, fontWeight: 700, WebkitTextStroke: '0.5px black', textShadow: '0 0 4px #000, 0 0 4px #000', fontFamily: 'Heebo,sans-serif', lineHeight: 1.5 }}>{scene.subtitle}</div>
-            </div>
-            <div style={{ padding: '8px 10px', fontSize: 11, fontWeight: 600, color: currentScene === i ? '#a855f7' : '#52525b', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 4, height: 4, borderRadius: '50%', background: currentScene === i ? '#a855f7' : '#27272a' }} />
-              {scene.label}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 20 }}>
+      {/* Main editor area */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 20, marginBottom: 20 }}>
+        {/* Left: Preview */}
         <div>
-          <div style={cardS}>
-            <div style={secTitle}>תצוגה מקדימה</div>
-            <div style={{ background: '#000', borderRadius: 14, overflow: 'hidden', aspectRatio: '9/16', maxHeight: 460, position: 'relative' }}>
-              <video ref={videoRef} controls playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+          <div style={{ ...cardS, padding: 0, overflow: 'hidden', position: 'relative' }}>
+            <div style={{ background: '#000', aspectRatio: '9/16', maxHeight: 520, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <video ref={videoRef} playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
               <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
+              {/* Play All overlay button */}
+              {!playing && (
+                <button onClick={playAll} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 64, height: 64, borderRadius: '50%', background: 'rgba(168,85,247,0.85)', border: '2px solid rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)', transition: 'all 200ms ease' }}>
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="white" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                </button>
+              )}
+              {playing && (
+                <button onClick={playAll} style={{ position: 'absolute', top: 16, right: 16, width: 40, height: 40, borderRadius: 10, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                </button>
+              )}
             </div>
           </div>
-          <button onClick={exportMp4} disabled={exporting} style={{ ...bigBtn, opacity: exporting ? 0.6 : 1, fontSize: 15, padding: 14, marginBottom: 16 }}>
-            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              {exporting ? <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>}
-              {exporting ? 'מייצא...' : 'ייצוא MP4 עם כתוביות'}
-            </span>
-          </button>
+        </div>
+
+        {/* Right: Audio controls + details */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Voiceover */}
           <div style={cardS}>
-            <div style={secTitle}>הורד סצנות</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+              <div style={secTitle}>קריינות</div>
+            </div>
+            <audio ref={audioRef} controls style={{ width: '100%', borderRadius: 8, height: 36 }} />
+            <div style={{ marginTop: 10, background: 'rgba(255,255,255,0.02)', borderRadius: 10, padding: '10px 12px', fontSize: 12, color: '#a1a1aa', direction: 'rtl', lineHeight: 1.7, fontFamily: 'Heebo,sans-serif', maxHeight: 80, overflowY: 'auto' }}>{result?.hebrewVoice}</div>
+          </div>
+
+          {/* Music track */}
+          <div style={cardS}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+              <div style={{ ...secTitle, color: '#22c55e' }}>מוזיקת רקע</div>
+            </div>
+            {musicUrl ? (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ flex: 1, fontSize: 12, color: '#a1a1aa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{musicName}</div>
+                  <button onClick={() => { setMusicUrl(null); setMusicName(''); if (musicRef.current) musicRef.current.src = '' }} style={{ ...ghostBtn, padding: '4px 10px', fontSize: 11, color: '#ef4444', borderColor: 'rgba(239,68,68,0.2)' }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    הסר
+                  </button>
+                </div>
+                <audio ref={musicRef} controls style={{ width: '100%', borderRadius: 8, height: 36 }} />
+              </div>
+            ) : (
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '16px 12px', border: '2px dashed rgba(34,197,94,0.2)', borderRadius: 12, cursor: 'pointer', background: 'rgba(34,197,94,0.03)', transition: 'all 200ms ease', fontSize: 13, color: '#52525b' }}>
+                <input type="file" accept="audio/*" onChange={handleMusicUpload} style={{ display: 'none' }} />
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                העלה קובץ מוזיקה
+              </label>
+            )}
+          </div>
+
+          {/* Scene details for current scene */}
+          <div style={cardS}>
+            <div style={secTitle}>סצנה {currentScene + 1} — {result?.story?.scenes?.[currentScene]?.type}</div>
+            {result?.story?.scenes?.[currentScene] && (
+              <div>
+                <div style={{ fontSize: 11, color: '#52525b', marginBottom: 6, lineHeight: 1.7 }}><span style={{ color: '#8b5cf6', fontWeight: 600 }}>NB:</span> {result.story.scenes[currentScene].nb_prompt}</div>
+                <div style={{ fontSize: 11, color: '#52525b', marginBottom: 6, lineHeight: 1.7 }}><span style={{ color: '#7c3aed', fontWeight: 600 }}>Kling:</span> {result.story.scenes[currentScene].kling_prompt}</div>
+                <div style={{ fontSize: 12, color: '#22c55e', fontWeight: 600, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>{result.story.scenes[currentScene].subtitle}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Download individual scenes */}
+          <div style={cardS}>
+            <div style={secTitle}>הורדות בודדות</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {result?.videos?.map((url, i) => (
-                <div key={i} style={{ background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 10, padding: 10, textAlign: 'center', fontSize: 12 }}>
-                  <div style={{ color: '#71717a', marginBottom: 4 }}>{result.story.scenes[i].label}</div>
-                  {url ? <a href={url} target="_blank" rel="noreferrer" style={{ color: '#a855f7', textDecoration: 'none', fontWeight: 600 }}>הורד</a> : <span style={{ color: '#27272a' }}>שגיאה</span>}
+                <div key={i} style={{ background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 8, padding: '8px 10px', textAlign: 'center', fontSize: 11 }}>
+                  <div style={{ color: '#52525b', marginBottom: 3 }}>סצנה {i+1}</div>
+                  {url ? <a href={url} target="_blank" rel="noreferrer" style={{ color: '#a855f7', textDecoration: 'none', fontWeight: 600 }}>הורד</a> : <span style={{ color: '#27272a' }}>--</span>}
                 </div>
               ))}
             </div>
           </div>
         </div>
+      </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={cardS}>
-            <div style={secTitle}>קריינות עברית</div>
-            <audio ref={audioRef} controls style={{ width: '100%', borderRadius: 8 }} />
-            <div style={{ marginTop: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#a1a1aa', direction: 'rtl', lineHeight: 1.8, fontFamily: 'Heebo,sans-serif' }}>{result?.hebrewVoice}</div>
+      {/* Timeline — drag-and-drop clips */}
+      <div style={{ ...cardS, padding: '16px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+            <div style={secTitle}>ציר זמן</div>
           </div>
-          <div style={cardS}>
-            <div style={secTitle}>פירוט הסיפור</div>
-            {result?.story?.scenes?.map((scene, i) => (
-              <div key={i} style={{ marginBottom: 10, padding: '14px 16px', background: currentScene === i ? 'rgba(168,85,247,0.04)' : 'rgba(255,255,255,0.02)', borderRadius: 12, border: `1px solid ${currentScene === i ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.04)'}`, transition: 'all 300ms ease' }}>
-                <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8, color: '#a855f7' }}>{scene.label}</div>
-                <div style={{ fontSize: 11, color: '#52525b', marginBottom: 4, lineHeight: 1.7 }}><span style={{ color: '#8b5cf6', fontWeight: 600 }}>NB:</span> {scene.nb_prompt}</div>
-                <div style={{ fontSize: 11, color: '#52525b', marginBottom: 4, lineHeight: 1.7 }}><span style={{ color: '#7c3aed', fontWeight: 600 }}>Kling:</span> {scene.kling_prompt}</div>
-                <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 500 }}>{scene.subtitle}</div>
+          <div style={{ fontSize: 11, color: '#52525b' }}>גרור כדי לשנות סדר</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+          {clipOrder.map((sceneIdx, orderIdx) => {
+            const scene = result?.story?.scenes?.[sceneIdx]
+            const videoUrl = result?.videos?.[sceneIdx]
+            const isActive = currentScene === sceneIdx
+            const isDragging = dragIdx === orderIdx
+            return (
+              <div
+                key={orderIdx}
+                draggable
+                onDragStart={(e) => handleDragStart(e, orderIdx)}
+                onDragOver={(e) => handleDragOver(e, orderIdx)}
+                onDragEnd={handleDragEnd}
+                onClick={() => loadScene(sceneIdx)}
+                style={{
+                  flex: '1 1 0', minWidth: 140,
+                  background: isActive ? 'rgba(168,85,247,0.06)' : 'rgba(255,255,255,0.02)',
+                  border: `2px solid ${isActive ? 'rgba(168,85,247,0.5)' : isDragging ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                  borderRadius: 12, overflow: 'hidden', cursor: 'grab',
+                  opacity: isDragging ? 0.6 : 1,
+                  transition: 'all 200ms ease',
+                  boxShadow: isActive ? '0 0 16px rgba(168,85,247,0.12)' : 'none'
+                }}
+              >
+                <div style={{ aspectRatio: '16/9', background: BG, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {videoUrl
+                    ? <video src={videoUrl} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onLoadedMetadata={e => { e.target.currentTime = 1 }} />
+                    : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#27272a" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  }
+                  {/* Duration badge */}
+                  <div style={{ position: 'absolute', top: 4, left: 4, background: 'rgba(0,0,0,0.7)', borderRadius: 4, padding: '2px 6px', fontSize: 9, color: '#fff', fontWeight: 600 }}>5s</div>
+                  {/* Scene number */}
+                  <div style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 6, background: isActive ? '#a855f7' : 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#fff', fontWeight: 700 }}>{orderIdx + 1}</div>
+                </div>
+                <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: isActive ? '#a855f7' : '#71717a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {scene?.type || `סצנה ${sceneIdx + 1}`}
+                  </div>
+                </div>
               </div>
-            ))}
-          </div>
+            )
+          })}
+        </div>
+        {/* Timeline bar visual */}
+        <div style={{ marginTop: 10, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.04)', display: 'flex', overflow: 'hidden' }}>
+          {clipOrder.map((sceneIdx, i) => (
+            <div key={i} style={{ flex: 1, background: currentScene === sceneIdx ? '#a855f7' : 'rgba(168,85,247,0.15)', borderRight: i < clipOrder.length - 1 ? '1px solid rgba(0,0,0,0.3)' : 'none', transition: 'background 300ms ease' }} />
+          ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 9, color: '#3f3f46' }}>
+          <span>0s</span>
+          <span>5s</span>
+          <span>10s</span>
+          <span>15s</span>
+          <span>20s</span>
         </div>
       </div>
 
