@@ -126,9 +126,9 @@ export async function POST(req) {
 
     const ffmpegArgs = ['-y']
 
-    // Add each clip as a separate input
+    // Add each clip as a separate input — force 24fps on decode to normalize timebase (fixes "8 tbn" variable-fps errors)
     for (const cp of validClipPaths) {
-      ffmpegArgs.push('-i', cp)
+      ffmpegArgs.push('-r', '24', '-i', cp)
     }
 
     // Audio inputs
@@ -137,8 +137,9 @@ export async function POST(req) {
     if (voicePath) ffmpegArgs.push('-i', voicePath)
     if (musicPath) ffmpegArgs.push('-i', musicPath)
 
-    // Build filter_complex: scale each clip to 720x1280 cover, then concat (video only)
-    const scaleFilter = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1'
+    // Build filter_complex: scale each clip to 720x1280 cover + force 24fps CFR before concat
+    // (fixes "8 tbn" / variable-frame-rate errors after concat by normalizing every input)
+    const scaleFilter = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,fps=24,setsar=1,format=yuv420p'
     const scaledStreams = validClipPaths.map((_, i) => `[${i}:v]${scaleFilter}[v${i}]`).join(';')
     const concatInputs = validClipPaths.map((_, i) => `[v${i}]`).join('')
     let filterComplex = `${scaledStreams};${concatInputs}concat=n=${n}:v=1:a=0[outv]`
@@ -163,13 +164,16 @@ export async function POST(req) {
       ffmpegArgs.push('-an')
     }
 
-    // Output encoding
+    // Output encoding — force constant 24fps throughout to avoid variable-timebase errors
     ffmpegArgs.push(
       '-c:v', 'libx264',
       '-preset', 'fast',
       '-crf', '23',
       '-r', '24',
+      '-fps_mode', 'cfr',
+      '-vsync', 'cfr',
       '-pix_fmt', 'yuv420p',
+      '-video_track_timescale', '24000',
       '-c:a', 'aac',
       '-b:a', '128k',
       '-ar', '44100',
