@@ -304,6 +304,9 @@ export default function Home() {
   const [applicationArea, setApplicationArea] = useState('')
   const [productImage, setProductImage] = useState(null)
   const [storyDescription, setStoryDescription] = useState('')
+  const [voiceId, setVoiceId] = useState('cp6q5qJLs8rR7eAWOepf')
+  const [voicePreviewing, setVoicePreviewing] = useState(null)
+  const voicePreviewRef = useRef(null)
   const [falKey, setFalKey] = useState('')
   const [elevenKey, setElevenKey] = useState('')
   const [keysOpen, setKeysOpen] = useState(false)
@@ -573,7 +576,7 @@ export default function Home() {
       }
       const agentRes = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl, falKey, elevenKey, voiceId: 'Z3R5wn05IrDiVCyEkUrK' })
+        body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl, falKey, elevenKey, voiceId })
       })
       if (!agentRes.ok) throw new Error('Agent failed')
       const { jobId } = await agentRes.json()
@@ -1013,6 +1016,77 @@ export default function Home() {
             <label style={lblS}>תיאור סיפור מותאם (אופציונלי)</label>
             <textarea value={storyDescription} onChange={e => setStoryDescription(e.target.value)} placeholder="תאר סיפור מותאם אישית..." style={{ ...inpS, height: 80, direction: 'rtl', fontFamily: 'Heebo,sans-serif', resize: 'none', marginTop: 6 }} />
           </div>
+        </div>
+      </div>
+
+      {/* Voice Selection */}
+      <div style={cardS}>
+        <div style={secTitle}>בחר קול</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {[
+            { id: 'cp6q5qJLs8rR7eAWOepf', name: 'נועה', gender: 'female', emoji: '👩' },
+            { id: 'nBiC8Jexp2XGyIxATg9S', name: 'דניאל', gender: 'male', emoji: '👨' },
+          ].map(v => {
+            const selected = voiceId === v.id
+            const isPlaying = voicePreviewing === v.id
+            return (
+              <div
+                key={v.id}
+                onClick={() => setVoiceId(v.id)}
+                style={{
+                  padding: 18,
+                  borderRadius: 14,
+                  border: `2px solid ${selected ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.08)'}`,
+                  background: selected ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 14,
+                  direction: 'rtl',
+                  fontFamily: 'Heebo,sans-serif',
+                  transition: 'all 300ms ease'
+                }}
+              >
+                <div style={{ fontSize: 32 }}>{v.emoji}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f0ff' }}>{v.name}</div>
+                  <div style={{ fontSize: 12, color: '#71717a', marginTop: 2 }}>{v.gender === 'female' ? 'קול נשי' : 'קול גברי'}</div>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (voicePreviewRef.current) { try { voicePreviewRef.current.pause() } catch {} }
+                    if (isPlaying) { setVoicePreviewing(null); return }
+                    const audio = new Audio(`/api/voice-preview?voiceId=${v.id}`)
+                    audio.onended = () => setVoicePreviewing(null)
+                    audio.onerror = () => setVoicePreviewing(null)
+                    audio.play().catch(() => setVoicePreviewing(null))
+                    voicePreviewRef.current = audio
+                    setVoicePreviewing(v.id)
+                  }}
+                  style={{
+                    width: 36, height: 36, borderRadius: '50%',
+                    background: isPlaying ? 'rgba(239,68,68,0.15)' : 'rgba(168,85,247,0.15)',
+                    border: `1px solid ${isPlaying ? 'rgba(239,68,68,0.4)' : 'rgba(168,85,247,0.4)'}`,
+                    color: isPlaying ? '#ef4444' : '#a855f7',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                  }}
+                  title={isPlaying ? 'עצור' : 'נגן'}
+                >
+                  {isPlaying
+                    ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>
+                    : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>}
+                </button>
+                {selected && (
+                  <div style={{ position: 'absolute' }}>
+                    <div style={{ width: 20, height: 20, background: '#a855f7', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: -28, marginTop: -24 }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
 

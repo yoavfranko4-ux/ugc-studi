@@ -48,7 +48,10 @@
       "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/NotoSansHebrew-Bold.ttf \"https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Bold.ttf\")",
       "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://cdn.jsdelivr.net/npm/@typopro/web-dejavu@3.7.5/TypoPRO-DejaVuSans-Bold.ttf\")",
       "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://cdn.jsdelivr.net/gh/fonts-archive/DejaVu-Sans@main/DejaVuSans-Bold.ttf\")",
-      "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://cdn.jsdelivr.net/npm/@fontsource/dejavu-sans@5.0.0/files/dejavu-sans-latin-700-normal.woff2\")"
+      "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://cdn.jsdelivr.net/npm/@fontsource/dejavu-sans@5.0.0/files/dejavu-sans-latin-700-normal.woff2\")",
+      "Bash(node -c app/api/agent/route.js)",
+      "Bash(node -c app/api/voice-preview/route.js)",
+      "Bash(node --input-type=module -e \"import\\('./app/studio/page.js'\\).catch\\(e => { if \\(e.code === 'ERR_UNSUPPORTED_DIR_IMPORT' || e.message?.includes\\('jsx'\\)\\) process.exit\\(0\\); console.error\\(e.message\\); process.exit\\(1\\); }\\)\")"
     ]
   }
 }

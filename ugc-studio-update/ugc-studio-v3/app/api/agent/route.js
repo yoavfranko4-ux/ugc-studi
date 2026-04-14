@@ -47,11 +47,12 @@ async function generateNBFrame(prompt, imageUrls, maxRetries = 3) {
   }
 }
 
-async function generateVoice(text) {
+async function generateVoice(text, voiceId) {
   if (!ELEVEN_KEY || !text) return null;
+  const voice = voiceId || ELEVEN_VOICE;
   try {
     // Use with-timestamps endpoint for word-level alignment data
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}/with-timestamps?output_format=mp3_44100_128`, {
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}/with-timestamps?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, model_id: 'eleven_v3', voice_settings: { stability: 0.55, similarity_boost: 0.75, style: 0.55, use_speaker_boost: true } })
@@ -93,14 +94,19 @@ async function generateVoice(text) {
   } catch (e) { console.error('Voice error:', e.message); return null; }
 }
 
-async function generateScript(productName, productDesc, applicationArea, hook) {
+async function generateScript(productName, productDesc, applicationArea, hook, voiceGender) {
   if (!ANTHROPIC_KEY) return null;
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
+  const genderInstruction = voiceGender === 'male'
+    ? 'כתוב את הקריינות בלשון זכר'
+    : 'כתוב את הקריינות בלשון נקבה';
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514', max_tokens: 2500,
     messages: [{ role: 'user', content: `You are a UGC ad expert writing scripts in Hebrew. Create a viral 4-scene ad for: "${productName}".
 Description: ${productDesc}
 How to use: ${applicationArea}
+
+${genderInstruction}
 
 STEP 0 — PRODUCT CATEGORY ANALYSIS (do this silently before writing):
 Read the product name and description and classify the product into one of these categories:
@@ -286,7 +292,7 @@ export async function POST(req) {
   }
 }
 
-async function runJob(jobId, { productName, productDesc, applicationArea, avatarUrl, productImageUrl }) {
+async function runJob(jobId, { productName, productDesc, applicationArea, avatarUrl, productImageUrl, voiceId }) {
   try {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
     const preparedAvatar = avatarUrl
@@ -299,7 +305,8 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
 
     // Script
     const hook = getHook(productName, productDesc);
-    const script = await generateScript(productName, productDesc, applicationArea, hook);
+    const voiceGender = voiceId === 'nBiC8Jexp2XGyIxATg9S' ? 'male' : 'female';
+    const script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender);
     const scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
     if (script) {
       script.voiceover_scene1 = hook;
@@ -331,7 +338,7 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
     };
 
     const [voiceResult, frames] = await Promise.all([
-      generateVoice(voiceover),
+      generateVoice(voiceover, voiceId),
       generateAllFrames()
     ]);
     const audioBase64 = voiceResult?.base64 || null;
