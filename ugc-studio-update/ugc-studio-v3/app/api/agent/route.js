@@ -5,6 +5,8 @@ import { supabase } from '../../../lib/supabase'
 export const maxDuration = 300;
 
 const FAL_KEY = process.env.FAL_API_KEY;
+if (!FAL_KEY) console.warn('⚠ FAL_API_KEY is not set — NanoBanana frames will fail');
+else console.log('FAL_API_KEY loaded:', FAL_KEY.slice(0, 8) + '...');
 fal.config({ credentials: FAL_KEY });
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW';
@@ -12,7 +14,7 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 const SCENE_DURATIONS = [5, 5, 5, 5];
 
-async function generateNBFrame(prompt, imageUrls) {
+async function generateNBFrame(prompt, imageUrls, maxRetries = 3) {
   const validUrls = imageUrls.filter(Boolean);
   console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
   const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real avatar not model, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`;
@@ -22,11 +24,27 @@ async function generateNBFrame(prompt, imageUrls) {
   const input = validUrls.length === 0
     ? { prompt: enhancedPrompt, image_size: { width: 720, height: 1280 } }
     : { prompt: enhancedPrompt, image_urls: validUrls, image_size: { width: 720, height: 1280 } };
-  const result = await fal.run(endpointId, { input });
-  console.log('NB response:', JSON.stringify(result.data).slice(0, 400));
-  const imageUrl = result.data.images?.[0]?.url || result.data.images?.[0] || null;
-  console.log('NB image URL:', imageUrl?.slice(0, 100));
-  return imageUrl;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await fal.run(endpointId, { input });
+      console.log('NB response:', JSON.stringify(result.data).slice(0, 400));
+      const imageUrl = result.data.images?.[0]?.url || result.data.images?.[0] || null;
+      console.log('NB image URL:', imageUrl?.slice(0, 100));
+      return imageUrl;
+    } catch (err) {
+      const status = err.status || err.statusCode || 'unknown';
+      const body = err.body || err.message || String(err);
+      console.error(`NB frame attempt ${attempt}/${maxRetries} failed — status: ${status}, body:`, JSON.stringify(body).slice(0, 500));
+      if ((status === 403 || status === 429) && attempt < maxRetries) {
+        const delay = attempt * 2000;
+        console.log(`NB retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 async function generateVoice(text) {
