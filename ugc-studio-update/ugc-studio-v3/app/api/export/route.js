@@ -23,9 +23,48 @@ function resolveFfmpegPath() {
   return ffmpegStaticPath
 }
 const ffmpegPath = resolveFfmpegPath()
-console.log('[Export] Resolved ffmpeg binary:', ffmpegPath)
+console.log('[Export] Resolved ffmpeg binary:', ffmpegPath, '(ffmpeg-static =', ffmpegStaticPath, ')')
+
+// Log ffmpeg version + libass availability ONCE at module load
+try {
+  const ver = execSync(`"${ffmpegPath}" -version 2>&1 | head -3`, { encoding: 'utf8', shell: '/bin/sh', stdio: ['pipe', 'pipe', 'ignore'] })
+  console.log('[Export] ffmpeg version:\n' + ver)
+} catch (e) { console.warn('[Export] Could not run ffmpeg -version:', e.message) }
+
+// Find a font with Hebrew glyph coverage — needed for drawtext filter (no libass path)
+function findHebrewFont() {
+  const candidates = [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSansHebrew-Bold.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
+  ]
+  for (const p of candidates) { if (fs.existsSync(p)) return p }
+  // Search the nix store (nixpacks installs fonts under /nix/store/<hash>-dejavu-fonts-.../)
+  try {
+    const found = execSync(`find /nix/store -type f \\( -name 'DejaVuSans-Bold.ttf' -o -name 'NotoSansHebrew-Bold.ttf' -o -name 'DejaVuSans.ttf' \\) 2>/dev/null | head -1`, { encoding: 'utf8', shell: '/bin/sh' }).trim()
+    if (found && fs.existsSync(found)) return found
+  } catch {}
+  return null
+}
+const hebrewFontPath = findHebrewFont()
+console.log('[Export] Hebrew font path:', hebrewFontPath || '(none found — subtitles will NOT be burned in)')
 
 const execFileAsync = promisify(execFile)
+
+// Reverse a Hebrew string so drawtext (which lacks BiDi/libass) renders it visually right-to-left.
+// Hack for pure-Hebrew short phrases; not linguistically correct for mixed content, but readable.
+function reverseIfHebrew(text) {
+  if (!text) return text
+  if (!/[\u0590-\u05FF]/.test(text)) return text
+  return text.split('').reverse().join('')
+}
+
+// Escape a string value for use inside an ffmpeg filter_complex argument
+function escapeFilterValue(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'")
+}
 
 // Format seconds → SRT timestamp (HH:MM:SS,mmm)
 function fmtSrtTime(sec) {
@@ -161,14 +200,36 @@ export async function POST(req) {
     // =============================================================
     const outputPath = path.join(jobDir, 'output.mp4')
 
-    // --- Step 1: normalize every clip to identical codec/fps/size/pix_fmt ---
+    // --- Step 1: normalize every clip + BURN IN per-clip subtitle via drawtext ---
+    // Using drawtext per clip avoids needing libass, and each clip's subtitle shows for the clip's entire 5s.
     const normalizedPaths = []
+    const totalDuration = validClipPaths.length * 5
+
     for (let i = 0; i < validClipPaths.length; i++) {
       const inPath = validClipPaths[i]
       const normPath = path.join(jobDir, `norm_${i}.mp4`)
+
+      // Build the scale/crop/fps chain, optionally followed by drawtext with this clip's subtitle
+      let vfChain = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1'
+
+      const sceneSub = Array.isArray(subtitles) && subtitles[i] ? (subtitles[i].text || '').trim() : ''
+      if (sceneSub && hebrewFontPath) {
+        const displayText = reverseIfHebrew(sceneSub)
+        const subFile = path.join(jobDir, `sub_${i}.txt`)
+        await writeFile(subFile, displayText, 'utf8')
+        const fontArg = escapeFilterValue(hebrewFontPath)
+        const txtArg = escapeFilterValue(subFile)
+        // White text, 3px black border, bottom-center at 82% height, fontsize 40 for 720x1280
+        vfChain += `,drawtext=fontfile='${fontArg}':textfile='${txtArg}':fontsize=40:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h*0.82`
+        console.log(`[Export] Clip ${i} subtitle (logical): ${sceneSub}`)
+        console.log(`[Export] Clip ${i} subtitle (drawn):   ${displayText}`)
+      } else if (sceneSub && !hebrewFontPath) {
+        console.warn(`[Export] Clip ${i}: have subtitle text but no font — skipping burn-in`)
+      }
+
       const normArgs = [
         '-y', '-i', inPath,
-        '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1',
+        '-vf', vfChain,
         '-r', '24',
         '-fps_mode', 'cfr',
         '-vsync', 'cfr',
@@ -199,10 +260,7 @@ export async function POST(req) {
       }
     }
 
-    // --- Build SRT subtitles file (UTF-8) from the subtitles array ---
-    // subtitles: Array<{ text, start (sec), duration (sec) }>
-    const totalDuration = validClipPaths.length * 5   // 5s per clip — matches client's subtitle schedule
-    let srtPath = null
+    // --- Build SRT file (kept for debug/reference only; subtitles now burned per-clip in Step 1) ---
     if (Array.isArray(subtitles) && subtitles.length) {
       const srtLines = []
       let idx = 1
@@ -217,14 +275,14 @@ export async function POST(req) {
         srtLines.push('')
       }
       if (srtLines.length) {
-        srtPath = path.join(jobDir, 'subs.srt')
-        await writeFile(srtPath, srtLines.join('\n'), 'utf8')
-        console.log('[Export] SRT written to', srtPath)
+        const srtDebugPath = path.join(jobDir, 'subs.srt')
+        await writeFile(srtDebugPath, srtLines.join('\n'), 'utf8')
+        console.log('[Export] SRT (debug) written to', srtDebugPath)
         console.log('[Export] SRT content:\n' + srtLines.join('\n'))
       }
     }
 
-    // --- Step 2: concat demuxer + optional subtitle burn-in + audio mix ---
+    // --- Step 2: concat demuxer + audio mix (video stream-copied — subtitles already burned) ---
     const listPath = path.join(jobDir, 'list.txt')
     const listContent = normalizedPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n') + '\n'
     await writeFile(listPath, listContent)
@@ -237,13 +295,7 @@ export async function POST(req) {
     if (voicePath) { finalArgs.push('-i', voicePath); voiceInputIdx = nextIdx++ }
     if (musicPath) { finalArgs.push('-i', musicPath); musicInputIdx = nextIdx }
 
-    // Build filter_complex — video chain (with subtitles if available) + audio mix
-    const escapeForFilter = (p) => p.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'")
-    const videoChain = srtPath
-      // force_style uses ASS style codes — white text, black outline, bottom-center, bold
-      ? `[0:v]subtitles='${escapeForFilter(srtPath)}':force_style='FontName=DejaVu Sans,FontSize=22,Bold=1,PrimaryColour=&HFFFFFFFF,OutlineColour=&HFF000000,BackColour=&H00000000,Outline=3,Shadow=1,Alignment=2,MarginV=90'[outv]`
-      : null
-
+    // Audio mix only — video is stream-copied from the normalized clips (subtitles already burned)
     let audioChain = null
     if (voicePath && musicPath) {
       audioChain = `[${voiceInputIdx}:a]volume=1.0,apad=whole_dur=${totalDuration},aresample=44100[va];[${musicInputIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[ma];[va][ma]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[aout]`
@@ -253,38 +305,20 @@ export async function POST(req) {
       audioChain = `[${musicInputIdx}:a]volume=0.4,aloop=loop=-1:size=2000000000,aresample=44100[aout]`
     }
 
-    const filterParts = []
-    if (videoChain) filterParts.push(videoChain)
-    if (audioChain) filterParts.push(audioChain)
-    if (filterParts.length) finalArgs.push('-filter_complex', filterParts.join(';'))
+    if (audioChain) finalArgs.push('-filter_complex', audioChain)
 
-    // Mapping
-    if (videoChain) finalArgs.push('-map', '[outv]')
-    else finalArgs.push('-map', '0:v:0')
+    finalArgs.push('-map', '0:v:0')
     if (audioChain) finalArgs.push('-map', '[aout]')
     else finalArgs.push('-an')
 
-    // Encoding — if we applied subtitles, must re-encode video; otherwise stream-copy is fine
-    if (videoChain) {
-      finalArgs.push(
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-crf', '23',
-        '-r', '24',
-        '-pix_fmt', 'yuv420p',
-      )
-    } else {
-      finalArgs.push('-c:v', 'copy')
-    }
-
     finalArgs.push(
+      '-c:v', 'copy',                        // subtitles already burned in Step 1
       '-c:a', 'aac',
       '-b:a', '128k',
       '-ar', '44100',
       '-ac', '2',
       '-movflags', '+faststart',
-      // Explicit duration cap — NO -shortest (which clipped to voice length = 15s instead of 20s)
-      '-t', String(totalDuration),
+      '-t', String(totalDuration),           // explicit 20s cap (no -shortest)
       outputPath
     )
 
@@ -301,33 +335,7 @@ export async function POST(req) {
       console.error('[Export] Concat FAILED. Exit code:', execErr.code)
       console.error('[Export] Concat stderr FULL:\n' + (execErr.stderr || '(no stderr)'))
       console.error('[Export] Concat stdout FULL:\n' + (execErr.stdout || '(no stdout)'))
-
-      // Fallback: if subtitles filter failed (libass missing), retry WITHOUT subtitles so user still gets a video
-      if (srtPath && /subtitles|libass|No such filter/i.test(String(execErr.stderr || ''))) {
-        console.warn('[Export] Subtitle burn-in failed — retrying without subtitles as fallback')
-        const fallbackArgs = finalArgs.filter((a, i) => {
-          // Drop the -filter_complex value (subtitle) but keep audio filter; simplest: rerun with no video filter
-          return true
-        })
-        // Rebuild from scratch without videoChain
-        const fb = ['-y', '-f', 'concat', '-safe', '0', '-i', listPath]
-        if (voicePath) fb.push('-i', voicePath)
-        if (musicPath) fb.push('-i', musicPath)
-        if (audioChain) fb.push('-filter_complex', audioChain, '-map', '0:v:0', '-map', '[aout]')
-        else fb.push('-map', '0:v:0', '-an')
-        fb.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
-                '-movflags', '+faststart', '-t', String(totalDuration), outputPath)
-        console.log('[Export] Fallback args:', JSON.stringify(fb))
-        try {
-          const r = await execFileAsync(ffmpegPath, fb, { timeout: 90000, maxBuffer: 20 * 1024 * 1024 })
-          console.log('[Export] Fallback concat stderr FULL:\n' + (r.stderr || '(empty)'))
-        } catch (fbErr) {
-          console.error('[Export] Fallback ALSO failed:', fbErr.stderr || fbErr.message)
-          throw new Error(`Concat failed (code ${execErr.code}): ${execErr.stderr?.slice(-400) || execErr.message}`)
-        }
-      } else {
-        throw new Error(`Concat failed (code ${execErr.code}): ${execErr.stderr?.slice(-400) || execErr.message}`)
-      }
+      throw new Error(`Concat failed (code ${execErr.code}): ${execErr.stderr?.slice(-400) || execErr.message}`)
     }
 
     // 5. Read output and return as MP4
