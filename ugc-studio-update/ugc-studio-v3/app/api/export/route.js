@@ -19,7 +19,7 @@ export async function POST(req) {
 
   try {
     const body = await req.json()
-    const { videoClipsB64, videoUrls, audioBase64, subtitles, bgMusic, bgMusicUrl, subtitleStyle } = body
+    const { videoClipsB64, videoUrls, audioBase64, audioFormat, subtitles, bgMusic, bgMusicUrl, subtitleStyle } = body
 
     const hasB64Clips = videoClipsB64?.length > 0
     const hasUrls = videoUrls?.length > 0 && videoUrls.some(Boolean)
@@ -57,41 +57,50 @@ export async function POST(req) {
     const validClipPaths = clipPaths.filter(Boolean)
     if (validClipPaths.length === 0) throw new Error('No clips written successfully')
 
-    // 2. Write voiceover audio if provided — with debug + AAC pre-conversion to avoid MP3 decode issues
+    // 2. Write voiceover audio if provided
+    //    Preferred path: client sends audioFormat='wav' (raw PCM) — FFmpeg reads it flawlessly.
+    //    Legacy path: MP3 — we pre-convert to AAC to dodge ffmpeg-static MP3 decoder bugs.
     let voicePath = null
     if (audioBase64) {
-      console.log('[Export] audioBase64 encoded string length:', audioBase64.length, 'chars')
-      const rawPath = path.join(jobDir, 'voice.mp3')
+      const fmt = audioFormat === 'wav' ? 'wav' : 'mp3'
+      const ext = fmt
+      console.log('[Export] audioBase64 encoded string length:', audioBase64.length, 'chars (format=' + fmt + ')')
+      const rawPath = path.join(jobDir, `voice.${ext}`)
       const audioBuf = Buffer.from(audioBase64, 'base64')
       console.log('[Export] audioBuf decoded length:', audioBuf.length, 'bytes')
       await writeFile(rawPath, audioBuf)
       try {
         const diskStats = fs.statSync(rawPath)
-        console.log('[Export] voice.mp3 on disk:', diskStats.size, 'bytes')
-      } catch (e) { console.warn('[Export] statSync voice.mp3 failed:', e.message) }
+        console.log(`[Export] voice.${ext} on disk:`, diskStats.size, 'bytes')
+      } catch (e) { console.warn(`[Export] statSync voice.${ext} failed:`, e.message) }
 
-      // Probe the MP3 via `ffmpeg -i` (no ffprobe available) — non-zero exit is expected
+      // Probe via ffmpeg -i
       try {
         const probeRes = await execFileAsync(ffmpegPath, ['-hide_banner', '-i', rawPath, '-f', 'null', '-'], { maxBuffer: 4 * 1024 * 1024 }).catch(e => ({ stderr: e.stderr || e.message }))
-        console.log('[Export] ffmpeg probe voice.mp3:', (probeRes.stderr || '').slice(-1200))
+        console.log(`[Export] ffmpeg probe voice.${ext}:`, (probeRes.stderr || '').slice(-1200))
       } catch (e) { console.warn('[Export] probe failed:', e.message) }
 
-      // Pre-convert to AAC/m4a — bypasses ffmpeg-static MP3 decoder bugs that produce 0 audio frames
-      const convertedPath = path.join(jobDir, 'voice_converted.m4a')
-      try {
-        const convRes = await execFileAsync(ffmpegPath, [
-          '-y', '-i', rawPath,
-          '-vn', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
-          convertedPath
-        ], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
-        const convStats = fs.statSync(convertedPath)
-        console.log('[Export] voice_converted.m4a:', convStats.size, 'bytes')
-        console.log('[Export] Converter stderr tail:', convRes.stderr?.slice(-400) || '(empty)')
-        voicePath = convertedPath
-      } catch (convErr) {
-        console.error('[Export] Voice AAC conversion FAILED:', convErr.stderr?.slice(-800) || convErr.message)
-        // Fall back to raw mp3 and hope for the best
+      if (fmt === 'wav') {
+        // WAV is raw PCM — use directly, no pre-conversion needed
         voicePath = rawPath
+        console.log('[Export] Using WAV voice directly — no pre-conversion')
+      } else {
+        // MP3 legacy path — pre-convert to AAC
+        const convertedPath = path.join(jobDir, 'voice_converted.m4a')
+        try {
+          const convRes = await execFileAsync(ffmpegPath, [
+            '-y', '-i', rawPath,
+            '-vn', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+            convertedPath
+          ], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
+          const convStats = fs.statSync(convertedPath)
+          console.log('[Export] voice_converted.m4a:', convStats.size, 'bytes')
+          console.log('[Export] Converter stderr tail:', convRes.stderr?.slice(-400) || '(empty)')
+          voicePath = convertedPath
+        } catch (convErr) {
+          console.error('[Export] Voice AAC conversion FAILED:', convErr.stderr?.slice(-800) || convErr.message)
+          voicePath = rawPath
+        }
       }
     }
 

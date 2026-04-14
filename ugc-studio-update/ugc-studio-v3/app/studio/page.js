@@ -33,6 +33,67 @@ const TRANSITIONS = [
 function createAudioContext() {
   return new (window.AudioContext || window.webkitAudioContext)()
 }
+
+// === AudioBuffer → WAV (16-bit PCM) ArrayBuffer encoder ===
+// Used to convert MP3 voiceover to WAV client-side before sending to FFmpeg.
+// WAV is raw PCM — ffmpeg-static decodes it perfectly every time (unlike the MP3 path).
+function audioBufferToWav(buffer) {
+  const numChannels = buffer.numberOfChannels
+  const sampleRate = buffer.sampleRate
+  const bitDepth = 16
+  const bytesPerSample = bitDepth / 8
+  const blockAlign = numChannels * bytesPerSample
+  const dataLength = buffer.length * blockAlign
+  const bufferLength = 44 + dataLength
+  const ab = new ArrayBuffer(bufferLength)
+  const view = new DataView(ab)
+  const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)) }
+  writeStr(0, 'RIFF')
+  view.setUint32(4, 36 + dataLength, true)
+  writeStr(8, 'WAVE')
+  writeStr(12, 'fmt ')
+  view.setUint32(16, 16, true)        // fmt chunk size
+  view.setUint16(20, 1, true)         // PCM format
+  view.setUint16(22, numChannels, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * blockAlign, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, bitDepth, true)
+  writeStr(36, 'data')
+  view.setUint32(40, dataLength, true)
+  const channels = []
+  for (let c = 0; c < numChannels; c++) channels.push(buffer.getChannelData(c))
+  let pos = 44
+  for (let i = 0; i < buffer.length; i++) {
+    for (let c = 0; c < numChannels; c++) {
+      let s = Math.max(-1, Math.min(1, channels[c][i]))
+      s = s < 0 ? s * 0x8000 : s * 0x7FFF
+      view.setInt16(pos, s | 0, true)
+      pos += 2
+    }
+  }
+  return ab
+}
+
+// Convert a base64 MP3 (or any browser-decodable audio) to base64 WAV via Web Audio API
+async function mp3Base64ToWavBase64(mp3B64) {
+  const bin = atob(mp3B64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  const ctx = new (window.AudioContext || window.webkitAudioContext)()
+  try {
+    const audioBuf = await ctx.decodeAudioData(bytes.buffer.slice(0))
+    const wavAb = audioBufferToWav(audioBuf)
+    const wavBytes = new Uint8Array(wavAb)
+    let s = ''
+    for (let j = 0; j < wavBytes.length; j += 8192) {
+      s += String.fromCharCode(...wavBytes.slice(j, j + 8192))
+    }
+    return { base64: btoa(s), byteLength: wavAb.byteLength, sampleRate: audioBuf.sampleRate, channels: audioBuf.numberOfChannels, duration: audioBuf.duration }
+  } finally {
+    try { ctx.close() } catch {}
+  }
+}
 function playWhoosh(ctx) {
   const osc = ctx.createOscillator(), gain = ctx.createGain(), filter = ctx.createBiquadFilter()
   osc.type = 'sawtooth'; osc.frequency.setValueAtTime(800, ctx.currentTime)
@@ -750,13 +811,30 @@ export default function Home() {
 
       setExportProgress('שולח לשרת... 20%')
 
+      // Convert MP3 voiceover → WAV (raw PCM) on the CLIENT so FFmpeg never has to decode MP3.
+      // Web Audio API's decodeAudioData handles MP3 reliably; the resulting WAV is bulletproof server-side.
+      let voiceAudioB64 = result.audioBase64 || null
+      let audioFormat = 'mp3'
+      if (voiceAudioB64) {
+        try {
+          setExportProgress('ממיר קול ל-WAV... 16%')
+          const wav = await mp3Base64ToWavBase64(voiceAudioB64)
+          voiceAudioB64 = wav.base64
+          audioFormat = 'wav'
+          console.log('[Studio] Voice WAV:', wav.byteLength, 'bytes,', wav.sampleRate, 'Hz,', wav.channels, 'ch,', wav.duration.toFixed(2), 's')
+        } catch (e) {
+          console.warn('[Studio] Client-side WAV conversion failed — falling back to raw MP3:', e.message)
+        }
+      }
+
       const bgMusicTrack = MUSIC_TRACKS.find(t => t.id === bgMusic)
       const resp = await fetch('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           videoClipsB64,
-          audioBase64: result.audioBase64 || null,
+          audioBase64: voiceAudioB64,
+          audioFormat,
           subtitles,
           bgMusic,
           bgMusicUrl: bgMusicTrack?.url || null,
