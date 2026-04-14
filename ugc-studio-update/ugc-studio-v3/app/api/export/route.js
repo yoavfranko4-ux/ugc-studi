@@ -65,38 +65,35 @@ export async function POST(req) {
       console.log(`[Export] Voiceover: ${(audioBuf.length / 1024).toFixed(0)}KB`)
     }
 
-    // 3. Write concat list file
-    const listPath = path.join(jobDir, 'list.txt')
-    const listContent = validClipPaths.map(p => `file '${p}'`).join('\n')
-    await writeFile(listPath, listContent)
-    console.log('[Export] Concat list:', listContent)
-
-    // 4. Build FFmpeg args — simple concat + scale + audio, NO subtitles
-    // (ffmpeg-static doesn't include libass; subtitles handled client-side)
+    // 3. Build FFmpeg args using filter_complex concat filter (re-encodes, avoids H264 bitstream issues)
     const outputPath = path.join(jobDir, 'output.mp4')
-    const videoFilter = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280'
+    const n = validClipPaths.length
 
     const ffmpegArgs = ['-y']
 
-    // Input: concatenated video
-    ffmpegArgs.push('-f', 'concat', '-safe', '0', '-i', listPath)
+    // Add each clip as a separate input
+    for (const cp of validClipPaths) {
+      ffmpegArgs.push('-i', cp)
+    }
 
-    // Input: voiceover audio (if available)
+    // Add voiceover as the last input (index = n)
+    const voiceInputIdx = voicePath ? n : -1
     if (voicePath) {
       ffmpegArgs.push('-i', voicePath)
     }
 
-    // Filter + mapping
+    // Build filter_complex: scale each clip to 720x1280 cover, then concat
+    const scaleFilter = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1'
+    const scaledStreams = validClipPaths.map((_, i) => `[${i}:v]${scaleFilter}[v${i}]`).join(';')
+    const concatInputs = validClipPaths.map((_, i) => `[v${i}]`).join('')
+    let filterComplex = `${scaledStreams};${concatInputs}concat=n=${n}:v=1:a=0[outv]`
+
+    // Add voiceover volume adjustment if present
     if (voicePath) {
-      ffmpegArgs.push(
-        '-filter_complex', `[0:v]${videoFilter}[v];[1:a]volume=0.85[a]`,
-        '-map', '[v]', '-map', '[a]'
-      )
+      filterComplex += `;[${voiceInputIdx}:a]volume=0.85[outa]`
+      ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]', '-map', '[outa]')
     } else {
-      ffmpegArgs.push(
-        '-vf', videoFilter,
-        '-an'
-      )
+      ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]', '-an')
     }
 
     // Output encoding
@@ -105,6 +102,7 @@ export async function POST(req) {
       '-preset', 'fast',
       '-crf', '23',
       '-r', '24',
+      '-pix_fmt', 'yuv420p',
       '-c:a', 'aac',
       '-b:a', '128k',
       '-movflags', '+faststart',
