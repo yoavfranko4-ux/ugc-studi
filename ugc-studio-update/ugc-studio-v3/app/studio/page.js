@@ -836,6 +836,7 @@ export default function Home() {
           audioBase64: voiceAudioB64,
           audioFormat,
           subtitles,
+          wordTimestamps: result.wordTimestamps || null,   // enables word-level ASS subtitles
           bgMusic,
           bgMusicUrl: bgMusicTrack?.url || null,
           subtitleStyle,

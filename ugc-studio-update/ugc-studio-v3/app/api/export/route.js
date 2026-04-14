@@ -9,17 +9,25 @@ import path from 'path'
 const require = createRequire(import.meta.url)
 const ffmpegStaticPath = require('ffmpeg-static')
 
-// Prefer a system ffmpeg (via nixpacks.toml / apt) — typically built WITH libass,
-// which enables the `subtitles=` filter for Hebrew subtitle burn-in.
-// Fall back to ffmpeg-static if no system binary is found.
+// Force use of the SYSTEM ffmpeg (nixpacks `ffmpeg-full`) which is built with libass, libfribidi,
+// and libfreetype — required for Hebrew subtitle burn-in via the `subtitles=` filter.
+// ffmpeg-static lacks those libs. We only fall back to it if nothing else exists.
 function resolveFfmpegPath() {
+  // 1. `which ffmpeg` — works when PATH points at the nix profile
   try {
-    const which = execSync('which ffmpeg', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
-    if (which && fs.existsSync(which)) return which
+    const w = execSync('which ffmpeg', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+    if (w && fs.existsSync(w)) return w
   } catch {}
-  for (const p of ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']) {
+  // 2. Standard UNIX locations
+  for (const p of ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/run/current-system/sw/bin/ffmpeg', '/root/.nix-profile/bin/ffmpeg']) {
     if (fs.existsSync(p)) return p
   }
+  // 3. Scan /nix/store for an ffmpeg binary (nixpacks installs it there)
+  try {
+    const found = execSync("find /nix/store -maxdepth 4 -type f -name ffmpeg 2>/dev/null | head -1", { encoding: 'utf8', shell: '/bin/sh' }).trim()
+    if (found && fs.existsSync(found)) return found
+  } catch {}
+  // 4. Last resort — bundled static binary (no libass)
   return ffmpegStaticPath
 }
 const ffmpegPath = resolveFfmpegPath()
@@ -76,6 +84,59 @@ function fmtSrtTime(sec) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`
 }
 
+// Format seconds → ASS timestamp (H:MM:SS.cc — centiseconds)
+function fmtAssTime(sec) {
+  if (!Number.isFinite(sec) || sec < 0) sec = 0
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = Math.floor(sec % 60)
+  const cs = Math.round((sec - Math.floor(sec)) * 100)
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`
+}
+
+// Build an ASS (Advanced SubStation Alpha) subtitle file. libass + libfribidi handle
+// the Hebrew RTL shaping correctly, so we pass logical-order text straight through.
+function buildAssFile(subtitles, wordTimestamps) {
+  const header = `[Script Info]
+ScriptType: v4.00+
+PlayResX: 720
+PlayResY: 1280
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,DejaVu Sans,56,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,1,2,30,30,140,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`
+  const events = []
+  const escapeAss = (s) => String(s).replace(/\\/g, '\\\\').replace(/\n/g, '\\N').replace(/\{/g, '\\{').replace(/\}/g, '\\}')
+
+  if (Array.isArray(wordTimestamps) && wordTimestamps.length) {
+    // Group ~3 words per caption segment for readable word-level timing
+    const GROUP = 3
+    for (let i = 0; i < wordTimestamps.length; i += GROUP) {
+      const group = wordTimestamps.slice(i, i + GROUP)
+      const text = group.map(w => w.word).join(' ').trim()
+      if (!text) continue
+      const start = Number(group[0].start) || 0
+      const end = Number(group[group.length - 1].end) || (start + 1)
+      events.push(`Dialogue: 0,${fmtAssTime(start)},${fmtAssTime(end)},Default,,0,0,0,,${escapeAss(text)}`)
+    }
+  } else if (Array.isArray(subtitles)) {
+    for (const sub of subtitles) {
+      const text = (sub?.text || '').trim()
+      if (!text) continue
+      const start = Number(sub.start) || 0
+      const end = start + (Number(sub.duration) || 5)
+      events.push(`Dialogue: 0,${fmtAssTime(start)},${fmtAssTime(end)},Default,,0,0,0,,${escapeAss(text)}`)
+    }
+  }
+  return header + events.join('\n') + '\n'
+}
+
 export const runtime = 'nodejs'
 export const maxDuration = 240   // 4 normalize passes + 1 concat — bumped from 120
 
@@ -84,7 +145,7 @@ export async function POST(req) {
 
   try {
     const body = await req.json()
-    const { videoClipsB64, videoUrls, audioBase64, audioFormat, subtitles, bgMusic, bgMusicUrl, subtitleStyle } = body
+    const { videoClipsB64, videoUrls, audioBase64, audioFormat, subtitles, wordTimestamps, bgMusic, bgMusicUrl, subtitleStyle } = body
 
     const hasB64Clips = videoClipsB64?.length > 0
     const hasUrls = videoUrls?.length > 0 && videoUrls.some(Boolean)
@@ -200,8 +261,8 @@ export async function POST(req) {
     // =============================================================
     const outputPath = path.join(jobDir, 'output.mp4')
 
-    // --- Step 1: normalize every clip + BURN IN per-clip subtitle via drawtext ---
-    // Using drawtext per clip avoids needing libass, and each clip's subtitle shows for the clip's entire 5s.
+    // --- Step 1: normalize every clip to identical codec/fps/size/pix_fmt (no subtitles) ---
+    // Subtitle burn-in happens in Step 2 via libass (system ffmpeg-full has libass + libfribidi for Hebrew RTL).
     const normalizedPaths = []
     const totalDuration = validClipPaths.length * 5
 
@@ -209,23 +270,7 @@ export async function POST(req) {
       const inPath = validClipPaths[i]
       const normPath = path.join(jobDir, `norm_${i}.mp4`)
 
-      // Build the scale/crop/fps chain, optionally followed by drawtext with this clip's subtitle
-      let vfChain = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1'
-
-      const sceneSub = Array.isArray(subtitles) && subtitles[i] ? (subtitles[i].text || '').trim() : ''
-      if (sceneSub && hebrewFontPath) {
-        const displayText = reverseIfHebrew(sceneSub)
-        const subFile = path.join(jobDir, `sub_${i}.txt`)
-        await writeFile(subFile, displayText, 'utf8')
-        const fontArg = escapeFilterValue(hebrewFontPath)
-        const txtArg = escapeFilterValue(subFile)
-        // White text, 3px black border, bottom-center at 82% height, fontsize 40 for 720x1280
-        vfChain += `,drawtext=fontfile='${fontArg}':textfile='${txtArg}':fontsize=40:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h*0.82`
-        console.log(`[Export] Clip ${i} subtitle (logical): ${sceneSub}`)
-        console.log(`[Export] Clip ${i} subtitle (drawn):   ${displayText}`)
-      } else if (sceneSub && !hebrewFontPath) {
-        console.warn(`[Export] Clip ${i}: have subtitle text but no font — skipping burn-in`)
-      }
+      const vfChain = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1'
 
       const normArgs = [
         '-y', '-i', inPath,
@@ -260,26 +305,17 @@ export async function POST(req) {
       }
     }
 
-    // --- Build SRT file (kept for debug/reference only; subtitles now burned per-clip in Step 1) ---
-    if (Array.isArray(subtitles) && subtitles.length) {
-      const srtLines = []
-      let idx = 1
-      for (const sub of subtitles) {
-        const text = (sub?.text || '').trim()
-        if (!text) continue
-        const start = Number(sub.start) || 0
-        const end = start + (Number(sub.duration) || 5)
-        srtLines.push(String(idx++))
-        srtLines.push(`${fmtSrtTime(start)} --> ${fmtSrtTime(end)}`)
-        srtLines.push(text)
-        srtLines.push('')
-      }
-      if (srtLines.length) {
-        const srtDebugPath = path.join(jobDir, 'subs.srt')
-        await writeFile(srtDebugPath, srtLines.join('\n'), 'utf8')
-        console.log('[Export] SRT (debug) written to', srtDebugPath)
-        console.log('[Export] SRT content:\n' + srtLines.join('\n'))
-      }
+    // --- Build ASS subtitle file (libass + libfribidi handle Hebrew RTL properly) ---
+    let assPath = null
+    const hasSubs = (Array.isArray(wordTimestamps) && wordTimestamps.length) || (Array.isArray(subtitles) && subtitles.length)
+    if (hasSubs) {
+      const assContent = buildAssFile(subtitles || [], wordTimestamps || null)
+      assPath = path.join(jobDir, 'subs.ass')
+      await writeFile(assPath, assContent, 'utf8')
+      console.log('[Export] ASS written to', assPath)
+      console.log('[Export] ASS content:\n' + assContent)
+    } else {
+      console.log('[Export] No subtitles payload — skipping subtitle burn-in')
     }
 
     // --- Step 2: concat demuxer + audio mix (video stream-copied — subtitles already burned) ---
@@ -295,7 +331,12 @@ export async function POST(req) {
     if (voicePath) { finalArgs.push('-i', voicePath); voiceInputIdx = nextIdx++ }
     if (musicPath) { finalArgs.push('-i', musicPath); musicInputIdx = nextIdx }
 
-    // Audio mix only — video is stream-copied from the normalized clips (subtitles already burned)
+    // Video chain — apply ASS subtitles filter (requires libass/libfribidi, present in system ffmpeg-full)
+    let videoChain = null
+    if (assPath) {
+      videoChain = `[0:v]subtitles='${escapeFilterValue(assPath)}'[outv]`
+    }
+
     let audioChain = null
     if (voicePath && musicPath) {
       audioChain = `[${voiceInputIdx}:a]volume=1.0,apad=whole_dur=${totalDuration},aresample=44100[va];[${musicInputIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[ma];[va][ma]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[aout]`
@@ -305,14 +346,29 @@ export async function POST(req) {
       audioChain = `[${musicInputIdx}:a]volume=0.4,aloop=loop=-1:size=2000000000,aresample=44100[aout]`
     }
 
-    if (audioChain) finalArgs.push('-filter_complex', audioChain)
+    const filterParts = []
+    if (videoChain) filterParts.push(videoChain)
+    if (audioChain) filterParts.push(audioChain)
+    if (filterParts.length) finalArgs.push('-filter_complex', filterParts.join(';'))
 
-    finalArgs.push('-map', '0:v:0')
+    finalArgs.push('-map', videoChain ? '[outv]' : '0:v:0')
     if (audioChain) finalArgs.push('-map', '[aout]')
     else finalArgs.push('-an')
 
+    // If subtitles applied, must re-encode video (libass overlay). Otherwise stream-copy.
+    if (videoChain) {
+      finalArgs.push(
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '23',
+        '-r', '24',
+        '-pix_fmt', 'yuv420p',
+      )
+    } else {
+      finalArgs.push('-c:v', 'copy')
+    }
+
     finalArgs.push(
-      '-c:v', 'copy',                        // subtitles already burned in Step 1
       '-c:a', 'aac',
       '-b:a', '128k',
       '-ar', '44100',
