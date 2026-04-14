@@ -51,7 +51,18 @@
       "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://cdn.jsdelivr.net/npm/@fontsource/dejavu-sans@5.0.0/files/dejavu-sans-latin-700-normal.woff2\")",
       "Bash(node -c app/api/agent/route.js)",
       "Bash(node -c app/api/voice-preview/route.js)",
-      "Bash(node --input-type=module -e \"import\\('./app/studio/page.js'\\).catch\\(e => { if \\(e.code === 'ERR_UNSUPPORTED_DIR_IMPORT' || e.message?.includes\\('jsx'\\)\\) process.exit\\(0\\); console.error\\(e.message\\); process.exit\\(1\\); }\\)\")"
+      "Bash(node --input-type=module -e \"import\\('./app/studio/page.js'\\).catch\\(e => { if \\(e.code === 'ERR_UNSUPPORTED_DIR_IMPORT' || e.message?.includes\\('jsx'\\)\\) process.exit\\(0\\); console.error\\(e.message\\); process.exit\\(1\\); }\\)\")",
+      "Bash(ffmpeg -version)",
+      "Bash(where.exe ffmpeg:*)",
+      "Read(//c/Program Files/**)",
+      "Bash(winget --version)",
+      "Bash(choco --version)",
+      "Bash(scoop --version)",
+      "Bash(npm ls:*)",
+      "Bash(winget install:*)",
+      "Bash(export PATH=\"/c/Users/Naomi/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.1-full_build/bin:$PATH\")",
+      "Bash(ffprobe -version)",
+      "Bash(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 __TRACKED_VAR__/__TRACKED_VAR__)"
     ]
   }
 }
