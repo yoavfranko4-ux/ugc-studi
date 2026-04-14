@@ -39,25 +39,85 @@ try {
   console.log('[Export] ffmpeg version:\n' + ver)
 } catch (e) { console.warn('[Export] Could not run ffmpeg -version:', e.message) }
 
-// Find a font with Hebrew glyph coverage — needed for drawtext filter (no libass path)
-function findHebrewFont() {
-  const candidates = [
-    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-    '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
-    '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',
-    '/usr/share/fonts/truetype/noto/NotoSansHebrew-Bold.ttf',
-    '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
-  ]
-  for (const p of candidates) { if (fs.existsSync(p)) return p }
-  // Search the nix store (nixpacks installs fonts under /nix/store/<hash>-dejavu-fonts-.../)
-  try {
-    const found = execSync(`find /nix/store -type f \\( -name 'DejaVuSans-Bold.ttf' -o -name 'NotoSansHebrew-Bold.ttf' -o -name 'DejaVuSans.ttf' \\) 2>/dev/null | head -1`, { encoding: 'utf8', shell: '/bin/sh' }).trim()
-    if (found && fs.existsSync(found)) return found
-  } catch {}
-  return null
+// Map known font-file names → the ASS FontName (family name) they actually register as
+const FONT_FAMILY_BY_FILE = {
+  'DejaVuSans-Bold.ttf':          'DejaVu Sans',
+  'DejaVuSans.ttf':               'DejaVu Sans',
+  'DejaVuSansCondensed-Bold.ttf': 'DejaVu Sans Condensed',
+  'NotoSansHebrew-Bold.ttf':      'Noto Sans Hebrew',
+  'NotoSansHebrew-Regular.ttf':   'Noto Sans Hebrew',
+  'NotoSans-Bold.ttf':            'Noto Sans',
+  'NotoSans-Regular.ttf':         'Noto Sans',
+  'NotoSansHebrew[wdth,wght].ttf':'Noto Sans Hebrew',
 }
-const hebrewFontPath = findHebrewFont()
-console.log('[Export] Hebrew font path:', hebrewFontPath || '(none found — subtitles will NOT be burned in)')
+
+// Scan the filesystem for fonts + fontconfig configs. libass needs both or it fails.
+function discoverFontEnv() {
+  const all = []
+  // System font dirs
+  for (const dir of ['/usr/share/fonts', '/usr/local/share/fonts', '/run/current-system/sw/share/fonts']) {
+    if (fs.existsSync(dir)) {
+      try {
+        const lines = execSync(`find ${dir} -type f \\( -name '*.ttf' -o -name '*.otf' \\) 2>/dev/null`, { encoding: 'utf8', shell: '/bin/sh' }).split('\n').filter(Boolean)
+        all.push(...lines)
+      } catch {}
+    }
+  }
+  // Nix store fonts (nixpacks installs dejavu_fonts / noto-fonts here)
+  try {
+    const lines = execSync(`find /nix/store -maxdepth 6 -type f \\( -name '*.ttf' -o -name '*.otf' \\) 2>/dev/null | head -60`, { encoding: 'utf8', shell: '/bin/sh' }).split('\n').filter(Boolean)
+    all.push(...lines)
+  } catch {}
+
+  // Pick the preferred Hebrew-capable font (DejaVu Sans first — bundled in dejavu_fonts + supports Hebrew)
+  const prefer = ['DejaVuSans-Bold.ttf', 'NotoSansHebrew-Bold.ttf', 'NotoSansHebrew-Regular.ttf', 'DejaVuSans.ttf', 'NotoSans-Bold.ttf']
+  let primaryPath = null
+  for (const name of prefer) {
+    const hit = all.find(f => f.endsWith('/' + name))
+    if (hit) { primaryPath = hit; break }
+  }
+  const primaryFile = primaryPath ? path.basename(primaryPath) : null
+  const primaryFamily = primaryFile && FONT_FAMILY_BY_FILE[primaryFile] ? FONT_FAMILY_BY_FILE[primaryFile] : 'DejaVu Sans'
+  const primaryDir = primaryPath ? path.dirname(primaryPath) : null
+
+  // Unique font directories — libass reads these via fontsdir=
+  const fontsDirs = [...new Set(all.map(f => path.dirname(f)))]
+
+  // Fontconfig config file
+  let fcConfig = null
+  for (const p of ['/etc/fonts/fonts.conf', '/usr/local/etc/fonts/fonts.conf']) {
+    if (fs.existsSync(p)) { fcConfig = p; break }
+  }
+  if (!fcConfig) {
+    try {
+      const found = execSync(`find /nix/store -maxdepth 5 -type f -name 'fonts.conf' 2>/dev/null | head -1`, { encoding: 'utf8', shell: '/bin/sh' }).trim()
+      if (found && fs.existsSync(found)) fcConfig = found
+    } catch {}
+  }
+
+  return { all, primaryPath, primaryFile, primaryFamily, primaryDir, fontsDirs, fcConfig }
+}
+
+const fontEnv = discoverFontEnv()
+console.log('[Export] All discovered fonts (first 40):')
+for (const f of fontEnv.all.slice(0, 40)) console.log('  -', f)
+console.log('[Export] Total fonts found:', fontEnv.all.length)
+console.log('[Export] Primary font path:', fontEnv.primaryPath || '(none)')
+console.log('[Export] Primary font family name (for ASS):', fontEnv.primaryFamily)
+console.log('[Export] Primary font dir (for fontsdir=):', fontEnv.primaryDir || '(none)')
+console.log('[Export] Fontconfig config:', fontEnv.fcConfig || '(none)')
+console.log('[Export] Unique font dirs:', fontEnv.fontsDirs.length)
+
+// Apply fontconfig env vars so libass can locate fonts
+if (fontEnv.fcConfig) {
+  process.env.FONTCONFIG_FILE = fontEnv.fcConfig
+  process.env.FONTCONFIG_PATH = path.dirname(fontEnv.fcConfig)
+  process.env.FC_CONFIG_DIR = path.dirname(fontEnv.fcConfig)
+  console.log('[Export] FONTCONFIG_FILE set to:', process.env.FONTCONFIG_FILE)
+}
+
+// Legacy name kept for existing code paths
+const hebrewFontPath = fontEnv.primaryPath
 
 const execFileAsync = promisify(execFile)
 
@@ -96,7 +156,8 @@ function fmtAssTime(sec) {
 
 // Build an ASS (Advanced SubStation Alpha) subtitle file. libass + libfribidi handle
 // the Hebrew RTL shaping correctly, so we pass logical-order text straight through.
-function buildAssFile(subtitles, wordTimestamps) {
+function buildAssFile(subtitles, wordTimestamps, fontFamily) {
+  const fam = fontFamily || 'DejaVu Sans'
   const header = `[Script Info]
 ScriptType: v4.00+
 PlayResX: 720
@@ -106,7 +167,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,DejaVu Sans,56,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,1,2,30,30,140,1
+Style: Default,${fam},56,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,1,2,30,30,140,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -309,10 +370,10 @@ export async function POST(req) {
     let assPath = null
     const hasSubs = (Array.isArray(wordTimestamps) && wordTimestamps.length) || (Array.isArray(subtitles) && subtitles.length)
     if (hasSubs) {
-      const assContent = buildAssFile(subtitles || [], wordTimestamps || null)
+      const assContent = buildAssFile(subtitles || [], wordTimestamps || null, fontEnv.primaryFamily)
       assPath = path.join(jobDir, 'subs.ass')
       await writeFile(assPath, assContent, 'utf8')
-      console.log('[Export] ASS written to', assPath)
+      console.log('[Export] ASS written to', assPath, '(font family:', fontEnv.primaryFamily, ')')
       console.log('[Export] ASS content:\n' + assContent)
     } else {
       console.log('[Export] No subtitles payload — skipping subtitle burn-in')
@@ -332,9 +393,11 @@ export async function POST(req) {
     if (musicPath) { finalArgs.push('-i', musicPath); musicInputIdx = nextIdx }
 
     // Video chain — apply ASS subtitles filter (requires libass/libfribidi, present in system ffmpeg-full)
+    // Pass fontsdir= pointing at the discovered font directory so libass can find the font without fontconfig.
     let videoChain = null
     if (assPath) {
-      videoChain = `[0:v]subtitles='${escapeFilterValue(assPath)}'[outv]`
+      const fontsDirArg = fontEnv.primaryDir ? `:fontsdir='${escapeFilterValue(fontEnv.primaryDir)}'` : ''
+      videoChain = `[0:v]subtitles='${escapeFilterValue(assPath)}'${fontsDirArg}[outv]`
     }
 
     let audioChain = null
