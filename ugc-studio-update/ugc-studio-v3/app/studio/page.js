@@ -219,91 +219,54 @@ function getSubtitleLinesAtTime(text, timeInScene, sceneDuration, subtitleSegmen
   return allLines.slice(currentLineIdx, currentLineIdx + 2)
 }
 
-// Draw styled subtitle lines on canvas (scales to any canvas size)
+// Full-size renderer — same ASS style as drawSubtitlePreview, kept in sync with the export.
 function drawSubtitleOnCtx(ctx, lines, canvasW, canvasH, style) {
-  if (!lines.length) return
-  const maxW = canvasW * 0.80
-  const isMinimal = style === 'minimal'
-  // Scale font proportionally: base 48px at 1080w, scale down for smaller canvases
-  const scale = canvasW / 1080
-  const fontSize = Math.round((isMinimal ? 36 : 48) * scale)
-  ctx.font = `bold ${fontSize}px Heebo, sans-serif`
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-  const lineHeight = Math.round((isMinimal ? 44 : 60) * scale)
-  // Position at 82% height but with at least 10% padding from bottom
-  const bottomPad = canvasH * 0.10
-  const targetY = canvasH - bottomPad - ((lines.length - 1) * lineHeight) / 2 - fontSize / 2
-  const startY = Math.min(canvasH * 0.82, targetY) - ((lines.length - 1) * lineHeight) / 2
-  const x = canvasW / 2
-  lines.forEach((line, i) => {
-    const y = startY + i * lineHeight
-    // Truncate if wider than 85% of canvas
-    let displayLine = line
-    while (ctx.measureText(displayLine).width > maxW && displayLine.length > 2) {
-      displayLine = displayLine.slice(0, -1)
-    }
-    if (style === 'classic') {
-      ctx.strokeStyle = 'black'; ctx.lineWidth = 8; ctx.lineJoin = 'round'; ctx.miterLimit = 2
-      ctx.strokeText(displayLine, x, y); ctx.fillStyle = 'white'; ctx.fillText(displayLine, x, y)
-    } else if (style === 'bold') {
-      const tw = Math.min(ctx.measureText(displayLine).width + 28, maxW + 28), th = fontSize + 16
-      ctx.fillStyle = 'rgba(255,255,255,0.92)'
-      const rx = x - tw / 2, ry = y - th / 2, r = 10
-      ctx.beginPath()
-      ctx.moveTo(rx + r, ry); ctx.lineTo(rx + tw - r, ry)
-      ctx.quadraticCurveTo(rx + tw, ry, rx + tw, ry + r); ctx.lineTo(rx + tw, ry + th - r)
-      ctx.quadraticCurveTo(rx + tw, ry + th, rx + tw - r, ry + th); ctx.lineTo(rx + r, ry + th)
-      ctx.quadraticCurveTo(rx, ry + th, rx, ry + th - r); ctx.lineTo(rx, ry + r)
-      ctx.quadraticCurveTo(rx, ry, rx + r, ry); ctx.closePath(); ctx.fill()
-      ctx.fillStyle = '#111'; ctx.fillText(displayLine, x, y)
-    } else if (style === 'minimal') {
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(displayLine, x, y)
-    } else if (style === 'neon') {
-      ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 24
-      ctx.fillStyle = 'white'; ctx.fillText(displayLine, x, y); ctx.fillText(displayLine, x, y)
-      ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'
-    }
-  })
+  // Delegate to the same renderer — one source of truth for subtitle look
+  return drawSubtitlePreview(ctx, lines, canvasW, canvasH, style)
 }
 
-// Draw styled subtitle lines on canvas (preview size)
+// Draw styled subtitle lines on canvas (preview size) — MATCHES EXPORT ASS STYLING EXACTLY.
+// Export ASS style (from /api/export/route.js buildAssFile):
+//   Noto Sans Hebrew Bold, FontSize=56, PrimaryColour=white, OutlineColour=black,
+//   Outline=4, Shadow=1, Alignment=2 (bottom-center), MarginV=140 at PlayResY=1280.
+// We scale those values to whatever canvas size the editor happens to render at.
 function drawSubtitlePreview(ctx, lines, canvasW, canvasH, style) {
   if (!lines.length) return
-  const maxW = canvasW * 0.85
-  const isMinimal = style === 'minimal'
-  const fontSize = isMinimal ? 16 : 22
-  ctx.font = `bold ${fontSize}px Heebo, sans-serif`
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-  const lineHeight = isMinimal ? 22 : 30
-  const startY = canvasH * 0.82 - ((lines.length - 1) * lineHeight) / 2
+  const maxW = canvasW * 0.90
+  // FontSize 56 at 1280h → ~4.375% of canvasH. Scale proportionally.
+  const fontSize = Math.max(14, Math.round(canvasH * (56 / 1280)))
+  ctx.font = `700 ${fontSize}px "Noto Sans Hebrew", Heebo, sans-serif`
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'
+  ctx.direction = 'rtl'
+  const lineHeight = Math.round(fontSize * 1.2)
+  // ASS MarginV=140 from bottom of PlayResY=1280 → text baseline sits at canvasH - 140/1280*canvasH
+  const marginV = Math.round(canvasH * (140 / 1280))
+  const baseY = canvasH - marginV
+  // Stack multiple lines upward from baseY
+  const startY = baseY - (lines.length - 1) * lineHeight
   const x = canvasW / 2
+  // Outline=4 at 1280h → ~4/1280 of canvasH per side, stroke is 2× outline for canvas
+  const outlineW = Math.max(2, Math.round(fontSize * 0.14))
+  const shadowOffset = Math.max(1, Math.round(fontSize * 0.035))
+
   lines.forEach((line, i) => {
     const y = startY + i * lineHeight
     let displayLine = line
     while (ctx.measureText(displayLine).width > maxW && displayLine.length > 2) {
       displayLine = displayLine.slice(0, -1)
     }
-    if (style === 'classic') {
-      ctx.strokeStyle = 'black'; ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.miterLimit = 2
-      ctx.strokeText(displayLine, x, y); ctx.fillStyle = 'white'; ctx.fillText(displayLine, x, y)
-    } else if (style === 'bold') {
-      const tw = Math.min(ctx.measureText(displayLine).width + 16, maxW + 16), th = fontSize + 10
-      ctx.fillStyle = 'rgba(255,255,255,0.92)'
-      const rx = x - tw / 2, ry = y - th / 2, r = 6
-      ctx.beginPath()
-      ctx.moveTo(rx + r, ry); ctx.lineTo(rx + tw - r, ry)
-      ctx.quadraticCurveTo(rx + tw, ry, rx + tw, ry + r); ctx.lineTo(rx + tw, ry + th - r)
-      ctx.quadraticCurveTo(rx + tw, ry + th, rx + tw - r, ry + th); ctx.lineTo(rx + r, ry + th)
-      ctx.quadraticCurveTo(rx, ry + th, rx, ry + th - r); ctx.lineTo(rx, ry + r)
-      ctx.quadraticCurveTo(rx, ry, rx + r, ry); ctx.closePath(); ctx.fill()
-      ctx.fillStyle = '#111'; ctx.fillText(displayLine, x, y)
-    } else if (style === 'minimal') {
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(displayLine, x, y)
-    } else if (style === 'neon') {
-      ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 12
-      ctx.fillStyle = 'white'; ctx.fillText(displayLine, x, y); ctx.fillText(displayLine, x, y)
-      ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'
-    }
+    // Shadow=1 (soft drop shadow)
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    ctx.fillText(displayLine, x + shadowOffset, y + shadowOffset)
+    // Outline=4 (thick black stroke)
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth = outlineW
+    ctx.lineJoin = 'round'
+    ctx.miterLimit = 2
+    ctx.strokeText(displayLine, x, y)
+    // PrimaryColour=white fill
+    ctx.fillStyle = '#ffffff'
+    ctx.fillText(displayLine, x, y)
   })
 }
 
@@ -379,6 +342,22 @@ export default function Home() {
   const playingRef = useRef(false)
   const currentPlayingIdxRef = useRef(0)  // index into clipOrder during playback (no re-render)
   const autoExportRef = useRef(false)
+
+  // Load the embedded Hebrew subtitle font (same file as server-side ASS burn-in) so the canvas
+  // preview matches the exported MP4 glyphs pixel-for-pixel.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('FontFace' in window)) return
+    const font = new FontFace('Noto Sans Hebrew', 'url(/fonts/NotoSansHebrew-Bold.ttf) format("truetype")', { weight: '700', style: 'normal' })
+    font.load().then(f => {
+      document.fonts.add(f)
+      // Force a subtitle re-draw once the font is ready
+      const canvas = canvasRef.current
+      if (canvas) {
+        const ctx = canvas.getContext('2d')
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+      }
+    }).catch(e => console.warn('[Studio] Failed to load Noto Sans Hebrew:', e.message))
+  }, [])
 
   // Auth check + restore saved edit from ?editId= query param
   useEffect(() => {
