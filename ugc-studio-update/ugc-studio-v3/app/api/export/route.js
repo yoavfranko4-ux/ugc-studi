@@ -12,7 +12,7 @@ const ffmpegPath = require('ffmpeg-static')
 const execFileAsync = promisify(execFile)
 
 export const runtime = 'nodejs'
-export const maxDuration = 120
+export const maxDuration = 240   // 4 normalize passes + 1 concat — bumped from 120
 
 export async function POST(req) {
   const jobDir = path.join('/tmp', `export-${randomUUID()}`)
@@ -129,60 +129,77 @@ export async function POST(req) {
       } catch (e) { console.warn('[Export] music download failed:', e.message) }
     }
 
-    // 3. Build FFmpeg args using filter_complex concat filter (re-encodes, avoids H264 bitstream issues)
+    // =============================================================
+    // TWO-STEP encode: (1) normalize each clip individually, (2) concat demuxer + audio mix.
+    // Avoids timebase/tbn errors from filter_complex concat on variable-framerate Kling MP4s.
+    // =============================================================
     const outputPath = path.join(jobDir, 'output.mp4')
-    const n = validClipPaths.length
 
-    const ffmpegArgs = ['-y']
-
-    // Add each clip as a separate input — force 24fps on decode to normalize timebase (fixes "8 tbn" variable-fps errors)
-    for (const cp of validClipPaths) {
-      ffmpegArgs.push('-r', '24', '-i', cp)
+    // --- Step 1: normalize every clip to identical codec/fps/size/pix_fmt ---
+    const normalizedPaths = []
+    for (let i = 0; i < validClipPaths.length; i++) {
+      const inPath = validClipPaths[i]
+      const normPath = path.join(jobDir, `norm_${i}.mp4`)
+      const normArgs = [
+        '-y', '-i', inPath,
+        '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1',
+        '-r', '24',
+        '-fps_mode', 'cfr',
+        '-vsync', 'cfr',
+        '-pix_fmt', 'yuv420p',
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '23',
+        '-profile:v', 'high',
+        '-level', '4.0',
+        '-video_track_timescale', '24000',
+        '-movflags', '+faststart',
+        '-an',
+        normPath
+      ]
+      console.log(`[Export] Step 1: Normalizing clip ${i} -> norm_${i}.mp4`)
+      console.log(`[Export] Normalize args[${i}]:`, JSON.stringify(normArgs))
+      try {
+        const r = await execFileAsync(ffmpegPath, normArgs, { timeout: 60000, maxBuffer: 20 * 1024 * 1024 })
+        console.log(`[Export] norm_${i} stderr FULL:\n${r.stderr || '(empty)'}`)
+        const sz = fs.statSync(normPath).size
+        console.log(`[Export] norm_${i}.mp4 size:`, sz, 'bytes')
+        normalizedPaths.push(normPath)
+      } catch (err) {
+        console.error(`[Export] Normalization clip ${i} FAILED. Exit code:`, err.code)
+        console.error(`[Export] Normalize stderr FULL:\n${err.stderr || '(no stderr)'}`)
+        console.error(`[Export] Normalize stdout FULL:\n${err.stdout || '(no stdout)'}`)
+        throw new Error(`Normalize clip ${i} failed (code ${err.code}): ${err.stderr?.slice(-400) || err.message}`)
+      }
     }
 
-    // Audio inputs
-    const voiceIdx = voicePath ? n : -1
-    const musicIdx = musicPath ? (voicePath ? n + 1 : n) : -1
-    if (voicePath) ffmpegArgs.push('-i', voicePath)
-    if (musicPath) ffmpegArgs.push('-i', musicPath)
+    // --- Step 2: concat demuxer + audio mix ---
+    const listPath = path.join(jobDir, 'list.txt')
+    const listContent = normalizedPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n') + '\n'
+    await writeFile(listPath, listContent)
+    console.log('[Export] list.txt content:\n' + listContent)
 
-    // Build filter_complex: scale each clip to 720x1280 cover + force 24fps CFR before concat
-    // (fixes "8 tbn" / variable-frame-rate errors after concat by normalizing every input)
-    const scaleFilter = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,fps=24,setsar=1,format=yuv420p'
-    const scaledStreams = validClipPaths.map((_, i) => `[${i}:v]${scaleFilter}[v${i}]`).join(';')
-    const concatInputs = validClipPaths.map((_, i) => `[v${i}]`).join('')
-    let filterComplex = `${scaledStreams};${concatInputs}concat=n=${n}:v=1:a=0[outv]`
+    const finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', listPath]
 
-    // Audio mixing: voice at full volume + music at 15% (looped), mix, duration=first (= voice length)
-    let audioMapLabel = null
+    // Audio inputs (after the concat demuxer at input 0)
+    let voiceInputIdx = -1, musicInputIdx = -1, nextIdx = 1
+    if (voicePath) { finalArgs.push('-i', voicePath); voiceInputIdx = nextIdx++ }
+    if (musicPath) { finalArgs.push('-i', musicPath); musicInputIdx = nextIdx }
+
+    // Audio mixing with filter_complex — video is copied straight from the concat demuxer
     if (voicePath && musicPath) {
-      filterComplex += `;[${voiceIdx}:a]volume=1.0,aresample=44100[va];[${musicIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[ma];[va][ma]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[aout]`
-      audioMapLabel = '[aout]'
+      const f = `[${voiceInputIdx}:a]volume=1.0,aresample=44100[va];[${musicInputIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[ma];[va][ma]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[aout]`
+      finalArgs.push('-filter_complex', f, '-map', '0:v:0', '-map', '[aout]')
     } else if (voicePath) {
-      filterComplex += `;[${voiceIdx}:a]aresample=44100[aout]`
-      audioMapLabel = '[aout]'
+      finalArgs.push('-map', '0:v:0', '-map', `${voiceInputIdx}:a`)
     } else if (musicPath) {
-      filterComplex += `;[${musicIdx}:a]volume=0.4,aresample=44100[aout]`
-      audioMapLabel = '[aout]'
-    }
-
-    ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]')
-    if (audioMapLabel) {
-      ffmpegArgs.push('-map', audioMapLabel)
+      finalArgs.push('-filter_complex', `[${musicInputIdx}:a]volume=0.4,aresample=44100[aout]`, '-map', '0:v:0', '-map', '[aout]')
     } else {
-      ffmpegArgs.push('-an')
+      finalArgs.push('-map', '0:v:0', '-an')
     }
 
-    // Output encoding — force constant 24fps throughout to avoid variable-timebase errors
-    ffmpegArgs.push(
-      '-c:v', 'libx264',
-      '-preset', 'fast',
-      '-crf', '23',
-      '-r', '24',
-      '-fps_mode', 'cfr',
-      '-vsync', 'cfr',
-      '-pix_fmt', 'yuv420p',
-      '-video_track_timescale', '24000',
+    finalArgs.push(
+      '-c:v', 'copy',                   // Step 1 already normalized — copy keeps it fast
       '-c:a', 'aac',
       '-b:a', '128k',
       '-ar', '44100',
@@ -192,21 +209,20 @@ export async function POST(req) {
       outputPath
     )
 
-    console.log('[Export] FFmpeg args:', JSON.stringify(ffmpegArgs))
+    console.log('[Export] Step 2 concat args:', JSON.stringify(finalArgs))
 
     try {
-      const { stdout, stderr } = await execFileAsync(ffmpegPath, ffmpegArgs, {
-        timeout: 90000,
-        maxBuffer: 10 * 1024 * 1024
+      const { stdout, stderr } = await execFileAsync(ffmpegPath, finalArgs, {
+        timeout: 60000,
+        maxBuffer: 20 * 1024 * 1024
       })
-      console.log('[Export] FFmpeg stdout:', stdout?.slice(-200) || '(empty)')
-      console.log('[Export] FFmpeg stderr:', stderr?.slice(-1000) || '(empty)')
+      console.log('[Export] Concat stdout FULL:\n' + (stdout || '(empty)'))
+      console.log('[Export] Concat stderr FULL:\n' + (stderr || '(empty)'))
     } catch (execErr) {
-      // execFile rejects on non-zero exit — log full stderr before rethrowing
-      console.error('[Export] FFmpeg FAILED. Exit code:', execErr.code)
-      console.error('[Export] FFmpeg stderr FULL:', execErr.stderr?.slice(-2000) || '(no stderr)')
-      console.error('[Export] FFmpeg stdout:', execErr.stdout?.slice(-500) || '(no stdout)')
-      throw new Error(`FFmpeg failed (code ${execErr.code}): ${execErr.stderr?.slice(-300) || execErr.message}`)
+      console.error('[Export] Concat FAILED. Exit code:', execErr.code)
+      console.error('[Export] Concat stderr FULL:\n' + (execErr.stderr || '(no stderr)'))
+      console.error('[Export] Concat stdout FULL:\n' + (execErr.stdout || '(no stdout)'))
+      throw new Error(`Concat failed (code ${execErr.code}): ${execErr.stderr?.slice(-400) || execErr.message}`)
     }
 
     // 5. Read output and return as MP4
