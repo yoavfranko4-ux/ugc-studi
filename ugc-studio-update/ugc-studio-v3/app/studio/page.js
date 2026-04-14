@@ -341,6 +341,8 @@ export default function Home() {
   const playingRef = useRef(false)
   const currentPlayingIdxRef = useRef(0)  // index into clipOrder during playback (no re-render)
   const autoExportRef = useRef(false)
+  const blobUrlCache = useRef(new Map())  // remote-URL → blob: URL cache — survives re-renders
+  const [preloadProgress, setPreloadProgress] = useState({ done: 0, total: 0 })
 
   // Load the embedded Hebrew subtitle font (same file as server-side ASS burn-in) so the canvas
   // preview matches the exported MP4 glyphs pixel-for-pixel.
@@ -427,28 +429,52 @@ export default function Home() {
     init()
   }, [])
 
-  // Preload ALL video blobs in parallel + wait for canplaythrough on rendered <video> elements
+  // Preload ALL video blobs IN PARALLEL + wait for canplaythrough on rendered <video> elements.
+  // Uses a ref-based cache keyed on remote URL so re-renders / scene switches never re-fetch.
+  // Reports per-clip progress to preloadProgress so the UI can show "טוען 3/4 סרטונים...".
   useEffect(() => {
     if (step !== 'done' || !result?.videos) return
     let cancelled = false
     setVideosReady(false)
+    const remoteUrls = result.videos
+    const total = remoteUrls.filter(Boolean).length
+    setPreloadProgress({ done: 0, total })
+
     const preload = async () => {
-      // Fetch all blobs in parallel
-      const urls = await Promise.all(result.videos.map(async (url) => {
-        if (!url) return null
+      // === Parallel blob fetch with cache hit short-circuit ===
+      let completed = 0
+      const urls = await Promise.all(remoteUrls.map(async (remoteUrl) => {
+        if (!remoteUrl) return null
+        // Cache hit — instant
+        const cached = blobUrlCache.current.get(remoteUrl)
+        if (cached) {
+          completed++
+          if (!cancelled) setPreloadProgress({ done: completed, total })
+          return cached
+        }
         try {
-          const resp = await fetch(url)
+          const resp = await fetch(remoteUrl)
           const blob = await resp.blob()
-          return URL.createObjectURL(blob)
-        } catch { return url }
+          const blobUrl = URL.createObjectURL(blob)
+          blobUrlCache.current.set(remoteUrl, blobUrl)
+          completed++
+          if (!cancelled) setPreloadProgress({ done: completed, total })
+          return blobUrl
+        } catch {
+          completed++
+          if (!cancelled) setPreloadProgress({ done: completed, total })
+          return remoteUrl
+        }
       }))
       if (cancelled) return
       setVideoBlobUrls(urls)
 
-      // Wait for React to render the <video> elements (one per clip) and for each to be canplaythrough
-      await new Promise(r => setTimeout(r, 80))
+      // Wait for React to render the <video> elements, then kick off load() on each + wait for canplaythrough
+      await new Promise(r => setTimeout(r, 50))
       const readyPromises = videoRefs.current.map((el) => {
         if (!el) return Promise.resolve()
+        // Explicit load() now — starts buffering immediately after src is set
+        try { el.preload = 'auto'; el.load() } catch {}
         if (el.readyState >= 3) return Promise.resolve()
         return new Promise(resolve => {
           const onReady = () => { el.removeEventListener('canplaythrough', onReady); resolve() }
@@ -461,7 +487,6 @@ export default function Home() {
       if (cancelled) return
 
       setVideosReady(true)
-      // Auto-trigger export if came from dashboard
       if (autoExportRef.current) {
         autoExportRef.current = false
         setTimeout(() => { exportMp4() }, 300)
@@ -1189,9 +1214,18 @@ export default function Home() {
             <audio ref={musicAudioRef} preload="auto" style={{ display: 'none' }} />
             <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
             {!playing && !videosReady && (
-              <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+              <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, minWidth: 180 }}>
                 <div style={{ width: 36, height: 36, border: '3px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                <span style={{ color: '#71717a', fontSize: 12, fontWeight: 600 }}>טוען סרטונים...</span>
+                <span style={{ color: '#a1a1aa', fontSize: 13, fontWeight: 600, fontFamily: 'Heebo,sans-serif' }}>
+                  {preloadProgress.total > 0
+                    ? `טוען ${preloadProgress.done}/${preloadProgress.total} סרטונים...`
+                    : 'טוען סרטונים...'}
+                </span>
+                {preloadProgress.total > 0 && (
+                  <div style={{ width: 160, height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: `${(preloadProgress.done / preloadProgress.total) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #7c3aed, #a855f7)', transition: 'width 200ms ease' }} />
+                  </div>
+                )}
               </div>
             )}
             {!playing && videosReady && (
