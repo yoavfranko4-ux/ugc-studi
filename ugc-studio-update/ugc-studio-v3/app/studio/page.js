@@ -10,16 +10,14 @@ const SUBTITLE_STYLES = [
   { id: 'neon', label: 'Neon', desc: 'לבן עם glow סגול' },
 ]
 
-// === Background Music Tracks — real royalty-free MP3s from CDN ===
-// SoundHelix hosts public-domain, royalty-free instrumental tracks at a reliable CDN.
-// These are used as-is; users can replace with their own URLs if desired.
+// === Background Music Tracks — royalty-free MP3s from Pixabay CDN ===
 const MUSIC_TRACKS = [
-  { id: 'none',         label: 'ללא מוזיקה',       emoji: '🔇', url: null },
-  { id: 'upbeat',       label: 'Upbeat TikTok',    emoji: '🎵', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
-  { id: 'chill',        label: 'Chill Vibes',      emoji: '🌊', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3' },
-  { id: 'motivational', label: 'Motivational',     emoji: '💪', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3' },
-  { id: 'dramatic',     label: 'Dramatic',         emoji: '🎭', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3' },
-  { id: 'energetic',    label: 'Energetic',        emoji: '⚡', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3' },
+  { id: 'none',         label: 'ללא מוזיקה',        emoji: '🔇', url: null },
+  { id: 'upbeat',       label: 'Upbeat TikTok 🔥',  emoji: '🎵', url: 'https://cdn.pixabay.com/audio/2024/03/11/audio_2dfe4b1d35.mp3' },
+  { id: 'chill',        label: 'Chill Vibes ✨',    emoji: '🌊', url: 'https://cdn.pixabay.com/audio/2023/10/09/audio_6cc7ab3825.mp3' },
+  { id: 'motivational', label: 'Motivational 💪',   emoji: '🏆', url: 'https://cdn.pixabay.com/audio/2024/01/15/audio_8d53ce08f8.mp3' },
+  { id: 'dramatic',     label: 'Dramatic 🎬',       emoji: '🎭', url: 'https://cdn.pixabay.com/audio/2023/06/08/audio_8b378e5a8e.mp3' },
+  { id: 'energetic',    label: 'Energetic ⚡',      emoji: '⚡', url: 'https://cdn.pixabay.com/audio/2024/02/28/audio_5d3b8e1f2a.mp3' },
 ]
 
 // === Scene Transitions ===
