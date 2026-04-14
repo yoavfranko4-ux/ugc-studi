@@ -35,7 +35,20 @@
       "Bash(node -e \"require\\('./app/studio/page.js'\\)\")",
       "Bash(node --check app/api/export/route.js)",
       "Bash(node --check app/studio/page.js)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(curl -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://github.com/dejavu-fonts/dejavu-fonts/raw/version_2_37/ttf/DejaVuSans-Bold.ttf\")",
+      "Bash(curl -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/version_2_37/ttf/DejaVuSans-Bold.ttf\")",
+      "Bash(curl -v -o public/fonts/DejaVuSans-Bold.ttf \"https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/version_2_37/ttf/DejaVuSans-Bold.ttf\")",
+      "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/version_2_37/ttf/DejaVuSans-Bold.ttf\")",
+      "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf\")",
+      "Bash(curl -k --ssl-no-revoke -sL \"https://api.github.com/search/repositories?q=dejavu-fonts&per_page=5\")",
+      "Bash(curl -k --ssl-no-revoke -sL \"https://api.github.com/repos/dejavu-fonts/dejavu-fonts\")",
+      "Bash(curl -k --ssl-no-revoke -sL \"https://api.github.com/repos/dejavu-fonts/dejavu-fonts/git/trees/master\")",
+      "Bash(curl -k --ssl-no-revoke -sL \"https://api.github.com/repos/dejavu-fonts/dejavu-fonts/git/trees/master?recursive=1\")",
+      "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/NotoSansHebrew-Bold.ttf \"https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Bold.ttf\")",
+      "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://cdn.jsdelivr.net/npm/@typopro/web-dejavu@3.7.5/TypoPRO-DejaVuSans-Bold.ttf\")",
+      "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://cdn.jsdelivr.net/gh/fonts-archive/DejaVu-Sans@main/DejaVuSans-Bold.ttf\")",
+      "Bash(curl -k --ssl-no-revoke -sL -o public/fonts/DejaVuSans-Bold.ttf \"https://cdn.jsdelivr.net/npm/@fontsource/dejavu-sans@5.0.0/files/dejavu-sans-latin-700-normal.woff2\")"
     ]
   }
 }

@@ -39,85 +39,17 @@ try {
   console.log('[Export] ffmpeg version:\n' + ver)
 } catch (e) { console.warn('[Export] Could not run ffmpeg -version:', e.message) }
 
-// Map known font-file names → the ASS FontName (family name) they actually register as
-const FONT_FAMILY_BY_FILE = {
-  'DejaVuSans-Bold.ttf':          'DejaVu Sans',
-  'DejaVuSans.ttf':               'DejaVu Sans',
-  'DejaVuSansCondensed-Bold.ttf': 'DejaVu Sans Condensed',
-  'NotoSansHebrew-Bold.ttf':      'Noto Sans Hebrew',
-  'NotoSansHebrew-Regular.ttf':   'Noto Sans Hebrew',
-  'NotoSans-Bold.ttf':            'Noto Sans',
-  'NotoSans-Regular.ttf':         'Noto Sans',
-  'NotoSansHebrew[wdth,wght].ttf':'Noto Sans Hebrew',
-}
+// === Embedded font (checked into repo at public/fonts/) ===
+// libass loads this directly via fontsdir= — bypasses fontconfig entirely,
+// so it works regardless of whether DejaVu/Noto are installed at the OS level.
+const EMBEDDED_FONT_DIR    = path.join(process.cwd(), 'public', 'fonts')
+const EMBEDDED_FONT_FILE   = path.join(EMBEDDED_FONT_DIR, 'NotoSansHebrew-Bold.ttf')
+const EMBEDDED_FONT_FAMILY = 'Noto Sans Hebrew'
 
-// Scan the filesystem for fonts + fontconfig configs. libass needs both or it fails.
-function discoverFontEnv() {
-  const all = []
-  // System font dirs
-  for (const dir of ['/usr/share/fonts', '/usr/local/share/fonts', '/run/current-system/sw/share/fonts']) {
-    if (fs.existsSync(dir)) {
-      try {
-        const lines = execSync(`find ${dir} -type f \\( -name '*.ttf' -o -name '*.otf' \\) 2>/dev/null`, { encoding: 'utf8', shell: '/bin/sh' }).split('\n').filter(Boolean)
-        all.push(...lines)
-      } catch {}
-    }
-  }
-  // Nix store fonts (nixpacks installs dejavu_fonts / noto-fonts here)
-  try {
-    const lines = execSync(`find /nix/store -maxdepth 6 -type f \\( -name '*.ttf' -o -name '*.otf' \\) 2>/dev/null | head -60`, { encoding: 'utf8', shell: '/bin/sh' }).split('\n').filter(Boolean)
-    all.push(...lines)
-  } catch {}
+console.log('[Export] Embedded font dir:', EMBEDDED_FONT_DIR)
+console.log('[Export] Embedded font file:', EMBEDDED_FONT_FILE, 'exists:', fs.existsSync(EMBEDDED_FONT_FILE))
 
-  // Pick the preferred Hebrew-capable font (DejaVu Sans first — bundled in dejavu_fonts + supports Hebrew)
-  const prefer = ['DejaVuSans-Bold.ttf', 'NotoSansHebrew-Bold.ttf', 'NotoSansHebrew-Regular.ttf', 'DejaVuSans.ttf', 'NotoSans-Bold.ttf']
-  let primaryPath = null
-  for (const name of prefer) {
-    const hit = all.find(f => f.endsWith('/' + name))
-    if (hit) { primaryPath = hit; break }
-  }
-  const primaryFile = primaryPath ? path.basename(primaryPath) : null
-  const primaryFamily = primaryFile && FONT_FAMILY_BY_FILE[primaryFile] ? FONT_FAMILY_BY_FILE[primaryFile] : 'DejaVu Sans'
-  const primaryDir = primaryPath ? path.dirname(primaryPath) : null
-
-  // Unique font directories — libass reads these via fontsdir=
-  const fontsDirs = [...new Set(all.map(f => path.dirname(f)))]
-
-  // Fontconfig config file
-  let fcConfig = null
-  for (const p of ['/etc/fonts/fonts.conf', '/usr/local/etc/fonts/fonts.conf']) {
-    if (fs.existsSync(p)) { fcConfig = p; break }
-  }
-  if (!fcConfig) {
-    try {
-      const found = execSync(`find /nix/store -maxdepth 5 -type f -name 'fonts.conf' 2>/dev/null | head -1`, { encoding: 'utf8', shell: '/bin/sh' }).trim()
-      if (found && fs.existsSync(found)) fcConfig = found
-    } catch {}
-  }
-
-  return { all, primaryPath, primaryFile, primaryFamily, primaryDir, fontsDirs, fcConfig }
-}
-
-const fontEnv = discoverFontEnv()
-console.log('[Export] All discovered fonts (first 40):')
-for (const f of fontEnv.all.slice(0, 40)) console.log('  -', f)
-console.log('[Export] Total fonts found:', fontEnv.all.length)
-console.log('[Export] Primary font path:', fontEnv.primaryPath || '(none)')
-console.log('[Export] Primary font family name (for ASS):', fontEnv.primaryFamily)
-console.log('[Export] Primary font dir (for fontsdir=):', fontEnv.primaryDir || '(none)')
-console.log('[Export] Fontconfig config:', fontEnv.fcConfig || '(none)')
-console.log('[Export] Unique font dirs:', fontEnv.fontsDirs.length)
-
-// Apply fontconfig env vars so libass can locate fonts
-if (fontEnv.fcConfig) {
-  process.env.FONTCONFIG_FILE = fontEnv.fcConfig
-  process.env.FONTCONFIG_PATH = path.dirname(fontEnv.fcConfig)
-  process.env.FC_CONFIG_DIR = path.dirname(fontEnv.fcConfig)
-  console.log('[Export] FONTCONFIG_FILE set to:', process.env.FONTCONFIG_FILE)
-}
-
-// Legacy name kept for existing code paths
-const hebrewFontPath = fontEnv.primaryPath
+const hebrewFontPath = fs.existsSync(EMBEDDED_FONT_FILE) ? EMBEDDED_FONT_FILE : null
 
 const execFileAsync = promisify(execFile)
 
@@ -370,10 +302,10 @@ export async function POST(req) {
     let assPath = null
     const hasSubs = (Array.isArray(wordTimestamps) && wordTimestamps.length) || (Array.isArray(subtitles) && subtitles.length)
     if (hasSubs) {
-      const assContent = buildAssFile(subtitles || [], wordTimestamps || null, fontEnv.primaryFamily)
+      const assContent = buildAssFile(subtitles || [], wordTimestamps || null, EMBEDDED_FONT_FAMILY)
       assPath = path.join(jobDir, 'subs.ass')
       await writeFile(assPath, assContent, 'utf8')
-      console.log('[Export] ASS written to', assPath, '(font family:', fontEnv.primaryFamily, ')')
+      console.log('[Export] ASS written to', assPath, '(font family:', EMBEDDED_FONT_FAMILY, ')')
       console.log('[Export] ASS content:\n' + assContent)
     } else {
       console.log('[Export] No subtitles payload — skipping subtitle burn-in')
@@ -392,11 +324,11 @@ export async function POST(req) {
     if (voicePath) { finalArgs.push('-i', voicePath); voiceInputIdx = nextIdx++ }
     if (musicPath) { finalArgs.push('-i', musicPath); musicInputIdx = nextIdx }
 
-    // Video chain — apply ASS subtitles filter (requires libass/libfribidi, present in system ffmpeg-full)
-    // Pass fontsdir= pointing at the discovered font directory so libass can find the font without fontconfig.
+    // Video chain — apply ASS subtitles filter. libass loads the embedded font directly from
+    // public/fonts/ via fontsdir= — no fontconfig required.
     let videoChain = null
     if (assPath) {
-      const fontsDirArg = fontEnv.primaryDir ? `:fontsdir='${escapeFilterValue(fontEnv.primaryDir)}'` : ''
+      const fontsDirArg = fs.existsSync(EMBEDDED_FONT_DIR) ? `:fontsdir='${escapeFilterValue(EMBEDDED_FONT_DIR)}'` : ''
       videoChain = `[0:v]subtitles='${escapeFilterValue(assPath)}'${fontsDirArg}[outv]`
     }
 
