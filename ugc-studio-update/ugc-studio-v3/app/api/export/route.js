@@ -1,6 +1,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { writeFile, mkdir, readFile, rm } from 'fs/promises'
+import fs from 'fs'
 import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import path from 'path'
@@ -18,7 +19,7 @@ export async function POST(req) {
 
   try {
     const body = await req.json()
-    const { videoClipsB64, videoUrls, audioBase64, subtitles, bgMusic, subtitleStyle } = body
+    const { videoClipsB64, videoUrls, audioBase64, subtitles, bgMusic, bgMusicUrl, subtitleStyle } = body
 
     const hasB64Clips = videoClipsB64?.length > 0
     const hasUrls = videoUrls?.length > 0 && videoUrls.some(Boolean)
@@ -56,13 +57,67 @@ export async function POST(req) {
     const validClipPaths = clipPaths.filter(Boolean)
     if (validClipPaths.length === 0) throw new Error('No clips written successfully')
 
-    // 2. Write voiceover audio if provided
+    // 2. Write voiceover audio if provided — with debug + AAC pre-conversion to avoid MP3 decode issues
     let voicePath = null
     if (audioBase64) {
-      voicePath = path.join(jobDir, 'voice.mp3')
+      console.log('[Export] audioBase64 encoded string length:', audioBase64.length, 'chars')
+      const rawPath = path.join(jobDir, 'voice.mp3')
       const audioBuf = Buffer.from(audioBase64, 'base64')
-      await writeFile(voicePath, audioBuf)
-      console.log(`[Export] Voiceover written: ${audioBuf.length} bytes (${(audioBuf.length / 1024).toFixed(0)}KB)`)
+      console.log('[Export] audioBuf decoded length:', audioBuf.length, 'bytes')
+      await writeFile(rawPath, audioBuf)
+      try {
+        const diskStats = fs.statSync(rawPath)
+        console.log('[Export] voice.mp3 on disk:', diskStats.size, 'bytes')
+      } catch (e) { console.warn('[Export] statSync voice.mp3 failed:', e.message) }
+
+      // Probe the MP3 via `ffmpeg -i` (no ffprobe available) — non-zero exit is expected
+      try {
+        const probeRes = await execFileAsync(ffmpegPath, ['-hide_banner', '-i', rawPath, '-f', 'null', '-'], { maxBuffer: 4 * 1024 * 1024 }).catch(e => ({ stderr: e.stderr || e.message }))
+        console.log('[Export] ffmpeg probe voice.mp3:', (probeRes.stderr || '').slice(-1200))
+      } catch (e) { console.warn('[Export] probe failed:', e.message) }
+
+      // Pre-convert to AAC/m4a — bypasses ffmpeg-static MP3 decoder bugs that produce 0 audio frames
+      const convertedPath = path.join(jobDir, 'voice_converted.m4a')
+      try {
+        const convRes = await execFileAsync(ffmpegPath, [
+          '-y', '-i', rawPath,
+          '-vn', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+          convertedPath
+        ], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
+        const convStats = fs.statSync(convertedPath)
+        console.log('[Export] voice_converted.m4a:', convStats.size, 'bytes')
+        console.log('[Export] Converter stderr tail:', convRes.stderr?.slice(-400) || '(empty)')
+        voicePath = convertedPath
+      } catch (convErr) {
+        console.error('[Export] Voice AAC conversion FAILED:', convErr.stderr?.slice(-800) || convErr.message)
+        // Fall back to raw mp3 and hope for the best
+        voicePath = rawPath
+      }
+    }
+
+    // Download background music if URL provided
+    let musicPath = null
+    if (bgMusic && bgMusic !== 'none' && bgMusicUrl) {
+      try {
+        const resp = await fetch(bgMusicUrl)
+        if (resp.ok) {
+          const musicBuf = Buffer.from(await resp.arrayBuffer())
+          const musicRaw = path.join(jobDir, 'music_raw.mp3')
+          await writeFile(musicRaw, musicBuf)
+          console.log('[Export] music downloaded:', musicBuf.length, 'bytes from', bgMusicUrl)
+          // Convert to AAC too for consistency
+          const musicConv = path.join(jobDir, 'music.m4a')
+          try {
+            await execFileAsync(ffmpegPath, ['-y', '-i', musicRaw, '-vn', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', musicConv], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
+            musicPath = musicConv
+          } catch (me) {
+            console.warn('[Export] music AAC conversion failed, using raw:', me.stderr?.slice(-300) || me.message)
+            musicPath = musicRaw
+          }
+        } else {
+          console.warn('[Export] music fetch HTTP', resp.status)
+        }
+      } catch (e) { console.warn('[Export] music download failed:', e.message) }
     }
 
     // 3. Build FFmpeg args using filter_complex concat filter (re-encodes, avoids H264 bitstream issues)
@@ -76,22 +131,34 @@ export async function POST(req) {
       ffmpegArgs.push('-i', cp)
     }
 
-    // Add voiceover as a separate input (not in filter_complex — avoids 0-frame audio bug)
-    if (voicePath) {
-      ffmpegArgs.push('-i', voicePath)
-    }
+    // Audio inputs
+    const voiceIdx = voicePath ? n : -1
+    const musicIdx = musicPath ? (voicePath ? n + 1 : n) : -1
+    if (voicePath) ffmpegArgs.push('-i', voicePath)
+    if (musicPath) ffmpegArgs.push('-i', musicPath)
 
     // Build filter_complex: scale each clip to 720x1280 cover, then concat (video only)
     const scaleFilter = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1'
     const scaledStreams = validClipPaths.map((_, i) => `[${i}:v]${scaleFilter}[v${i}]`).join(';')
     const concatInputs = validClipPaths.map((_, i) => `[v${i}]`).join('')
-    const filterComplex = `${scaledStreams};${concatInputs}concat=n=${n}:v=1:a=0[outv]`
+    let filterComplex = `${scaledStreams};${concatInputs}concat=n=${n}:v=1:a=0[outv]`
+
+    // Audio mixing: voice at full volume + music at 15% (looped), mix, duration=first (= voice length)
+    let audioMapLabel = null
+    if (voicePath && musicPath) {
+      filterComplex += `;[${voiceIdx}:a]volume=1.0,aresample=44100[va];[${musicIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[ma];[va][ma]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[aout]`
+      audioMapLabel = '[aout]'
+    } else if (voicePath) {
+      filterComplex += `;[${voiceIdx}:a]aresample=44100[aout]`
+      audioMapLabel = '[aout]'
+    } else if (musicPath) {
+      filterComplex += `;[${musicIdx}:a]volume=0.4,aresample=44100[aout]`
+      audioMapLabel = '[aout]'
+    }
 
     ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]')
-
-    // Map audio directly from voiceover input (simple -map, no filter_complex for audio)
-    if (voicePath) {
-      ffmpegArgs.push('-map', `${n}:a`)
+    if (audioMapLabel) {
+      ffmpegArgs.push('-map', audioMapLabel)
     } else {
       ffmpegArgs.push('-an')
     }
@@ -105,7 +172,8 @@ export async function POST(req) {
       '-pix_fmt', 'yuv420p',
       '-c:a', 'aac',
       '-b:a', '128k',
-      '-async', '1',
+      '-ar', '44100',
+      '-ac', '2',
       '-movflags', '+faststart',
       '-shortest',
       outputPath

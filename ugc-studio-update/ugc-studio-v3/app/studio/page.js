@@ -10,13 +10,16 @@ const SUBTITLE_STYLES = [
   { id: 'neon', label: 'Neon', desc: 'לבן עם glow סגול' },
 ]
 
-// === Background Music Tracks (Web Audio generated) ===
+// === Background Music Tracks — real royalty-free MP3s from CDN ===
+// SoundHelix hosts public-domain, royalty-free instrumental tracks at a reliable CDN.
+// These are used as-is; users can replace with their own URLs if desired.
 const MUSIC_TRACKS = [
-  { id: 'none', label: 'ללא מוזיקה', emoji: '🔇' },
-  { id: 'upbeat', label: 'Upbeat TikTok', emoji: '🎵', bpm: 130, key: 'C' },
-  { id: 'chill', label: 'Chill Vibes', emoji: '🌊', bpm: 85, key: 'Am' },
-  { id: 'motivational', label: 'Motivational', emoji: '💪', bpm: 110, key: 'G' },
-  { id: 'dramatic', label: 'Dramatic', emoji: '🎭', bpm: 70, key: 'Dm' },
+  { id: 'none',         label: 'ללא מוזיקה',       emoji: '🔇', url: null },
+  { id: 'upbeat',       label: 'Upbeat TikTok',    emoji: '🎵', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
+  { id: 'chill',        label: 'Chill Vibes',      emoji: '🌊', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3' },
+  { id: 'motivational', label: 'Motivational',     emoji: '💪', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3' },
+  { id: 'dramatic',     label: 'Dramatic',         emoji: '🎭', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3' },
+  { id: 'energetic',    label: 'Energetic',        emoji: '⚡', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3' },
 ]
 
 // === Scene Transitions ===
@@ -306,13 +309,14 @@ export default function Home() {
   const [videosReady, setVideosReady] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
-  const videoRef = useRef(null)
+  const videoRef = useRef(null)           // legacy single ref (still used in some places)
+  const videoRefs = useRef([])            // one <video> element per clip — enables seamless back-to-back playback
   const audioRef = useRef(null)
+  const musicAudioRef = useRef(null)      // real <audio> element for bgMusic (preview + playback)
   const canvasRef = useRef(null)
   const audioBlobUrl = useRef(null)
   const playingRef = useRef(false)
-  const musicSourceRef = useRef(null)
-  const musicCtxRef = useRef(null)
+  const currentPlayingIdxRef = useRef(0)  // index into clipOrder during playback (no re-render)
   const autoExportRef = useRef(false)
 
   // Auth check + restore saved edit from ?editId= query param
@@ -384,7 +388,7 @@ export default function Home() {
     init()
   }, [])
 
-  // Preload ALL video blobs in parallel + wait for canplaythrough
+  // Preload ALL video blobs in parallel + wait for canplaythrough on rendered <video> elements
   useEffect(() => {
     if (step !== 'done' || !result?.videos) return
     let cancelled = false
@@ -402,25 +406,22 @@ export default function Home() {
       if (cancelled) return
       setVideoBlobUrls(urls)
 
-      // Preload each blob into a hidden video element and wait for canplaythrough
-      const readyPromises = urls.map(url => {
-        if (!url) return Promise.resolve()
+      // Wait for React to render the <video> elements (one per clip) and for each to be canplaythrough
+      await new Promise(r => setTimeout(r, 80))
+      const readyPromises = videoRefs.current.map((el) => {
+        if (!el) return Promise.resolve()
+        if (el.readyState >= 3) return Promise.resolve()
         return new Promise(resolve => {
-          const v = document.createElement('video')
-          v.preload = 'auto'; v.muted = true; v.playsInline = true; v.src = url
-          v.oncanplaythrough = () => resolve()
-          v.onerror = () => resolve()
-          setTimeout(resolve, 5000) // safety timeout
+          const onReady = () => { el.removeEventListener('canplaythrough', onReady); resolve() }
+          el.addEventListener('canplaythrough', onReady)
+          el.addEventListener('error', onReady, { once: true })
+          setTimeout(resolve, 6000) // safety
         })
       })
       await Promise.all(readyPromises)
       if (cancelled) return
 
       setVideosReady(true)
-      if (videoRef.current && urls[currentScene]) {
-        videoRef.current.src = urls[currentScene]
-        videoRef.current.load()
-      }
       // Auto-trigger export if came from dashboard
       if (autoExportRef.current) {
         autoExportRef.current = false
@@ -454,9 +455,8 @@ export default function Home() {
 
   // Stop music preview on track change
   useEffect(() => {
-    if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
-    if (musicCtxRef.current) { try { musicCtxRef.current.close() } catch {} }
-    musicSourceRef.current = null; musicCtxRef.current = null; setMusicPreviewing(false)
+    if (musicAudioRef.current) { try { musicAudioRef.current.pause() } catch {} }
+    setMusicPreviewing(false)
   }, [bgMusic])
 
   const avatarUrl = customAvatar || selectedAvatar?.url
@@ -561,8 +561,13 @@ export default function Home() {
 
   const loadScene = (idx) => {
     setCurrentScene(idx)
-    const url = videoBlobUrls[idx] || result?.videos?.[idx]
-    if (url && videoRef.current) { videoRef.current.src = url; videoRef.current.load() }
+    // Swap visibility among preloaded <video> elements — no reload, no freeze
+    const orderPos = clipOrder.indexOf(idx)
+    videoRefs.current.forEach((v, i) => {
+      if (!v) return
+      try { v.pause(); v.currentTime = 0 } catch {}
+      v.style.opacity = i === orderPos ? '1' : '0'
+    })
   }
 
   // Drag-and-drop
@@ -575,105 +580,123 @@ export default function Home() {
   }
   const handleDragEnd = () => setDragIdx(null)
 
-  // Toggle music preview
+  // Toggle music preview — real <audio> element playing the track URL
   const toggleMusicPreview = useCallback(() => {
+    const el = musicAudioRef.current
+    if (!el) return
     if (musicPreviewing) {
-      if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
-      if (musicCtxRef.current) { try { musicCtxRef.current.close() } catch {} }
-      musicSourceRef.current = null; musicCtxRef.current = null; setMusicPreviewing(false); return
+      try { el.pause() } catch {}
+      setMusicPreviewing(false); return
     }
     if (bgMusic === 'none') return
+    const track = MUSIC_TRACKS.find(t => t.id === bgMusic)
+    if (!track?.url) return
     try {
-      const ctx = createAudioContext(); musicCtxRef.current = ctx
-      const buf = generateMusicBuffer(ctx, bgMusic, 8)
-      const source = ctx.createBufferSource(); source.buffer = buf; source.connect(ctx.destination)
-      source.onended = () => setMusicPreviewing(false); source.start()
-      musicSourceRef.current = source; setMusicPreviewing(true)
-    } catch {}
+      el.src = track.url
+      el.volume = 0.35
+      el.loop = true
+      el.currentTime = 0
+      el.play().then(() => setMusicPreviewing(true)).catch(() => setMusicPreviewing(false))
+    } catch { setMusicPreviewing(false) }
   }, [bgMusic, musicPreviewing])
 
-  // Play all clips sequentially with voiceover + music — synced with rAF
+  // === Seamless back-to-back playback controller ===
+  // All clips rendered as separate <video> elements, preloaded. Switch opacity + play() — zero reload, zero setState during playback.
   const playAll = useCallback(async () => {
     if (!result?.videos) return
+    const videoEls = videoRefs.current.filter(Boolean)
+    if (videoEls.length === 0) return
+
     if (playing) {
-      playingRef.current = false; setPlaying(false)
-      if (videoRef.current) videoRef.current.pause()
-      if (audioRef.current) audioRef.current.pause()
-      if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
+      playingRef.current = false
+      setPlaying(false)
+      videoEls.forEach(v => { try { v.pause() } catch {} })
+      if (audioRef.current) { try { audioRef.current.pause() } catch {} }
+      if (musicAudioRef.current) { try { musicAudioRef.current.pause() } catch {} }
       return
     }
+
     setPlaying(true); playingRef.current = true
 
-    // Start voiceover at time 0, synced with first clip
+    // Reset all videos to t=0, show only first
+    videoEls.forEach((v, i) => {
+      try { v.pause(); v.currentTime = 0 } catch {}
+      v.style.opacity = i === 0 ? '1' : '0'
+    })
+
+    // Start voiceover
     if (audioRef.current && audioBlobUrl.current) {
-      audioRef.current.currentTime = 0
+      try { audioRef.current.currentTime = 0; audioRef.current.play().catch(() => {}) } catch {}
     }
-    // Start generated music
-    if (bgMusic !== 'none') {
+    // Start real music track
+    const track = MUSIC_TRACKS.find(t => t.id === bgMusic)
+    if (track?.url && musicAudioRef.current) {
       try {
-        const ctx = createAudioContext(); musicCtxRef.current = ctx
-        const buf = generateMusicBuffer(ctx, bgMusic, 22)
-        const source = ctx.createBufferSource(); source.buffer = buf
-        const gain = ctx.createGain(); gain.gain.value = 0.25
-        source.connect(gain); gain.connect(ctx.destination); source.start()
-        musicSourceRef.current = source
+        const m = musicAudioRef.current
+        if (m.src !== track.url) m.src = track.url
+        m.volume = 0.15
+        m.loop = true
+        m.currentTime = 0
+        m.play().catch(() => {})
       } catch {}
     }
 
-    let firstClip = true
-    for (const sceneIdx of clipOrder) {
-      if (!playingRef.current) break
-      const url = videoBlobUrls[sceneIdx] || result.videos[sceneIdx]
-      if (!url || !videoRef.current) continue
-      setCurrentScene(sceneIdx)
-      videoRef.current.src = url
-      videoRef.current.currentTime = 0
-
-      await new Promise(resolve => {
-        const safety = setTimeout(resolve, 6500)
-        const onCanPlay = async () => {
-          videoRef.current.removeEventListener('canplay', onCanPlay)
-          try {
-            await videoRef.current.play()
-            // Start voiceover exactly when first clip starts playing
-            if (firstClip && audioRef.current && audioBlobUrl.current) {
-              audioRef.current.play().catch(() => {})
-              firstClip = false
-            }
-          } catch { clearTimeout(safety); resolve(); return }
-          // Use rAF to update subtitle overlay in sync
-          const subtitle = result.story?.scenes?.[sceneIdx]?.subtitle || ''
-          const startTime = performance.now()
-          const tick = () => {
-            if (!playingRef.current || videoRef.current.paused || videoRef.current.ended) return
-            const elapsed = (performance.now() - startTime) / 1000
-            const canvas = canvasRef.current
-            if (canvas) {
-              const ctx = canvas.getContext('2d')
-              const container = canvas.parentElement
-              canvas.width = container.offsetWidth
-              canvas.height = container.offsetHeight
-              ctx.clearRect(0, 0, canvas.width, canvas.height)
-              const segments = result.subtitleSegments || null
-              const sceneStart = sceneIdx * 5
-              const lines = getSubtitleLinesAtTime(subtitle, elapsed, 5, segments, sceneStart)
-              drawSubtitlePreview(ctx, lines, canvas.width, canvas.height, subtitleStyle)
-            }
-            requestAnimationFrame(tick)
-          }
-          requestAnimationFrame(tick)
-        }
-        const onEnd = () => { clearTimeout(safety); videoRef.current.removeEventListener('ended', onEnd); resolve() }
-        videoRef.current.addEventListener('ended', onEnd)
-        if (videoRef.current.readyState >= 3) { onCanPlay() }
-        else { videoRef.current.addEventListener('canplay', onCanPlay) }
-      })
+    // Subtitle overlay rAF — reads currentPlayingIdxRef, no state reads
+    const subtitleTick = () => {
+      if (!playingRef.current) return
+      const idx = currentPlayingIdxRef.current
+      const sceneIdx = clipOrder[idx]
+      const activeVid = videoEls[idx]
+      if (!activeVid || activeVid.paused || activeVid.ended) {
+        requestAnimationFrame(subtitleTick); return
+      }
+      const canvas = canvasRef.current
+      if (canvas) {
+        const ctx = canvas.getContext('2d')
+        const container = canvas.parentElement
+        if (canvas.width !== container.offsetWidth) canvas.width = container.offsetWidth
+        if (canvas.height !== container.offsetHeight) canvas.height = container.offsetHeight
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        const subtitle = result.story?.scenes?.[sceneIdx]?.subtitle || ''
+        const elapsed = activeVid.currentTime
+        const segments = result.subtitleSegments || null
+        const sceneStart = idx * 5
+        const lines = getSubtitleLinesAtTime(subtitle, elapsed, 5, segments, sceneStart)
+        drawSubtitlePreview(ctx, lines, canvas.width, canvas.height, subtitleStyle)
+      }
+      requestAnimationFrame(subtitleTick)
     }
-    setPlaying(false); playingRef.current = false
-    if (audioRef.current) audioRef.current.pause()
-    if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
-    if (musicCtxRef.current) { try { musicCtxRef.current.close() } catch {} }
-  }, [result, clipOrder, bgMusic, playing, videoBlobUrls, subtitleStyle])
+
+    // Chain clips: on ended, immediately swap opacity + play next (zero gap)
+    const playChain = (idx) => {
+      if (!playingRef.current) return
+      if (idx >= videoEls.length) {
+        // Done
+        playingRef.current = false
+        setPlaying(false)
+        if (audioRef.current) { try { audioRef.current.pause() } catch {} }
+        if (musicAudioRef.current) { try { musicAudioRef.current.pause() } catch {} }
+        return
+      }
+      currentPlayingIdxRef.current = idx
+      const v = videoEls[idx]
+      // Swap visibility (direct DOM — no React re-render)
+      videoEls.forEach((el, i) => { el.style.opacity = i === idx ? '1' : '0' })
+      try { v.currentTime = 0 } catch {}
+      // Immediately play — no await, no delay
+      const playPromise = v.play()
+      if (playPromise?.catch) playPromise.catch(() => {})
+      const onEnded = () => {
+        v.removeEventListener('ended', onEnded)
+        playChain(idx + 1)
+      }
+      v.addEventListener('ended', onEnded, { once: true })
+    }
+
+    // Kick off rAF + chain
+    requestAnimationFrame(subtitleTick)
+    playChain(0)
+  }, [result, clipOrder, bgMusic, playing, subtitleStyle])
 
   // === Server-side FFmpeg export via /api/export ===
   const exportMp4 = async () => {
@@ -727,6 +750,7 @@ export default function Home() {
 
       setExportProgress('שולח לשרת... 20%')
 
+      const bgMusicTrack = MUSIC_TRACKS.find(t => t.id === bgMusic)
       const resp = await fetch('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -735,6 +759,7 @@ export default function Home() {
           audioBase64: result.audioBase64 || null,
           subtitles,
           bgMusic,
+          bgMusicUrl: bgMusicTrack?.url || null,
           subtitleStyle,
         })
       })
@@ -1081,7 +1106,30 @@ export default function Home() {
         {/* Center: Full-width Preview */}
         <div style={{ ...cardS, marginBottom: 0, padding: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#000', aspectRatio: '9/16', maxHeight: 'calc(100vh - 280px)', height: '100%', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
-            <video ref={videoRef} playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            {/* Stack of preloaded <video> elements — one per clip. Opacity swap = seamless back-to-back playback, zero reload */}
+            {clipOrder.map((sceneIdx, orderIdx) => {
+              const url = videoBlobUrls[sceneIdx]
+              return (
+                <video
+                  key={`scene-${sceneIdx}`}
+                  ref={el => { if (el) videoRefs.current[orderIdx] = el; else videoRefs.current[orderIdx] = null }}
+                  src={url || undefined}
+                  playsInline
+                  preload="auto"
+                  style={{
+                    position: 'absolute', top: 0, left: 0,
+                    width: '100%', height: '100%', objectFit: 'cover',
+                    opacity: orderIdx === 0 ? 1 : 0,
+                    transition: 'opacity 40ms linear',
+                    display: 'block',
+                  }}
+                />
+              )
+            })}
+            {/* Legacy single ref — kept pointing to first video for backward compat */}
+            <video ref={videoRef} style={{ display: 'none' }} />
+            {/* Hidden music audio element (also used for preview) */}
+            <audio ref={musicAudioRef} preload="auto" style={{ display: 'none' }} />
             <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
             {!playing && !videosReady && (
               <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
