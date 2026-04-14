@@ -62,7 +62,7 @@ export async function POST(req) {
       voicePath = path.join(jobDir, 'voice.mp3')
       const audioBuf = Buffer.from(audioBase64, 'base64')
       await writeFile(voicePath, audioBuf)
-      console.log(`[Export] Voiceover: ${(audioBuf.length / 1024).toFixed(0)}KB`)
+      console.log(`[Export] Voiceover written: ${audioBuf.length} bytes (${(audioBuf.length / 1024).toFixed(0)}KB)`)
     }
 
     // 3. Build FFmpeg args using filter_complex concat filter (re-encodes, avoids H264 bitstream issues)
@@ -76,24 +76,24 @@ export async function POST(req) {
       ffmpegArgs.push('-i', cp)
     }
 
-    // Add voiceover as the last input (index = n)
-    const voiceInputIdx = voicePath ? n : -1
+    // Add voiceover as a separate input (not in filter_complex — avoids 0-frame audio bug)
     if (voicePath) {
       ffmpegArgs.push('-i', voicePath)
     }
 
-    // Build filter_complex: scale each clip to 720x1280 cover, then concat
+    // Build filter_complex: scale each clip to 720x1280 cover, then concat (video only)
     const scaleFilter = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1'
     const scaledStreams = validClipPaths.map((_, i) => `[${i}:v]${scaleFilter}[v${i}]`).join(';')
     const concatInputs = validClipPaths.map((_, i) => `[v${i}]`).join('')
-    let filterComplex = `${scaledStreams};${concatInputs}concat=n=${n}:v=1:a=0[outv]`
+    const filterComplex = `${scaledStreams};${concatInputs}concat=n=${n}:v=1:a=0[outv]`
 
-    // Add voiceover volume adjustment if present
+    ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]')
+
+    // Map audio directly from voiceover input (simple -map, no filter_complex for audio)
     if (voicePath) {
-      filterComplex += `;[${voiceInputIdx}:a]volume=0.85[outa]`
-      ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]', '-map', '[outa]')
+      ffmpegArgs.push('-map', `${n}:a`)
     } else {
-      ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]', '-an')
+      ffmpegArgs.push('-an')
     }
 
     // Output encoding
@@ -105,6 +105,7 @@ export async function POST(req) {
       '-pix_fmt', 'yuv420p',
       '-c:a', 'aac',
       '-b:a', '128k',
+      '-async', '1',
       '-movflags', '+faststart',
       '-shortest',
       outputPath

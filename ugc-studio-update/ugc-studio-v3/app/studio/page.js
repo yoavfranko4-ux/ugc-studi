@@ -115,13 +115,43 @@ function splitSubtitle(text, maxWordsPerLine = 3) {
   return lines
 }
 
-// Get the 2 subtitle lines visible at a given time within a scene (word-level timing)
-function getSubtitleLinesAtTime(text, timeInScene, sceneDuration) {
+// Build subtitle segments from word timestamps: groups of 3-4 words with exact timing
+function buildSubtitleSegments(wordTimestamps, maxWordsPerSegment = 3) {
+  if (!wordTimestamps?.length) return []
+  const segments = []
+  for (let i = 0; i < wordTimestamps.length; i += maxWordsPerSegment) {
+    const group = wordTimestamps.slice(i, i + maxWordsPerSegment)
+    segments.push({
+      text: group.map(w => w.word).join(' '),
+      start: group[0].start,
+      end: group[group.length - 1].end
+    })
+  }
+  return segments
+}
+
+// Get the 2 subtitle lines visible at a given time (uses word timestamps if available)
+function getSubtitleLinesAtTime(text, timeInScene, sceneDuration, subtitleSegments, sceneStartTime) {
+  // If we have word-level segments, use exact timing
+  if (subtitleSegments?.length) {
+    const globalTime = (sceneStartTime || 0) + timeInScene
+    const visible = []
+    for (let i = 0; i < subtitleSegments.length; i++) {
+      const seg = subtitleSegments[i]
+      if (globalTime >= seg.start && globalTime < seg.end + 0.1) {
+        visible.push(seg.text)
+        // Also show next segment if it exists (max 2 lines)
+        if (i + 1 < subtitleSegments.length) visible.push(subtitleSegments[i + 1].text)
+        break
+      }
+    }
+    if (visible.length > 0) return visible.slice(0, 2)
+  }
+  // Fallback: equal time distribution
   const allLines = splitSubtitle(text, 3)
   if (allLines.length === 0) return []
   const timePerLine = sceneDuration / allLines.length
   const currentLineIdx = Math.min(Math.floor(timeInScene / timePerLine), allLines.length - 1)
-  // Show current line + next line (max 2)
   return allLines.slice(currentLineIdx, currentLineIdx + 2)
 }
 
@@ -316,6 +346,7 @@ export default function Home() {
 
         // Rebuild result object for the editor
         const restoredResult = {
+          wordTimestamps: d.word_timestamps || null,
           story: d.story || null,
           frames: d.frames || [],
           videos: d.videos || [],
@@ -331,6 +362,10 @@ export default function Home() {
             const blob = new Blob([bytes], { type: 'audio/mpeg' })
             audioBlobUrl.current = URL.createObjectURL(blob)
           } catch (e) { console.warn('Failed to restore voiceover audio:', e.message) }
+        }
+        // Build subtitle segments from word timestamps if available
+        if (restoredResult.wordTimestamps?.length) {
+          restoredResult.subtitleSegments = buildSubtitleSegments(restoredResult.wordTimestamps, 3)
         }
         setResult(restoredResult)
 
@@ -411,7 +446,9 @@ export default function Home() {
     canvas.width = container.offsetWidth
     canvas.height = container.offsetHeight
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    const lines = getSubtitleLinesAtTime(subtitle, 0, 5)
+    const segments = result.subtitleSegments || null
+    const sceneStart = currentScene * 5
+    const lines = getSubtitleLinesAtTime(subtitle, 0, 5, segments, sceneStart)
     drawSubtitlePreview(ctx, lines, canvas.width, canvas.height, subtitleStyle)
   }, [currentScene, result, step, subtitleStyle])
 
@@ -510,6 +547,11 @@ export default function Home() {
       if (data.audioBase64) {
         const blob = new Blob([Uint8Array.from(atob(data.audioBase64), c => c.charCodeAt(0))], { type: 'audio/mpeg' })
         audioBlobUrl.current = URL.createObjectURL(blob)
+      }
+      // Build subtitle segments from word-level timestamps if available
+      if (data.wordTimestamps?.length) {
+        data.subtitleSegments = buildSubtitleSegments(data.wordTimestamps, 3)
+        console.log('[Studio] Subtitle segments from alignment:', data.subtitleSegments.length, 'segments')
       }
       setResult(data)
       const hasVideos = data.videos?.some(v => v)
@@ -612,7 +654,9 @@ export default function Home() {
               canvas.width = container.offsetWidth
               canvas.height = container.offsetHeight
               ctx.clearRect(0, 0, canvas.width, canvas.height)
-              const lines = getSubtitleLinesAtTime(subtitle, elapsed, 5)
+              const segments = result.subtitleSegments || null
+              const sceneStart = sceneIdx * 5
+              const lines = getSubtitleLinesAtTime(subtitle, elapsed, 5, segments, sceneStart)
               drawSubtitlePreview(ctx, lines, canvas.width, canvas.height, subtitleStyle)
             }
             requestAnimationFrame(tick)
@@ -746,6 +790,7 @@ export default function Home() {
         story: result.story,
         hebrew_voice: result.hebrewVoice,
         audio_base64: result.audioBase64 || null,
+        word_timestamps: result.wordTimestamps || null,
         thumbnail: thumbnail,
       }
       const { error } = await supabase.from('saved_edits').insert({

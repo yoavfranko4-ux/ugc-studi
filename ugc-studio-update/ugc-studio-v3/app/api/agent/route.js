@@ -50,17 +50,46 @@ async function generateNBFrame(prompt, imageUrls, maxRetries = 3) {
 async function generateVoice(text) {
   if (!ELEVEN_KEY || !text) return null;
   try {
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}?output_format=mp3_44100_128`, {
+    // Use with-timestamps endpoint for word-level alignment data
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}/with-timestamps?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, model_id: 'eleven_v3', voice_settings: { stability: 0.55, similarity_boost: 0.75, style: 0.55, use_speaker_boost: true } })
     });
     if (!res.ok) { console.error('ElevenLabs failed:', await res.text()); return null; }
-    const audioBuffer = Buffer.from(await res.arrayBuffer());
-    const base64 = audioBuffer.toString('base64');
-    // Estimate MP3 duration: fileSize(bytes) * 8 / bitrate(bits/sec)
+    const json = await res.json();
+    const audioBuffer = Buffer.from(json.audio_base64, 'base64');
+    const base64 = json.audio_base64;
     const durationSec = (audioBuffer.length * 8) / (128 * 1000);
-    return { base64, duration: Math.round(durationSec * 100) / 100 };
+    console.log(`[Voice] Audio size: ${(audioBuffer.length / 1024).toFixed(0)}KB, est duration: ${durationSec.toFixed(1)}s`);
+
+    // Build word-level timestamps from character alignment
+    let wordTimestamps = null;
+    if (json.alignment) {
+      const { characters, character_start_times_seconds, character_end_times_seconds } = json.alignment;
+      wordTimestamps = [];
+      let wordStart = null;
+      let wordChars = '';
+      for (let i = 0; i < characters.length; i++) {
+        const ch = characters[i];
+        if (ch === ' ' || ch === '\n' || ch === '\t') {
+          if (wordChars.trim()) {
+            wordTimestamps.push({ word: wordChars.trim(), start: wordStart, end: character_end_times_seconds[i - 1] });
+          }
+          wordChars = '';
+          wordStart = null;
+        } else {
+          if (wordStart === null) wordStart = character_start_times_seconds[i];
+          wordChars += ch;
+        }
+      }
+      if (wordChars.trim()) {
+        wordTimestamps.push({ word: wordChars.trim(), start: wordStart, end: character_end_times_seconds[characters.length - 1] });
+      }
+      console.log(`[Voice] Word timestamps: ${wordTimestamps.length} words, first:`, wordTimestamps[0], 'last:', wordTimestamps[wordTimestamps.length - 1]);
+    }
+
+    return { base64, duration: Math.round(durationSec * 100) / 100, wordTimestamps };
   } catch (e) { console.error('Voice error:', e.message); return null; }
 }
 
@@ -275,6 +304,7 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
       generateAllFrames()
     ]);
     const audioBase64 = voiceResult?.base64 || null;
+    const wordTimestamps = voiceResult?.wordTimestamps || null;
 
     // Kling videos — run all 4 in parallel
     console.log(`[Job ${jobId}] Starting all 4 Kling videos in parallel...`);
@@ -307,6 +337,7 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
       frames,
       videos,
       audioBase64,
+      wordTimestamps,
       hebrewVoice: voiceover
     };
 
