@@ -1,5 +1,7 @@
 [phases.setup]
-nixPkgs = ["ffmpeg"]
+# ffmpeg-full bundles libass (for the `subtitles=` filter) and all codecs.
+# DejaVu + Noto provide Hebrew glyph support for the subtitle burn-in.
+nixPkgs = ["ffmpeg-full", "dejavu_fonts", "noto-fonts", "fontconfig"]
 
 [phases.build]
 cmds = ["npm run build"]

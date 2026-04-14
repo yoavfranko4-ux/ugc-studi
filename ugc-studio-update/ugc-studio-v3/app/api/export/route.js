@@ -1,4 +1,4 @@
-import { execFile } from 'child_process'
+import { execFile, execSync } from 'child_process'
 import { promisify } from 'util'
 import { writeFile, mkdir, readFile, rm } from 'fs/promises'
 import fs from 'fs'
@@ -7,9 +7,35 @@ import { createRequire } from 'module'
 import path from 'path'
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
+const ffmpegStaticPath = require('ffmpeg-static')
+
+// Prefer a system ffmpeg (via nixpacks.toml / apt) — typically built WITH libass,
+// which enables the `subtitles=` filter for Hebrew subtitle burn-in.
+// Fall back to ffmpeg-static if no system binary is found.
+function resolveFfmpegPath() {
+  try {
+    const which = execSync('which ffmpeg', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+    if (which && fs.existsSync(which)) return which
+  } catch {}
+  for (const p of ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']) {
+    if (fs.existsSync(p)) return p
+  }
+  return ffmpegStaticPath
+}
+const ffmpegPath = resolveFfmpegPath()
+console.log('[Export] Resolved ffmpeg binary:', ffmpegPath)
 
 const execFileAsync = promisify(execFile)
+
+// Format seconds → SRT timestamp (HH:MM:SS,mmm)
+function fmtSrtTime(sec) {
+  if (!Number.isFinite(sec) || sec < 0) sec = 0
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = Math.floor(sec % 60)
+  const ms = Math.round((sec - Math.floor(sec)) * 1000)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`
+}
 
 export const runtime = 'nodejs'
 export const maxDuration = 240   // 4 normalize passes + 1 concat — bumped from 120
@@ -173,7 +199,32 @@ export async function POST(req) {
       }
     }
 
-    // --- Step 2: concat demuxer + audio mix ---
+    // --- Build SRT subtitles file (UTF-8) from the subtitles array ---
+    // subtitles: Array<{ text, start (sec), duration (sec) }>
+    const totalDuration = validClipPaths.length * 5   // 5s per clip — matches client's subtitle schedule
+    let srtPath = null
+    if (Array.isArray(subtitles) && subtitles.length) {
+      const srtLines = []
+      let idx = 1
+      for (const sub of subtitles) {
+        const text = (sub?.text || '').trim()
+        if (!text) continue
+        const start = Number(sub.start) || 0
+        const end = start + (Number(sub.duration) || 5)
+        srtLines.push(String(idx++))
+        srtLines.push(`${fmtSrtTime(start)} --> ${fmtSrtTime(end)}`)
+        srtLines.push(text)
+        srtLines.push('')
+      }
+      if (srtLines.length) {
+        srtPath = path.join(jobDir, 'subs.srt')
+        await writeFile(srtPath, srtLines.join('\n'), 'utf8')
+        console.log('[Export] SRT written to', srtPath)
+        console.log('[Export] SRT content:\n' + srtLines.join('\n'))
+      }
+    }
+
+    // --- Step 2: concat demuxer + optional subtitle burn-in + audio mix ---
     const listPath = path.join(jobDir, 'list.txt')
     const listContent = normalizedPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n') + '\n'
     await writeFile(listPath, listContent)
@@ -186,26 +237,54 @@ export async function POST(req) {
     if (voicePath) { finalArgs.push('-i', voicePath); voiceInputIdx = nextIdx++ }
     if (musicPath) { finalArgs.push('-i', musicPath); musicInputIdx = nextIdx }
 
-    // Audio mixing with filter_complex — video is copied straight from the concat demuxer
+    // Build filter_complex — video chain (with subtitles if available) + audio mix
+    const escapeForFilter = (p) => p.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'")
+    const videoChain = srtPath
+      // force_style uses ASS style codes — white text, black outline, bottom-center, bold
+      ? `[0:v]subtitles='${escapeForFilter(srtPath)}':force_style='FontName=DejaVu Sans,FontSize=22,Bold=1,PrimaryColour=&HFFFFFFFF,OutlineColour=&HFF000000,BackColour=&H00000000,Outline=3,Shadow=1,Alignment=2,MarginV=90'[outv]`
+      : null
+
+    let audioChain = null
     if (voicePath && musicPath) {
-      const f = `[${voiceInputIdx}:a]volume=1.0,aresample=44100[va];[${musicInputIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[ma];[va][ma]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[aout]`
-      finalArgs.push('-filter_complex', f, '-map', '0:v:0', '-map', '[aout]')
+      audioChain = `[${voiceInputIdx}:a]volume=1.0,apad=whole_dur=${totalDuration},aresample=44100[va];[${musicInputIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[ma];[va][ma]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[aout]`
     } else if (voicePath) {
-      finalArgs.push('-map', '0:v:0', '-map', `${voiceInputIdx}:a`)
+      audioChain = `[${voiceInputIdx}:a]apad=whole_dur=${totalDuration},aresample=44100[aout]`
     } else if (musicPath) {
-      finalArgs.push('-filter_complex', `[${musicInputIdx}:a]volume=0.4,aresample=44100[aout]`, '-map', '0:v:0', '-map', '[aout]')
+      audioChain = `[${musicInputIdx}:a]volume=0.4,aloop=loop=-1:size=2000000000,aresample=44100[aout]`
+    }
+
+    const filterParts = []
+    if (videoChain) filterParts.push(videoChain)
+    if (audioChain) filterParts.push(audioChain)
+    if (filterParts.length) finalArgs.push('-filter_complex', filterParts.join(';'))
+
+    // Mapping
+    if (videoChain) finalArgs.push('-map', '[outv]')
+    else finalArgs.push('-map', '0:v:0')
+    if (audioChain) finalArgs.push('-map', '[aout]')
+    else finalArgs.push('-an')
+
+    // Encoding — if we applied subtitles, must re-encode video; otherwise stream-copy is fine
+    if (videoChain) {
+      finalArgs.push(
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '23',
+        '-r', '24',
+        '-pix_fmt', 'yuv420p',
+      )
     } else {
-      finalArgs.push('-map', '0:v:0', '-an')
+      finalArgs.push('-c:v', 'copy')
     }
 
     finalArgs.push(
-      '-c:v', 'copy',                   // Step 1 already normalized — copy keeps it fast
       '-c:a', 'aac',
       '-b:a', '128k',
       '-ar', '44100',
       '-ac', '2',
       '-movflags', '+faststart',
-      '-shortest',
+      // Explicit duration cap — NO -shortest (which clipped to voice length = 15s instead of 20s)
+      '-t', String(totalDuration),
       outputPath
     )
 
@@ -213,7 +292,7 @@ export async function POST(req) {
 
     try {
       const { stdout, stderr } = await execFileAsync(ffmpegPath, finalArgs, {
-        timeout: 60000,
+        timeout: 90000,
         maxBuffer: 20 * 1024 * 1024
       })
       console.log('[Export] Concat stdout FULL:\n' + (stdout || '(empty)'))
@@ -222,7 +301,33 @@ export async function POST(req) {
       console.error('[Export] Concat FAILED. Exit code:', execErr.code)
       console.error('[Export] Concat stderr FULL:\n' + (execErr.stderr || '(no stderr)'))
       console.error('[Export] Concat stdout FULL:\n' + (execErr.stdout || '(no stdout)'))
-      throw new Error(`Concat failed (code ${execErr.code}): ${execErr.stderr?.slice(-400) || execErr.message}`)
+
+      // Fallback: if subtitles filter failed (libass missing), retry WITHOUT subtitles so user still gets a video
+      if (srtPath && /subtitles|libass|No such filter/i.test(String(execErr.stderr || ''))) {
+        console.warn('[Export] Subtitle burn-in failed — retrying without subtitles as fallback')
+        const fallbackArgs = finalArgs.filter((a, i) => {
+          // Drop the -filter_complex value (subtitle) but keep audio filter; simplest: rerun with no video filter
+          return true
+        })
+        // Rebuild from scratch without videoChain
+        const fb = ['-y', '-f', 'concat', '-safe', '0', '-i', listPath]
+        if (voicePath) fb.push('-i', voicePath)
+        if (musicPath) fb.push('-i', musicPath)
+        if (audioChain) fb.push('-filter_complex', audioChain, '-map', '0:v:0', '-map', '[aout]')
+        else fb.push('-map', '0:v:0', '-an')
+        fb.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+                '-movflags', '+faststart', '-t', String(totalDuration), outputPath)
+        console.log('[Export] Fallback args:', JSON.stringify(fb))
+        try {
+          const r = await execFileAsync(ffmpegPath, fb, { timeout: 90000, maxBuffer: 20 * 1024 * 1024 })
+          console.log('[Export] Fallback concat stderr FULL:\n' + (r.stderr || '(empty)'))
+        } catch (fbErr) {
+          console.error('[Export] Fallback ALSO failed:', fbErr.stderr || fbErr.message)
+          throw new Error(`Concat failed (code ${execErr.code}): ${execErr.stderr?.slice(-400) || execErr.message}`)
+        }
+      } else {
+        throw new Error(`Concat failed (code ${execErr.code}): ${execErr.stderr?.slice(-400) || execErr.message}`)
+      }
     }
 
     // 5. Read output and return as MP4
