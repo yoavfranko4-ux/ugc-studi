@@ -194,29 +194,28 @@ function buildSubtitleSegments(wordTimestamps, maxWordsPerSegment = 3) {
   return segments
 }
 
-// Get the 2 subtitle lines visible at a given time (uses word timestamps if available)
+// Get the subtitle line(s) visible at a given time. Matches export ASS behavior:
+// only renders when the current time falls inside an active word-timestamp segment.
+// Past the last word's end time, nothing is shown — same as the exported MP4.
 function getSubtitleLinesAtTime(text, timeInScene, sceneDuration, subtitleSegments, sceneStartTime) {
-  // If we have word-level segments, use exact timing
+  // Preferred path: word-level segments with explicit start/end (from ElevenLabs alignment)
   if (subtitleSegments?.length) {
     const globalTime = (sceneStartTime || 0) + timeInScene
-    const visible = []
-    for (let i = 0; i < subtitleSegments.length; i++) {
-      const seg = subtitleSegments[i]
-      if (globalTime >= seg.start && globalTime < seg.end + 0.1) {
-        visible.push(seg.text)
-        // Also show next segment if it exists (max 2 lines)
-        if (i + 1 < subtitleSegments.length) visible.push(subtitleSegments[i + 1].text)
-        break
+    for (const seg of subtitleSegments) {
+      if (globalTime >= seg.start && globalTime <= seg.end) {
+        // Single active segment only — matches the one-caption-at-a-time ASS behavior
+        return [seg.text]
       }
     }
-    if (visible.length > 0) return visible.slice(0, 2)
+    // No segment contains this time → no subtitle (silence / end of voiceover)
+    return []
   }
-  // Fallback: equal time distribution
+  // Fallback: no word-level data available — use equal time distribution across the scene
   const allLines = splitSubtitle(text, 3)
   if (allLines.length === 0) return []
   const timePerLine = sceneDuration / allLines.length
   const currentLineIdx = Math.min(Math.floor(timeInScene / timePerLine), allLines.length - 1)
-  return allLines.slice(currentLineIdx, currentLineIdx + 2)
+  return [allLines[currentLineIdx]]
 }
 
 // Full-size renderer — same ASS style as drawSubtitlePreview, kept in sync with the export.
