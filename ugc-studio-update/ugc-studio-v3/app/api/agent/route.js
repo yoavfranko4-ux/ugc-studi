@@ -102,22 +102,53 @@ async function generateScript(productName, productDesc, applicationArea, hook) {
 Description: ${productDesc}
 How to use: ${applicationArea}
 
-SCENE DURATIONS = [5, 5, 5, 5] = 20 seconds total. Scene 1: ~12 Hebrew words. Scene 2: ~12 Hebrew words. Scene 3: ~20 Hebrew words. Scene 4: ~12 Hebrew words. TOTAL = ~56 Hebrew words for ~20 seconds of voiceover.
+STEP 0 — PRODUCT CATEGORY ANALYSIS (do this silently before writing):
+Read the product name and description and classify the product into one of these categories:
+- Fashion/clothing (dresses, shirts, pants, shoes, bags)
+- Skincare/beauty (creams, serums, makeup, acne treatments)
+- Hair products (shampoo, treatments, styling tools)
+- Dental/teeth (whitening strips, toothpaste, oral care)
+- Jewelry/accessories (watches, bracelets, necklaces)
+- Food/restaurant/meal kits/supplements/vitamins
+- Tech/gadgets/apps/software
+- Fitness/sport/workout/weight loss
+- Sleep/pillow/mattress/bedding
+- Baby/kids products
+- Cleaning/household products
+- Home decor/furniture
+- Pet products
+- Car accessories
+- Other (analyze the description to find the closest match)
+
+Then identify the CORE PROBLEM this product solves — the universal pain point that a real person in the target audience feels before discovering this product. This pain must be RELATABLE and UNIVERSAL for anyone in that category, not specific to this brand.
+
+Examples of category-based pain hooks (adapt in natural Hebrew):
+- Fashion/clothing → "כל פעם שחיפשתי משהו לאירוע זה היה יקר מדי או לא התאים לי"
+- Skincare → "ניסיתי כל קרם בשוק ושום דבר לא עזר לי עם..."
+- Food/restaurant → "הייתי כל כך עייפה מלבשל כל יום ולא ידעתי מה לעשות"
+- Tech/gadget → "בזבזתי שעות כל יום על משהו שהיה אמור להיות פשוט"
+- Fitness → "ניסיתי כל שיטה ופשוט לא ראיתי תוצאות"
+- Sleep → "כל לילה הייתי מתהפכת במיטה שעות בלי להצליח להירדם"
+- Dental → "הייתי מביכה לחייך בתמונות בגלל השיניים שלי"
+- Hair → "שיער שלי היה נושר ונשבר וכלום לא עזר"
+- Cleaning → "בזבזתי שעות על ניקיון והבית עדיין נראה לא נקי"
+- Baby/kids → "ילדים שלי לא היו מפסיקים להתעצבן ולא ידעתי מה לעשות"
 
 CRITICAL RULES:
 
 1. UGC HOOK FORMULA — THIS IS THE MOST IMPORTANT RULE:
-- Scene 1 (Hook — כאב): Start with a RELATABLE PROBLEM or emotional pain point. NEVER start with the product name or brand name. The viewer must feel "זה בדיוק אני!" Examples: "הבעיה שלי עם שמלות ערב התחילה כש..." or "כל פעם שחיפשתי שמלה לאירוע..." — create curiosity or emotional connection.
+- Scene 1 (Hook — כאב): Start with a UNIVERSAL, RELATABLE PROBLEM for the product's category. NEVER mention the product name, brand name, or even the product type/category name directly. Sound like a real friend telling you about a struggle. The viewer must feel "זה בדיוק אני!"
 - Scene 2 (Agitate — החמרה): Make the problem WORSE, build tension. Describe failed attempts, frustration, embarrassment. Still NO product name yet.
 - Scene 3 (Solution reveal — פתרון): NOW introduce ${productName} naturally as THE solution. "עד שגיליתי את..." or "ואז מישהי המליצה לי על..." — describe the experience of using it.
 - Scene 4 (CTA — קריאה לפעולה): Call to action with urgency. Emotional push to try it now.
 
 ⚠️ ABSOLUTE RULES FOR SCENE 1:
 - NEVER start scene 1 with the product name "${productName}" or any brand name
-- NEVER mention the product in scene 1 at all
-- Scene 1 MUST start with a pain point, problem, or relatable frustration
-- Scene 1 must make the viewer feel understood — like talking to a friend about a real struggle
-- Think: "what problem does this product solve?" and START there
+- NEVER mention the product or brand in scene 1 AT ALL
+- Scene 1 MUST start with a UNIVERSAL pain point for the product's category — a feeling/problem anyone in that audience can relate to
+- Scene 1 must sound like a real person talking to a friend, not like an ad
+- Be EMOTIONAL and AUTHENTIC — use everyday spoken Hebrew
+- Think: "what frustration does the TARGET CUSTOMER feel every day?" and START there
 
 2. HEBREW STYLE — MANDATORY:
 - Write conversational Hebrew, like a real person talking to a friend — NOT formal, NOT salesy
@@ -174,7 +205,7 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "~12 Hebrew words — relatable PROBLEM or pain point, NEVER the product name",
+  "voiceover_scene1": "~12 Hebrew words — UNIVERSAL pain point for this product's category, NEVER the product name, NEVER the brand, sound like a friend venting about a struggle",
   "voiceover_scene2": "~12 Hebrew words — make the problem WORSE, build tension, failed attempts",
   "voiceover_scene3": "~20 Hebrew words — reveal ${productName} as the solution, describe the experience in detail",
   "voiceover_scene4": "~12 Hebrew words — emotional CTA with urgency, tell them to try it now",
@@ -358,19 +389,69 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
 
 function getHook(productName, productDesc) {
   const desc = ((productDesc || '') + ' ' + (productName || '')).toLowerCase();
-  if (desc.includes('שמלה') || desc.includes('בגד') || desc.includes('חולצה'))
-    return 'לא מוצאת בגד שמחמיא לדמות שלי ומרגישה לא בטוחה בבגדים';
-  if (desc.includes('שינ') || desc.includes('דנטל') || desc.includes('לבן'))
-    return 'שיניים צהובות שמביכות אותי בכל תמונה ולא יכולה לחייך';
-  if (desc.includes('קרם') || desc.includes('פנים') || desc.includes('אקנה') || desc.includes('עור'))
-    return 'כתמים ואקנה שמופיעים כל בוקר ולא יודעת מה לעשות';
-  if (desc.includes('שיער'))
-    return 'שיער שנושר ונשבר ולא יכולה לעשות איתו כלום';
-  if (desc.includes('שעון') || desc.includes('תכשיט'))
-    return 'האביזרים שלי לא מתאימים לסגנון שלי בכלל';
-  if (desc.includes('שינה') || desc.includes('לישון'))
-    return 'שוכבת בלילה שעות ולא יכולה להירדם בכלל';
-  return `הבעיה עם ${productName} הציקה לי כבר הרבה זמן`;
+
+  // Fashion / clothing
+  if (/שמלה|בגד|חולצה|מכנס|נעל|תיק|אופנה|dress|shirt|clothes|fashion|pants|shoes|bag/.test(desc))
+    return 'כל פעם שחיפשתי משהו לאירוע זה היה יקר מדי או לא התאים לי';
+
+  // Dental / teeth
+  if (/שינ|דנטל|לבן|משחת|teeth|dental|whiten/.test(desc))
+    return 'הייתי מביכה לחייך בתמונות בגלל השיניים שלי והרגשתי נורא';
+
+  // Skincare
+  if (/קרם|פנים|אקנה|עור|סרום|skincare|cream|serum|acne|face/.test(desc))
+    return 'ניסיתי כל קרם בשוק ושום דבר לא עזר לי עם העור שלי';
+
+  // Hair
+  if (/שיער|hair|שמפו/.test(desc))
+    return 'השיער שלי היה נושר ונשבר וכלום לא עזר לי באמת';
+
+  // Jewelry / accessories
+  if (/שעון|תכשיט|צמיד|שרשרת|watch|jewelry|bracelet|necklace/.test(desc))
+    return 'האביזרים שלי תמיד נראו זולים ולא הרגשתי בנוח איתם';
+
+  // Sleep
+  if (/שינה|לישון|כרית|מזרון|sleep|pillow|mattress/.test(desc))
+    return 'כל לילה הייתי מתהפכת במיטה שעות בלי להצליח להירדם';
+
+  // Food / restaurant / meal kit
+  if (/אוכל|מסעדה|ארוחה|מזון|תזונה|food|meal|restaurant|diet/.test(desc))
+    return 'הייתי כל כך עייפה מלבשל כל יום ולא ידעתי מה לעשות';
+
+  // Supplement / vitamin
+  if (/ויטמין|תוסף|חלבון|supplement|vitamin|protein/.test(desc))
+    return 'הרגשתי עייפה כל היום וכלום לא נתן לי באמת אנרגיה';
+
+  // Fitness / workout
+  if (/כושר|אימון|ספורט|הרזיה|דיאטה|fitness|workout|gym|weight|exercise/.test(desc))
+    return 'ניסיתי כל שיטה בעולם ופשוט לא ראיתי שום תוצאות';
+
+  // Tech / gadget / app
+  if (/אפליקציה|גאדג׳ט|טכנולוגיה|מכשיר|app|tech|gadget|device|software/.test(desc))
+    return 'בזבזתי שעות כל יום על משהו שהיה אמור להיות פשוט';
+
+  // Cleaning
+  if (/ניקוי|ניקיון|כביסה|cleaning|detergent|clean/.test(desc))
+    return 'בזבזתי שעות על ניקיון והבית עדיין נראה לא נקי';
+
+  // Baby / kids
+  if (/תינוק|ילד|baby|kid|child/.test(desc))
+    return 'הילדים שלי לא היו מפסיקים להתעצבן ולא ידעתי מה לעשות';
+
+  // Home / furniture / decor
+  if (/בית|ריהוט|עיצוב|home|furniture|decor/.test(desc))
+    return 'הבית שלי אף פעם לא הרגיש מסודר למרות שניסיתי הכל';
+
+  // Pet
+  if (/כלב|חתול|חיית|pet|dog|cat/.test(desc))
+    return 'החיה שלי הייתה אומללה וכל מה שניסיתי פשוט לא עבד';
+
+  // Car accessories
+  if (/רכב|אוטו|מכונית|car|vehicle/.test(desc))
+    return 'כל נסיעה הייתה מעצבנת אותי והרגשתי שאני מבזבזת זמן';
+
+  // Generic fallback — universal pain, no product name
+  return 'ניסיתי המון דברים כדי לפתור את זה ושום דבר פשוט לא עבד לי';
 }
 
 function getDefaultVoiceover(productName, applicationArea, hook) {
