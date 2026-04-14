@@ -51,7 +51,7 @@ async function generateScript(productName, productDesc, applicationArea, hook) {
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514', max_tokens: 2500,
-    messages: [{ role: 'user', content: `You are a UGC ad expert. Create a viral 4-scene ad for: "${productName}".
+    messages: [{ role: 'user', content: `You are a UGC ad expert writing scripts in Hebrew. Create a viral 4-scene ad for: "${productName}".
 Description: ${productDesc}
 How to use: ${applicationArea}
 
@@ -59,20 +59,38 @@ SCENE DURATIONS = [5, 5, 5, 5] = 20 seconds total. Scene 1: ~12 Hebrew words. Sc
 
 CRITICAL RULES:
 
-1. VOICEOVER TIMING — STRICT:
-- Scene 1: ~12 Hebrew words (fills 5s naturally — write MORE copy, longer sentences)
-- Scene 2: ~12 Hebrew words (fills 5s naturally — elaborate on the discovery)
-- Scene 3: ~20 Hebrew words (fills 5s naturally — describe the experience in detail)
-- Scene 4: ~12 Hebrew words (fills 5s naturally — strong CTA with urgency and emotion)
-- Write at NATURAL SPEAKING PACE — not too fast, not too slow. Each scene must feel complete.
-- voiceover MUST fill the full duration naturally — write LONGER, MORE DETAILED copy to fill each scene completely, do not leave silence gaps
-- AIM FOR ~20 SECONDS TOTAL of spoken Hebrew — write enough words so the voiceover covers the entire video
+1. UGC HOOK FORMULA — THIS IS THE MOST IMPORTANT RULE:
+- Scene 1 (Hook — כאב): Start with a RELATABLE PROBLEM or emotional pain point. NEVER start with the product name or brand name. The viewer must feel "זה בדיוק אני!" Examples: "הבעיה שלי עם שמלות ערב התחילה כש..." or "כל פעם שחיפשתי שמלה לאירוע..." — create curiosity or emotional connection.
+- Scene 2 (Agitate — החמרה): Make the problem WORSE, build tension. Describe failed attempts, frustration, embarrassment. Still NO product name yet.
+- Scene 3 (Solution reveal — פתרון): NOW introduce ${productName} naturally as THE solution. "עד שגיליתי את..." or "ואז מישהי המליצה לי על..." — describe the experience of using it.
+- Scene 4 (CTA — קריאה לפעולה): Call to action with urgency. Emotional push to try it now.
 
-2. HOOK (voiceover_scene1) — PRE-SET, DO NOT CHANGE:
+⚠️ ABSOLUTE RULES FOR SCENE 1:
+- NEVER start scene 1 with the product name "${productName}" or any brand name
+- NEVER mention the product in scene 1 at all
+- Scene 1 MUST start with a pain point, problem, or relatable frustration
+- Scene 1 must make the viewer feel understood — like talking to a friend about a real struggle
+- Think: "what problem does this product solve?" and START there
+
+2. HEBREW STYLE — MANDATORY:
+- Write conversational Hebrew, like a real person talking to a friend — NOT formal, NOT salesy
+- Max 4-5 words per subtitle segment (for on-screen text readability)
+- Use everyday spoken Hebrew, not written/literary Hebrew
+
+3. VOICEOVER TIMING — STRICT:
+- Scene 1: ~12 Hebrew words (fills 5s naturally — elaborate on the pain)
+- Scene 2: ~12 Hebrew words (fills 5s naturally — make the problem worse)
+- Scene 3: ~20 Hebrew words (fills 5s naturally — reveal the solution, describe the experience)
+- Scene 4: ~12 Hebrew words (fills 5s naturally — strong CTA with urgency and emotion)
+- Write at NATURAL SPEAKING PACE — each scene must feel complete.
+- voiceover MUST fill the full duration naturally — no silence gaps
+- AIM FOR ~20 SECONDS TOTAL of spoken Hebrew
+
+4. HOOK (voiceover_scene1) — PRE-SET, DO NOT CHANGE:
 voiceover_scene1 is already set to: "${hook}"
 You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 
-3. SETTING — HARD RULES, no exceptions:
+5. SETTING — HARD RULES, no exceptions:
 - Clothing/dress/fashion → ALWAYS: "bedroom with full-length mirror and open closet/wardrobe in background"
 - Watch/bracelet/jewelry → ALWAYS: "dressing table with mirror, jewellery and accessories visible"
 - Teeth/dental/strips/whitening → ALWAYS: "bathroom, standing close to mirror, sink visible"
@@ -90,13 +108,13 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 
 6. EVERY nb_prompt MUST end with: "correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle"
 
-4. SCENE STRUCTURE:
-- Scene 1 (כאב): Avatar ALONE showing the specific problem — NO product visible yet
-- Scene 2 (מוצר): Close-up beauty shot of the PRODUCT — no avatar, or hand only. Product is the hero.
-- Scene 3 (שימוש): Avatar actively USING the product — product ON the avatar not just held
-- Scene 4 (תוצאה): Avatar genuinely happy with the RESULT — product naturally visible
+7. SCENE STRUCTURE (follows the hook formula):
+- Scene 1 (כאב — Hook): Avatar ALONE showing the specific problem — NO product visible, NO product mentioned
+- Scene 2 (החמרה — Agitate): Avatar showing frustration getting WORSE — failed attempts, embarrassment. Still no product.
+- Scene 3 (פתרון — Solution): Avatar actively USING the product — product ON the avatar not just held. This is the reveal!
+- Scene 4 (תוצאה — CTA): Avatar genuinely happy with the RESULT — product naturally visible, emotional CTA
 
-5. SCENE 3 (שימוש) — product must be ON the avatar:
+8. SCENE 3 (פתרון) — product must be ON the avatar:
 - Clothing/dress → "avatar WEARING the [exact item], item ON body, admiring the fit"
 - Watch/jewelry → "avatar WEARING the watch/jewelry on wrist/neck, holding arm up to admire"
 - Teeth/dental → "avatar applying the strip/gel directly ON teeth, dental product ON teeth visible"
@@ -104,14 +122,14 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 - Hair → "avatar applying product directly INTO hair, running fingers through hair"
 - Supplement → "avatar at kitchen table actually taking/drinking/eating the supplement"
 
-5. END every Kling prompt with exactly this phrase (no more, no less):
+9. END every Kling prompt with exactly this phrase (no more, no less):
 "silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference"
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "~12 Hebrew words — SPECIFIC visible problem, elaborate on the pain",
-  "voiceover_scene2": "~12 Hebrew words — discovery of ${productName}, why it caught attention",
-  "voiceover_scene3": "~20 Hebrew words — using product ON/IN person, describe the feeling and experience in detail",
+  "voiceover_scene1": "~12 Hebrew words — relatable PROBLEM or pain point, NEVER the product name",
+  "voiceover_scene2": "~12 Hebrew words — make the problem WORSE, build tension, failed attempts",
+  "voiceover_scene3": "~20 Hebrew words — reveal ${productName} as the solution, describe the experience in detail",
   "voiceover_scene4": "~12 Hebrew words — emotional CTA with urgency, tell them to try it now",
   "setting": "one-line description of the setting",
   "scenes": [
@@ -122,15 +140,15 @@ Return ONLY valid JSON (no markdown):
       "subtitle": "same as voiceover_scene1"
     },
     {
-      "type": "מוצר",
-      "nb_prompt": "close-up beauty shot of ${productName}, beautiful natural lighting, product is the hero of the shot, clean background, preserve exact product appearance from reference — exact colors exact shape",
-      "kling_prompt": "Cinematic close-up of ${productName} rotating slowly or being revealed, beautiful lighting, clean background, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
+      "type": "החמרה",
+      "nb_prompt": "avatar looking more frustrated, showing failed attempt to solve the problem, disappointed expression, no product visible, correct human anatomy, exactly two arms, no extra limbs, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar in [setting] showing deeper frustration, failed attempt visible, disappointed body language, no product visible, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps",
       "subtitle": "same as voiceover_scene2"
     },
     {
-      "type": "שימוש",
-      "nb_prompt": "avatar actively using ${productName} — wearing/applying/consuming based on product type, product ON the avatar not just held, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar actively using ${productName} on themselves — product ON the avatar, hands clearly visible doing the action, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
+      "type": "פתרון",
+      "nb_prompt": "avatar actively using ${productName} — wearing/applying/consuming based on product type, product ON the avatar not just held, excited expression of discovery, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar excitedly using ${productName} on themselves for the first time — product ON the avatar, hands clearly visible doing the action, expression of pleasant surprise, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene3"
     },
     {
@@ -308,7 +326,7 @@ function getHook(productName, productDesc) {
 
 function getDefaultVoiceover(productName, applicationArea, hook) {
   const h = hook || getHook(productName, '');
-  return `${h}. גיליתי את ${productName} ולא האמנתי שיעזור לי. התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
+  return `${h}. ניסיתי הכל ושום דבר לא עזר לי באמת. עד שגיליתי את ${productName} ואז הכל השתנה, ${applicationArea} והתוצאות מטורפות. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
 }
 
 const STABLE = 'silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference';
@@ -323,16 +341,16 @@ function getDefaultScenes(productName, applicationArea, productDesc) {
       subtitle: hook
     },
     {
-      type: 'מוצר',
-      nb_prompt: `close-up beauty shot of ${productName}, beautiful natural lighting, product is the hero of the shot, clean background, preserve exact product appearance from reference — exact colors exact shape`,
-      kling_prompt: `Cinematic close-up of ${productName} rotating slowly or being revealed, beautiful lighting, clean background, ${STABLE}`,
-      subtitle: `גיליתי את ${productName} ולא האמנתי שיעזור לי.`
+      type: 'החמרה',
+      nb_prompt: `avatar looking more frustrated, showing failed attempt to solve problem related to ${productDesc}, disappointed expression, no product visible, correct human anatomy, exactly two arms, no extra limbs, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar showing deeper frustration with ${productDesc} problem, failed attempt visible, disappointed body language, no product visible, ${STABLE}`,
+      subtitle: `ניסיתי הכל ושום דבר לא עזר לי באמת.`
     },
     {
-      type: 'שימוש',
-      nb_prompt: `avatar actively using ${productName} — wearing/applying/consuming based on product type, product ON the avatar not just held, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar actively using ${productName} on themselves during ${applicationArea}, product ON the avatar, hands clearly visible, no talking, ${STABLE}`,
-      subtitle: `התחלתי להשתמש, ${applicationArea}, והתוצאות הפתיעו אותי לגמרי ממש שינוי אמיתי.`
+      type: 'פתרון',
+      nb_prompt: `avatar actively using ${productName} — wearing/applying/consuming based on product type, product ON the avatar not just held, excited expression, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar excitedly using ${productName} on themselves during ${applicationArea}, product ON the avatar, hands clearly visible, expression of pleasant surprise, ${STABLE}`,
+      subtitle: `עד שגיליתי את ${productName} ואז הכל השתנה, ${applicationArea} והתוצאות מטורפות.`
     },
     {
       type: 'תוצאה',
