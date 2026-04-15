@@ -153,13 +153,23 @@ export async function POST(req) {
     const clipPaths = []
     if (hasB64Clips) {
       console.log('[Export] Writing', videoClipsB64.length, 'base64 clips...')
+      // Log base64 payload lengths BEFORE decoding so we can tell whether the
+      // client sent bad data (short/empty string) vs. valid base64 that
+      // decodes to a corrupt MP4.
+      videoClipsB64.forEach((b64, i) => {
+        const len = b64?.length ?? 0
+        console.log(`[Export] videoClipsB64[${i}] base64 length: ${len} chars` + (len === 0 ? ' (EMPTY)' : ''))
+      })
       for (let i = 0; i < videoClipsB64.length; i++) {
-        if (!videoClipsB64[i]) continue
+        if (!videoClipsB64[i]) {
+          console.warn(`[Export] videoClipsB64[${i}] is empty — will be filled with black placeholder in Step 1`)
+          continue
+        }
         const clipPath = path.join(jobDir, `clip${i}.mp4`)
         const buf = Buffer.from(videoClipsB64[i], 'base64')
         await writeFile(clipPath, buf)
         clipPaths[i] = clipPath
-        console.log(`[Export] Clip ${i}: ${(buf.length / 1024 / 1024).toFixed(1)}MB`)
+        console.log(`[Export] Clip ${i} on disk: ${buf.length} bytes (${(buf.length / 1024 / 1024).toFixed(2)}MB)`)
       }
     } else {
       console.log('[Export] Downloading', videoUrls.length, 'clips from URLs...')
@@ -173,8 +183,13 @@ export async function POST(req) {
         console.log(`[Export] Clip ${i}: ${(buf.length / 1024 / 1024).toFixed(1)}MB`)
       }))
     }
-    const validClipPaths = clipPaths.filter(Boolean)
-    if (validClipPaths.length === 0) throw new Error('No clips written successfully')
+    // Keep positional slots — an empty/missing slot gets a black placeholder
+    // in Step 1 instead of being silently dropped. This way clip indices stay
+    // aligned with subtitles/wordTimestamps that key off scene position.
+    const expectedCount = hasB64Clips ? videoClipsB64.length : videoUrls.length
+    const validClipPaths = []
+    for (let i = 0; i < expectedCount; i++) validClipPaths[i] = clipPaths[i] || null
+    if (!validClipPaths.some(Boolean)) throw new Error('No clips written successfully')
 
     // 2. Write voiceover audio if provided
     //    Preferred path: client sends audioFormat='wav' (raw PCM) — FFmpeg reads it flawlessly.
@@ -282,21 +297,34 @@ export async function POST(req) {
     const normalizedPaths = []
     const totalDuration = validClipPaths.length * 5
 
+    const MIN_CLIP_BYTES = 50 * 1024 // 50KB — anything smaller is almost certainly a corrupt MP4
     for (let i = 0; i < validClipPaths.length; i++) {
       let inPath = validClipPaths[i]
       const normPath = path.join(jobDir, `norm_${i}.mp4`)
 
-      // Log incoming clip size and replace empty/corrupt clips with a black
-      // placeholder video so FFmpeg doesn't crash with "speed=0x" / no frames.
+      // Log incoming clip size and replace missing/empty/corrupt clips with a
+      // 5-second black placeholder so FFmpeg doesn't crash on "speed=N/A, 0KiB".
       let inSize = 0
-      try { inSize = fs.statSync(inPath).size } catch { inSize = 0 }
-      console.log(`[Export] Step 1: clip ${i} input size: ${inSize} bytes (${(inSize / 1024).toFixed(1)}KB)`)
-      if (inSize < 10 * 1024) {
-        console.warn(`[Export] Clip ${i} is empty or too small (<10KB) — replacing with 5-second black video`)
+      if (inPath) {
+        try { inSize = fs.statSync(inPath).size } catch { inSize = 0 }
+        console.log(`[Export] Step 1: clip ${i} input size: ${inSize} bytes (${(inSize / 1024).toFixed(1)}KB)`)
+      } else {
+        console.warn(`[Export] Step 1: clip ${i} slot is missing (never written)`)
+      }
+
+      const needsPlaceholder = !inPath || inSize < MIN_CLIP_BYTES
+      if (needsPlaceholder) {
+        const reason = !inPath
+          ? 'missing slot'
+          : inSize === 0
+            ? 'zero bytes on disk'
+            : `only ${(inSize / 1024).toFixed(1)}KB (<50KB threshold)`
+        console.warn(`[Export] Clip ${i} ${reason} — substituting 5-second black placeholder`)
         const blackPath = path.join(jobDir, `black_${i}.mp4`)
         const blackArgs = [
           '-y',
-          '-f', 'lavfi', '-i', 'color=c=black:s=720x1280:r=24:d=5',
+          '-f', 'lavfi', '-i', 'color=c=black:s=720x1280:r=24',
+          '-t', '5',
           '-c:v', 'libx264',
           '-preset', 'fast',
           '-crf', '23',
@@ -309,10 +337,10 @@ export async function POST(req) {
           await execFileAsync(ffmpegPath, blackArgs, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 })
           inPath = blackPath
           const blackSize = fs.statSync(blackPath).size
-          console.log(`[Export] Black placeholder for clip ${i} written: ${blackSize} bytes`)
+          console.log(`[Export] Black placeholder for clip ${i} written: ${blackSize} bytes → ${blackPath}`)
         } catch (blackErr) {
           console.error(`[Export] Failed to build black placeholder for clip ${i}:`, blackErr.stderr?.slice(-400) || blackErr.message)
-          throw new Error(`Clip ${i} is empty and black placeholder generation failed`)
+          throw new Error(`Clip ${i} is invalid and black placeholder generation failed`)
         }
       }
 
