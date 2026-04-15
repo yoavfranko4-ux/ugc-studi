@@ -104,18 +104,26 @@ For EACH scene, write:
 2. Kling prompt (35 words max): MOTION ONLY — how the person moves/feels. Scenes 3-4 start with "Continuing from previous scene same person". Scene 2 describes food/product motion (steam rising, sauce dripping, etc.). End with "then settles".
 3. Hebrew subtitle (max 12 words): What appears on screen for this scene
 
-Hebrew voiceover: ONE monologue exactly 20 seconds long, mentions ${pName} by name, casual Israeli friend, craving→discovery→experience→recommendation, ONLY Hebrew.
+Hebrew voiceover: ONE monologue exactly 20 seconds long, mentions ${pName} by name, casual Israeli friend, craving→FAILED ATTEMPTS→discovery→experience→recommendation, ONLY Hebrew.
+
+SCRIPT FLOW RULES (CRITICAL — the monologue MUST follow this arc):
+- Scene 1 (craving): describe the frustration, end with a CLIFFHANGER or unsolved problem. Examples: "ונגמר הערב בפלאפל...", "וכל פעם יצאתי מאוכזבת...", "וכל מקום שניסיתי היה אותו דבר...". NEVER say ${pName} in scene 1. NEVER end scene 1 with the business name.
+- Scene 2 (discovery): MUST start with a discovery transition phrase — one of: "ואז גיליתי את...", "עד שחבר המליץ לי על...", "פעם אחת ניסיתי את...", "ואז מישהו סיפר לי על...". THEN mention ${pName}. Never jump straight to the name without a transition.
+- Scene 3 (experience): describe the actual experience — what made it amazing, specific details.
+- Scene 4 (CTA): direct recommendation, "אתם חייבים לנסות".
+- The flow MUST feel like: Problem → Failed attempts → Discovery → Love it → CTA. Natural storytelling, not a jump-cut.
+
 VOICEOVER WORD COUNT (CRITICAL): Scene 1: ~8 words, Scene 2: ~8 words, Scene 3: ~16 words, Scene 4: ~8 words = total ~40 words = 20 seconds.
 
 Return ONLY JSON:
 {
   "scenes": [
-    { "id": 1, "label": "😩 צורך", "nb_prompt": "same person from reference photo ...", "kling_prompt": "...", "subtitle": "..." },
-    { "id": 2, "label": "🍽️ הירו שוט", "nb_prompt": "...", "kling_prompt": "...", "subtitle": "..." },
-    { "id": 3, "label": "😍 חוויה", "nb_prompt": "same person from reference photo ...", "kling_prompt": "Continuing from previous scene same person ...", "subtitle": "..." },
-    { "id": 4, "label": "🚀 המלצה", "nb_prompt": "same person from reference photo ...", "kling_prompt": "Continuing from previous scene same person ...", "subtitle": "..." }
+    { "id": 1, "label": "😩 צורך", "nb_prompt": "same person from reference photo ...", "kling_prompt": "...", "subtitle": "...", "voiceover": "scene 1 chunk of the monologue" },
+    { "id": 2, "label": "🍽️ הירו שוט", "nb_prompt": "...", "kling_prompt": "...", "subtitle": "...", "voiceover": "scene 2 chunk starting with discovery phrase then ${pName}" },
+    { "id": 3, "label": "😍 חוויה", "nb_prompt": "same person from reference photo ...", "kling_prompt": "Continuing from previous scene same person ...", "subtitle": "...", "voiceover": "scene 3 chunk" },
+    { "id": 4, "label": "🚀 המלצה", "nb_prompt": "same person from reference photo ...", "kling_prompt": "Continuing from previous scene same person ...", "subtitle": "...", "voiceover": "scene 4 chunk" }
   ],
-  "hebrew_voice": "..."
+  "hebrew_voice": "concatenation of the 4 scene voiceover chunks exactly, no extra words"
 }`
             : `You are a UGC ad director and AI video prompt engineer.
 Create a CONNECTED 4-scene TikTok story for: ${pName} - ${product}. Usage: ${pUse}
@@ -156,18 +164,26 @@ For EACH scene, write:
 2. Kling prompt (35 words max): MOTION ONLY - how the person moves/feels. Scenes 2-4 start with "Continuing from previous scene same person". End with "then settles".
 3. Hebrew subtitle (max 12 words): What appears on screen for this scene
 
-Hebrew voiceover: ONE monologue exactly 20 seconds long, mentions ${pName} by name, casual Israeli friend, pain→discovery→result→CTA, ONLY Hebrew.
+Hebrew voiceover: ONE monologue exactly 20 seconds long, mentions ${pName} by name, casual Israeli friend, pain→FAILED ATTEMPTS→discovery→result→CTA, ONLY Hebrew.
+
+SCRIPT FLOW RULES (CRITICAL — the monologue MUST follow this arc):
+- Scene 1 (pain): describe the specific problem AND mention you already tried other things that failed. End with a CLIFFHANGER or unsolved problem. Examples: "...וכלום לא עזר", "...וכבר איבדתי תקווה", "...אבל כל בוקר אותו סיפור". NEVER say ${pName} in scene 1. NEVER end scene 1 with the product name.
+- Scene 2 (discovery): MUST start with a discovery transition phrase — one of: "ואז גיליתי את...", "עד שחבר המליץ לי על...", "פעם אחת ניסיתי את...", "ואז מישהו סיפר לי על...". THEN mention ${pName}. Never jump straight to the product name without a transition.
+- Scene 3 (result): describe actively using the product and the result — specific, believable.
+- Scene 4 (CTA): direct recommendation, "אתם חייבים לנסות".
+- The flow MUST feel like: Problem → Failed attempts → Discovery → Love it → CTA. Natural storytelling, not a jump-cut.
+
 VOICEOVER WORD COUNT (CRITICAL): Scene 1: ~8 words, Scene 2: ~8 words, Scene 3: ~16 words, Scene 4: ~8 words = total ~40 words = 20 seconds. voiceover MUST fill the full duration — write enough words to fill each scene completely, do not leave silence.
 
 Return ONLY JSON:
 {
   "scenes": [
-    { "id": 1, "label": "😟 כאב", "nb_prompt": "...", "kling_prompt": "...", "subtitle": "..." },
-    { "id": 2, "label": "💡 גילוי", "nb_prompt": "same person from reference photo ...", "kling_prompt": "Continuing from previous scene same person ...", "subtitle": "..." },
-    { "id": 3, "label": "✨ שימוש", "nb_prompt": "same person from reference photo ...", "kling_prompt": "Continuing from previous scene same person ...", "subtitle": "..." },
-    { "id": 4, "label": "🚀 CTA", "nb_prompt": "same person from reference photo ...", "kling_prompt": "Continuing from previous scene same person ...", "subtitle": "..." }
+    { "id": 1, "label": "😟 כאב", "nb_prompt": "...", "kling_prompt": "...", "subtitle": "...", "voiceover": "scene 1 chunk of the monologue (no product name, ends with cliffhanger)" },
+    { "id": 2, "label": "💡 גילוי", "nb_prompt": "same person from reference photo ...", "kling_prompt": "Continuing from previous scene same person ...", "subtitle": "...", "voiceover": "scene 2 chunk starting with discovery phrase then ${pName}" },
+    { "id": 3, "label": "✨ שימוש", "nb_prompt": "same person from reference photo ...", "kling_prompt": "Continuing from previous scene same person ...", "subtitle": "...", "voiceover": "scene 3 chunk" },
+    { "id": 4, "label": "🚀 CTA", "nb_prompt": "same person from reference photo ...", "kling_prompt": "Continuing from previous scene same person ...", "subtitle": "...", "voiceover": "scene 4 chunk" }
   ],
-  "hebrew_voice": "..."
+  "hebrew_voice": "concatenation of the 4 scene voiceover chunks exactly, no extra words"
 }`
       const message = await anthropic.messages.create({
         model: 'claude-sonnet-4-20250514',
@@ -196,28 +212,32 @@ Return ONLY JSON:
             id: 1, label: '😩 צורך',
             nb_prompt: `same person from reference photo, young woman mid-20s walking on busy street looking at phone disappointed, casual outfit jeans and t-shirt, crowded sidewalk with shops in background, searching expression frustrated, iPhone handheld street style, natural daylight, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Person walks slowly looking at phone sighs with disappointment looks around searching, handheld camera slight shake natural street sounds then settles`,
-            subtitle: `כבר חודשים שאני מחפשת מקום טוב`
+            subtitle: `כבר חודשים שאני מחפשת מקום טוב`,
+            voiceover: `אני כבר חודשים מחפשת מקום טוב באמת. ניסיתי המון ותמיד התאכזבתי`
           },
           {
             id: 2, label: '🍽️ הירו שוט',
             nb_prompt: `beautiful close-up hero shot of the food or service offering from ${pName}, steam rising, vibrant colors, professional food photography style, warm golden lighting, shallow depth of field, appetizing details visible, TikTok food creator style, ${noText}, ${format}`,
             kling_prompt: `Steam rising slowly from food, gentle camera push-in revealing details, warm light catching textures, slight movement of fresh ingredients then settles`,
-            subtitle: `${pName} — פשוט ברמה אחרת`
+            subtitle: `${pName} — פשוט ברמה אחרת`,
+            voiceover: `עד שחברה המליצה לי על ${pName} ואמרתי יאללה ננסה`
           },
           {
             id: 3, label: '😍 חוויה',
             nb_prompt: `same person from reference photo, sitting at table experiencing ${pName} for the first time, eyes wide genuine amazement, mid-bite or mid-experience candid moment, warm interior lighting, cozy restaurant atmosphere in background, authentic happiness, iPhone handheld, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Continuing from previous scene same person takes first bite or experiences service, eyes light up with genuine surprise, nods approvingly with amazed expression then settles`,
-            subtitle: `אוקיי וואו זה טעים ברמות`
+            subtitle: `אוקיי וואו זה טעים ברמות`,
+            voiceover: `אני אגיד לכם — מהרגע הראשון הבנתי שזה ברמה אחרת לגמרי. ${pUse}. אין מילים`
           },
           {
             id: 4, label: '🚀 המלצה',
             nb_prompt: `same person from reference photo, standing outside ${pName} pointing at the place behind, talking directly to camera with excited genuine recommendation smile, golden hour warm lighting, iPhone selfie style, enthusiastic energy, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Continuing from previous scene same person points enthusiastically at place behind, looks at camera with big excited smile, gestures with hands recommending then settles`,
-            subtitle: `אתם חייבים לנסות את ${pName}!`
+            subtitle: `אתם חייבים לנסות את ${pName}!`,
+            voiceover: `אתם חייבים לנסות את ${pName}, תגיעו ותגידו לי אחר כך`
           }
         ],
-        hebrew_voice: `אני כבר חודשים מחפשת מקום טוב באמת. ניסיתי המון ותמיד התאכזבתי. אז חברה המליצה לי על ${pName} ואמרתי יאללה ננסה. אני אגיד לכם — מהביס הראשון הבנתי שזה ברמה אחרת לגמרי. ${pUse}. אין מילים. אתם חייבים לנסות את ${pName}, תגיעו ותגידו לי אחר כך.`
+        hebrew_voice: `אני כבר חודשים מחפשת מקום טוב באמת. ניסיתי המון ותמיד התאכזבתי. עד שחברה המליצה לי על ${pName} ואמרתי יאללה ננסה. אני אגיד לכם — מהרגע הראשון הבנתי שזה ברמה אחרת לגמרי. ${pUse}. אין מילים. אתם חייבים לנסות את ${pName}, תגיעו ותגידו לי אחר כך.`
       }
     } else {
       story = {
@@ -226,28 +246,43 @@ Return ONLY JSON:
             id: 1, label: '😟 כאב',
             nb_prompt: `frustrated young woman mid-20s with messy bun hair in oversized t-shirt, standing in front of bathroom mirror, stressed expression hand on forehead, white tile bathroom with morning natural daylight from window, iPhone handheld selfie style, slightly imperfect framing, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Person sighs looks at mirror frustrated shakes head overwhelmed, slight camera shake handheld iPhone natural light then settles`,
-            subtitle: `כל כך נמאס לי מהבעיה הזאת`
+            subtitle: `כל כך נמאס לי מהבעיה הזאת`,
+            voiceover: `אתם לא מאמינים כמה זמן בזבזתי על הבעיה הזאת. ניסיתי הכל ושום דבר לא עבד`
           },
           {
             id: 2, label: '💡 גילוי',
             nb_prompt: `same person from reference photo, holding ${pName} box up toward camera with both hands label facing forward, direct eye contact, authentic excited curious expression, ring light from front, shot on iPhone slightly imperfect handheld, bathroom counter with products in background, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Continuing from previous scene same person picks up ${pName} reads label eyes widen with curiosity holds it toward camera then settles`,
-            subtitle: `מצאתי את ${pName} ולא האמנתי`
+            subtitle: `מצאתי את ${pName} ולא האמנתי`,
+            voiceover: `עד שמישהו המליץ לי על ${pName} ולא הכרתי אותו בכלל`
           },
           {
             id: 3, label: '✨ שימוש',
             nb_prompt: `same person from reference photo, actively using ${pName} mid-action ${pUse}, candid authentic moment, genuine amazed expression looking at mirror, natural bathroom setting with warm lighting, close-up showing application detail, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Continuing from previous scene same person ${pUse} carefully shows process to camera touches treated area with surprised satisfied reaction then settles`,
-            subtitle: `שבוע אחד ולא האמנתי לתוצאות`
+            subtitle: `שבוע אחד ולא האמנתי לתוצאות`,
+            voiceover: `התחלתי להשתמש, ${pUse}, ופשוט לא האמנתי לתוצאות. שבוע אחד ואני לגמרי מרוצה`
           },
           {
             id: 4, label: '🚀 CTA',
             nb_prompt: `same person from reference photo, genuine happy smile showing result, holding ${pName} up confidently, pointing at camera with other hand, warm bathroom lighting, eye contact with camera, excited grateful energy, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Continuing from previous scene same person holds ${pName} up points directly at camera with big excited smile thumbs up enthusiastic energy then settles`,
-            subtitle: `תנסו את ${pName} — יש אחריות מלאה!`
+            subtitle: `תנסו את ${pName} — יש אחריות מלאה!`,
+            voiceover: `אין לכם מה להפסיד, פשוט תנסו את ${pName}`
           }
         ],
-        hebrew_voice: `אתם לא מאמינים כמה זמן בזבזתי על הבעיה הזאת. ניסיתי הכל ושום דבר לא עבד. עד שמישהו המליץ לי על ${pName} ולא הכרתי אותו בכלל. התחלתי להשתמש, ${pUse}, ופשוט לא האמנתי לתוצאות. שבוע אחד ואני לגמרי מרוצה. ואם אתם מסתפקים, תדעו שיש גם אחריות מלאה. אין לכם מה להפסיד. פשוט תנסו את ${pName}.`
+        hebrew_voice: `אתם לא מאמינים כמה זמן בזבזתי על הבעיה הזאת. ניסיתי הכל ושום דבר לא עבד. עד שמישהו המליץ לי על ${pName} ולא הכרתי אותו בכלל. התחלתי להשתמש, ${pUse}, ופשוט לא האמנתי לתוצאות. שבוע אחד ואני לגמרי מרוצה. אין לכם מה להפסיד, פשוט תנסו את ${pName}.`
+      }
+    }
+  }
+
+  // Ensure every scene has a voiceover chunk (fall back to subtitle).
+  // This keeps the per-scene re-record editor working even if Claude
+  // returned the old schema without the voiceover field.
+  if (story?.scenes) {
+    for (const sc of story.scenes) {
+      if (!sc.voiceover || typeof sc.voiceover !== 'string') {
+        sc.voiceover = sc.subtitle || ''
       }
     }
   }

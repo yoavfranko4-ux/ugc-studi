@@ -225,6 +225,11 @@ export default function Home() {
   const [bgMusic, setBgMusic] = useState('none')
   const [transition, setTransition] = useState('cut')
   const [musicPlaying, setMusicPlaying] = useState(false)
+  // Per-scene voiceover editing + one-shot re-record
+  const [editingSceneIdx, setEditingSceneIdx] = useState(null)
+  const [editBuffer, setEditBuffer] = useState('')
+  const [hasRerecorded, setHasRerecorded] = useState(false)
+  const [rerecording, setRerecording] = useState(false)
   const videoRef = useRef(null)
   const audioRef = useRef(null)
   const canvasRef = useRef(null)
@@ -293,7 +298,7 @@ export default function Home() {
     const currentCheck = customAvatar || selectedAvatar?.url
     if (!currentCheck) return alert('בחר דמות')
     if (!productName || !productDesc) return alert('הכנס שם ותיאור מוצר')
-    setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' }); addLog('Agent מתחיל לעבוד...')
+    setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' }); setHasRerecorded(false); setEditingSceneIdx(null); setEditBuffer(''); addLog('Agent מתחיל לעבוד...')
     try {
       const currentAvatarUrl = customAvatar || selectedAvatar?.url
       addLog('Avatar: ' + (currentAvatarUrl ? currentAvatarUrl.slice(0,40) : 'NONE'), currentAvatarUrl ? '' : 'err')
@@ -350,6 +355,87 @@ export default function Home() {
         addLog('לא נוצרו סרטונים — נשאר בדף הלוגים', 'err')
       }
     } catch (e) { addLog(e.message, 'err'); alert('שגיאה: ' + e.message); setStep('form') }
+  }
+
+  // If the agent response didn't include per-scene voiceover chunks,
+  // split the full monologue into 4 parts by sentence so the editor has
+  // something to show. Runs whenever `result` changes.
+  useEffect(() => {
+    if (!result?.story?.scenes) return
+    const scenes = result.story.scenes
+    const anyMissing = scenes.some(s => !s.voiceover)
+    if (!anyMissing) return
+    const full = (result.hebrewVoice || result.story.hebrew_voice || '').trim()
+    // Split on sentence terminators, keep non-empty pieces.
+    const pieces = full.split(/(?<=[.!?])\s+/).filter(Boolean)
+    const chunks = ['', '', '', '']
+    if (pieces.length >= 4) {
+      // Distribute pieces across 4 scenes, last scene gets the remainder.
+      const per = Math.floor(pieces.length / 4)
+      for (let i = 0; i < 4; i++) {
+        const start = i * per
+        const end = i === 3 ? pieces.length : start + per
+        chunks[i] = pieces.slice(start, end).join(' ').trim()
+      }
+    } else {
+      // Fallback: put whole text in scene 1, others get subtitle
+      chunks[0] = full
+    }
+    const patched = scenes.map((s, i) => ({
+      ...s,
+      voiceover: s.voiceover || chunks[i] || s.subtitle || ''
+    }))
+    setResult(r => r ? { ...r, story: { ...r.story, scenes: patched } } : r)
+  }, [result?.story?.scenes?.length, result?.hebrewVoice])
+
+  const openSceneEdit = (idx) => {
+    const current = result?.story?.scenes?.[idx]?.voiceover || ''
+    setEditingSceneIdx(idx)
+    setEditBuffer(current)
+  }
+  const saveSceneEdit = () => {
+    if (editingSceneIdx == null) return
+    setResult(r => {
+      if (!r?.story?.scenes) return r
+      const scenes = r.story.scenes.map((s, i) =>
+        i === editingSceneIdx ? { ...s, voiceover: editBuffer, subtitle: editBuffer } : s
+      )
+      return { ...r, story: { ...r.story, scenes } }
+    })
+    setEditingSceneIdx(null); setEditBuffer('')
+  }
+  const cancelSceneEdit = () => { setEditingSceneIdx(null); setEditBuffer('') }
+
+  const rerecordVoiceover = async () => {
+    if (hasRerecorded || rerecording) return
+    const scenes = result?.story?.scenes
+    if (!scenes?.length) return
+    const text = scenes.map(s => (s.voiceover || '').trim()).filter(Boolean).join(' ')
+    if (!text) { alert('אין טקסט קריינות לערוך'); return }
+    setRerecording(true)
+    addLog('מקליט קריינות מחדש...')
+    try {
+      const vRes = await fetch('/api/voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      })
+      if (!vRes.ok) throw new Error('Voice API failed')
+      const blob = await vRes.blob()
+      if (audioRef.current) {
+        if (audioRef.current.src?.startsWith('blob:')) URL.revokeObjectURL(audioRef.current.src)
+        audioRef.current.src = URL.createObjectURL(blob)
+        audioRef.current.load()
+      }
+      setResult(r => r ? { ...r, hebrewVoice: text } : r)
+      setHasRerecorded(true)
+      addLog('קריינות חדשה מוכנה!', 'ok')
+    } catch (e) {
+      addLog('שגיאה בהקלטה מחדש: ' + e.message, 'err')
+      alert('שגיאה: ' + e.message)
+    } finally {
+      setRerecording(false)
+    }
   }
 
   const loadScene = (idx) => {
@@ -641,7 +727,7 @@ export default function Home() {
     <div style={{ ...pageStyle, maxWidth: 1100 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <h2 style={{ fontSize: 24, fontWeight: 900, color: '#f0f0ff' }}>הסרטון שלך מוכן!</h2>
-        <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0) }} style={ghostBtn}>
+        <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setHasRerecorded(false); setEditingSceneIdx(null); setEditBuffer('') }} style={ghostBtn}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           מודעה חדשה
         </button>
@@ -770,18 +856,92 @@ export default function Home() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={cardS}>
-            <div style={secTitle}>קריינות עברית</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ ...secTitle, marginBottom: 0 }}>קריינות עברית</div>
+              <button
+                onClick={rerecordVoiceover}
+                disabled={hasRerecorded || rerecording}
+                title={hasRerecorded ? 'ההקלטה מחדש זמינה פעם אחת בלבד לכל סרטון' : 'הקלט מחדש את הקריינות עם הטקסט המעודכן'}
+                style={{
+                  ...ghostBtn,
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  color: hasRerecorded || rerecording ? '#52525b' : '#a855f7',
+                  borderColor: hasRerecorded || rerecording ? 'rgba(255,255,255,0.06)' : 'rgba(168,85,247,0.3)',
+                  cursor: hasRerecorded || rerecording ? 'not-allowed' : 'pointer',
+                  opacity: hasRerecorded || rerecording ? 0.6 : 1
+                }}>
+                {rerecording
+                  ? <><div style={{ width: 12, height: 12, border: '2px solid rgba(168,85,247,0.3)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> מקליט...</>
+                  : hasRerecorded ? '✓ הוקלט מחדש' : '🎙 הקלט מחדש'}
+              </button>
+            </div>
             <audio ref={audioRef} controls style={{ width: '100%', borderRadius: 8 }} />
             <div style={{ marginTop: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#a1a1aa', direction: 'rtl', lineHeight: 1.8, fontFamily: 'Heebo,sans-serif' }}>{result?.hebrewVoice}</div>
+            {hasRerecorded && <div style={{ marginTop: 8, fontSize: 11, color: '#52525b', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>הקלטה מחדש זמינה פעם אחת לכל סרטון.</div>}
           </div>
           <div style={cardS}>
             <div style={secTitle}>פירוט הסיפור</div>
             {result?.story?.scenes?.map((scene, i) => (
               <div key={i} style={{ marginBottom: 10, padding: '14px 16px', background: currentScene === i ? 'rgba(168,85,247,0.04)' : 'rgba(255,255,255,0.02)', borderRadius: 12, border: `1px solid ${currentScene === i ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.04)'}`, transition: 'all 300ms ease' }}>
-                <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8, color: '#a855f7' }}>{scene.label}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: '#a855f7' }}>{scene.label}</div>
+                  {editingSceneIdx !== i && (
+                    <button
+                      onClick={() => openSceneEdit(i)}
+                      disabled={hasRerecorded}
+                      title={hasRerecorded ? 'לא ניתן לערוך לאחר הקלטה מחדש' : 'ערוך את טקסט הקריינות של הסצנה'}
+                      style={{
+                        background: 'transparent',
+                        border: `1px solid ${hasRerecorded ? 'rgba(255,255,255,0.06)' : 'rgba(168,85,247,0.3)'}`,
+                        color: hasRerecorded ? '#3f3f46' : '#a855f7',
+                        padding: '3px 10px',
+                        borderRadius: 8,
+                        fontSize: 11,
+                        cursor: hasRerecorded ? 'not-allowed' : 'pointer',
+                        fontFamily: 'Heebo,sans-serif',
+                        direction: 'rtl',
+                        opacity: hasRerecorded ? 0.6 : 1
+                      }}>
+                      ✎ ערוך טקסט
+                    </button>
+                  )}
+                </div>
                 <div style={{ fontSize: 11, color: '#52525b', marginBottom: 4, lineHeight: 1.7 }}><span style={{ color: '#8b5cf6', fontWeight: 600 }}>NB:</span> {scene.nb_prompt}</div>
                 <div style={{ fontSize: 11, color: '#52525b', marginBottom: 4, lineHeight: 1.7 }}><span style={{ color: '#7c3aed', fontWeight: 600 }}>Kling:</span> {scene.kling_prompt}</div>
-                <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 500 }}>{scene.subtitle}</div>
+                {editingSceneIdx === i ? (
+                  <div style={{ marginTop: 6 }}>
+                    <textarea
+                      value={editBuffer}
+                      onChange={e => setEditBuffer(e.target.value)}
+                      rows={3}
+                      style={{
+                        width: '100%',
+                        background: 'rgba(0,0,0,0.3)',
+                        border: '1px solid rgba(168,85,247,0.3)',
+                        borderRadius: 8,
+                        padding: 10,
+                        color: '#f0f0ff',
+                        fontSize: 12,
+                        fontFamily: 'Heebo,sans-serif',
+                        direction: 'rtl',
+                        lineHeight: 1.7,
+                        outline: 'none',
+                        resize: 'vertical'
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 6, justifyContent: 'flex-end' }}>
+                      <button onClick={cancelSceneEdit} style={{ ...ghostBtn, padding: '4px 10px', fontSize: 11 }}>ביטול</button>
+                      <button
+                        onClick={saveSceneEdit}
+                        style={{ background: 'linear-gradient(135deg, #7c3aed, #a855f7)', border: 'none', color: 'white', padding: '4px 12px', borderRadius: 8, fontSize: 11, cursor: 'pointer', fontFamily: 'Heebo,sans-serif' }}>
+                        שמור
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 500, direction: 'rtl', lineHeight: 1.7 }}>{scene.voiceover || scene.subtitle}</div>
+                )}
               </div>
             ))}
           </div>
