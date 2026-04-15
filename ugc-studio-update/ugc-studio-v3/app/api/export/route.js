@@ -223,29 +223,52 @@ export async function POST(req) {
       }
     }
 
-    // Download background music if URL provided
+    // Load background music. For relative paths (e.g. "/music/track1.mp3") we read
+    // the file off local disk from public/. Absolute http(s) URLs still fetch.
     let musicPath = null
     if (bgMusic && bgMusic !== 'none' && bgMusicUrl) {
       try {
-        const resp = await fetch(bgMusicUrl)
-        if (resp.ok) {
-          const musicBuf = Buffer.from(await resp.arrayBuffer())
+        let musicBuf = null
+        const isHttp = /^https?:\/\//i.test(bgMusicUrl)
+        if (!isHttp) {
+          // Relative path → resolve against public/
+          const rel = bgMusicUrl.replace(/^\/+/, '')
+          const diskPath = path.join(process.cwd(), 'public', rel)
+          const exists = fs.existsSync(diskPath)
+          console.log('[Export] music local lookup:', bgMusicUrl, '→', diskPath, 'exists:', exists)
+          if (exists) {
+            const stats = fs.statSync(diskPath)
+            console.log('[Export] music file size on disk:', stats.size, 'bytes')
+            musicBuf = await readFile(diskPath)
+          } else {
+            console.warn('[Export] music file NOT FOUND on disk:', diskPath)
+          }
+        } else {
+          const resp = await fetch(bgMusicUrl)
+          if (resp.ok) {
+            musicBuf = Buffer.from(await resp.arrayBuffer())
+            console.log('[Export] music downloaded:', musicBuf.length, 'bytes from', bgMusicUrl)
+          } else {
+            console.warn('[Export] music fetch HTTP', resp.status, 'for', bgMusicUrl)
+          }
+        }
+
+        if (musicBuf) {
           const musicRaw = path.join(jobDir, 'music_raw.mp3')
           await writeFile(musicRaw, musicBuf)
-          console.log('[Export] music downloaded:', musicBuf.length, 'bytes from', bgMusicUrl)
+          console.log('[Export] music raw written:', musicBuf.length, 'bytes')
           // Convert to AAC too for consistency
           const musicConv = path.join(jobDir, 'music.m4a')
           try {
             await execFileAsync(ffmpegPath, ['-y', '-i', musicRaw, '-vn', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', musicConv], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
             musicPath = musicConv
+            console.log('[Export] music.m4a ready at', musicConv)
           } catch (me) {
             console.warn('[Export] music AAC conversion failed, using raw:', me.stderr?.slice(-300) || me.message)
             musicPath = musicRaw
           }
-        } else {
-          console.warn('[Export] music fetch HTTP', resp.status)
         }
-      } catch (e) { console.warn('[Export] music download failed:', e.message) }
+      } catch (e) { console.warn('[Export] music load failed:', e.message) }
     }
 
     // =============================================================
@@ -338,7 +361,7 @@ export async function POST(req) {
     } else if (voicePath) {
       audioChain = `[${voiceInputIdx}:a]apad=whole_dur=${totalDuration},aresample=44100[aout]`
     } else if (musicPath) {
-      audioChain = `[${musicInputIdx}:a]volume=0.4,aloop=loop=-1:size=2000000000,aresample=44100[aout]`
+      audioChain = `[${musicInputIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[aout]`
     }
 
     const filterParts = []
