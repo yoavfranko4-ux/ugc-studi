@@ -1,6 +1,18 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { fal } from '@fal-ai/client'
 import { supabase } from '../../../lib/supabase'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import { writeFile, readFile, mkdir, rm } from 'fs/promises'
+import fs from 'fs'
+import path from 'path'
+import { randomUUID } from 'crypto'
+import { createRequire } from 'module'
+
+const require = createRequire(import.meta.url)
+let ffmpegStaticPath = null
+try { ffmpegStaticPath = require('ffmpeg-static') } catch {}
+const execFileAsync = promisify(execFile)
 
 export const maxDuration = 300;
 
@@ -295,6 +307,97 @@ export async function POST(req) {
   }
 }
 
+// Verify a Kling video URL is valid and non-empty.
+// Returns true if HEAD/GET reports an MP4-like response with content-length ≥ 10KB.
+async function verifyVideoUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    let head = await fetch(url, { method: 'HEAD' }).catch(() => null);
+    if (head && head.ok) {
+      const len = Number(head.headers.get('content-length') || 0);
+      if (len >= 10 * 1024) return true;
+      // Some CDNs don't return content-length on HEAD — fall through to range GET
+    }
+    // Range GET to confirm there are real bytes (avoid downloading the whole thing)
+    const resp = await fetch(url, { headers: { Range: 'bytes=0-65535' } }).catch(() => null);
+    if (!resp || (!resp.ok && resp.status !== 206)) return false;
+    const buf = await resp.arrayBuffer();
+    return buf.byteLength >= 10 * 1024;
+  } catch (e) {
+    console.warn('[verifyVideoUrl] failed:', e.message);
+    return false;
+  }
+}
+
+// Fallback: turn a NanoBanana still frame into a 5-second 720x1280 MP4 via FFmpeg,
+// then upload to fal.storage so it can flow through the rest of the pipeline like
+// any other Kling output (downloadable URL the export route can fetch).
+async function frameToStaticVideo(frameUrl, durationSec = 5) {
+  if (!frameUrl) return null;
+  if (!ffmpegStaticPath || !fs.existsSync(ffmpegStaticPath)) {
+    console.warn('[frameToStaticVideo] ffmpeg-static not available — cannot build fallback video');
+    return null;
+  }
+  const tmpDir = path.join('/tmp', `frame2vid-${randomUUID()}`);
+  await mkdir(tmpDir, { recursive: true });
+  const inPath = path.join(tmpDir, 'frame.png');
+  const outPath = path.join(tmpDir, 'scene2.mp4');
+  try {
+    // Download the frame
+    let frameBuf;
+    if (frameUrl.startsWith('data:')) {
+      const b64 = frameUrl.split(',')[1] || '';
+      frameBuf = Buffer.from(b64, 'base64');
+    } else {
+      const resp = await fetch(frameUrl);
+      if (!resp.ok) throw new Error(`frame fetch HTTP ${resp.status}`);
+      frameBuf = Buffer.from(await resp.arrayBuffer());
+    }
+    await writeFile(inPath, frameBuf);
+    console.log(`[frameToStaticVideo] frame.png written: ${frameBuf.length} bytes`);
+
+    // ffmpeg -loop 1 -i frame.png -t 5 -vf "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280" -r 24 -c:v libx264 -pix_fmt yuv420p scene2.mp4
+    const args = [
+      '-y', '-loop', '1', '-i', inPath,
+      '-t', String(durationSec),
+      '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1',
+      '-r', '24',
+      '-c:v', 'libx264',
+      '-preset', 'fast',
+      '-crf', '23',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      outPath
+    ];
+    console.log('[frameToStaticVideo] ffmpeg args:', JSON.stringify(args));
+    await execFileAsync(ffmpegStaticPath, args, { timeout: 60000, maxBuffer: 20 * 1024 * 1024 });
+    const stats = fs.statSync(outPath);
+    console.log(`[frameToStaticVideo] scene2.mp4 generated: ${stats.size} bytes`);
+    if (stats.size < 10 * 1024) throw new Error('generated mp4 too small');
+
+    const mp4Buf = await readFile(outPath);
+    // Upload to fal.storage so we get a CDN URL like normal Kling outputs
+    let uploadedUrl = null;
+    try {
+      const blob = new Blob([mp4Buf], { type: 'video/mp4' });
+      uploadedUrl = await fal.storage.upload(blob);
+      console.log('[frameToStaticVideo] uploaded to fal.storage:', uploadedUrl?.slice(0, 80));
+    } catch (upErr) {
+      console.warn('[frameToStaticVideo] fal.storage upload failed:', upErr.message);
+      // Fallback: return a data URL — clients that fetch() it still work, though it's bigger.
+      const b64 = mp4Buf.toString('base64');
+      uploadedUrl = `data:video/mp4;base64,${b64}`;
+      console.log('[frameToStaticVideo] returning data URL fallback, size:', mp4Buf.length, 'bytes');
+    }
+    return uploadedUrl;
+  } catch (e) {
+    console.error('[frameToStaticVideo] failed:', e.message);
+    return null;
+  } finally {
+    rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function runJob(jobId, body) {
   try {
     const {
@@ -410,9 +513,27 @@ async function runJob(jobId, body) {
         });
         const videoUrl = result.data.video?.url || null;
         console.log(`[Job ${jobId}] Kling scene ${i+1}:`, videoUrl ? 'OK' : 'no URL');
-        return videoUrl || null;
+
+        // Validate Kling output is a real, non-empty video. Kling sometimes
+        // returns a URL but the file is empty/corrupt — especially for the
+        // person-less product shot in scene 2.
+        const valid = videoUrl ? await verifyVideoUrl(videoUrl) : false;
+        if (!valid) {
+          console.warn(`[Job ${jobId}] Kling scene ${i+1} produced empty/invalid video — falling back to static frame video`);
+          const staticUrl = await frameToStaticVideo(frameUrl, 5);
+          console.log(`[Job ${jobId}] Static fallback for scene ${i+1}:`, staticUrl ? 'OK' : 'failed');
+          return staticUrl || null;
+        }
+        return videoUrl;
       } catch (e) {
         console.error(`[Job ${jobId}] Kling scene ${i+1} error:`, e.message);
+        // Last resort: try to build a static video from the NB frame so the export
+        // still has 4 valid clips and doesn't crash on "speed=0x" empty input.
+        try {
+          const staticUrl = await frameToStaticVideo(frameUrl, 5);
+          console.log(`[Job ${jobId}] Static fallback after Kling error for scene ${i+1}:`, staticUrl ? 'OK' : 'failed');
+          return staticUrl || null;
+        } catch {}
         return null;
       }
     }));

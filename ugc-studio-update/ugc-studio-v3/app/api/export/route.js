@@ -283,8 +283,38 @@ export async function POST(req) {
     const totalDuration = validClipPaths.length * 5
 
     for (let i = 0; i < validClipPaths.length; i++) {
-      const inPath = validClipPaths[i]
+      let inPath = validClipPaths[i]
       const normPath = path.join(jobDir, `norm_${i}.mp4`)
+
+      // Log incoming clip size and replace empty/corrupt clips with a black
+      // placeholder video so FFmpeg doesn't crash with "speed=0x" / no frames.
+      let inSize = 0
+      try { inSize = fs.statSync(inPath).size } catch { inSize = 0 }
+      console.log(`[Export] Step 1: clip ${i} input size: ${inSize} bytes (${(inSize / 1024).toFixed(1)}KB)`)
+      if (inSize < 10 * 1024) {
+        console.warn(`[Export] Clip ${i} is empty or too small (<10KB) — replacing with 5-second black video`)
+        const blackPath = path.join(jobDir, `black_${i}.mp4`)
+        const blackArgs = [
+          '-y',
+          '-f', 'lavfi', '-i', 'color=c=black:s=720x1280:r=24:d=5',
+          '-c:v', 'libx264',
+          '-preset', 'fast',
+          '-crf', '23',
+          '-pix_fmt', 'yuv420p',
+          '-movflags', '+faststart',
+          '-an',
+          blackPath
+        ]
+        try {
+          await execFileAsync(ffmpegPath, blackArgs, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 })
+          inPath = blackPath
+          const blackSize = fs.statSync(blackPath).size
+          console.log(`[Export] Black placeholder for clip ${i} written: ${blackSize} bytes`)
+        } catch (blackErr) {
+          console.error(`[Export] Failed to build black placeholder for clip ${i}:`, blackErr.stderr?.slice(-400) || blackErr.message)
+          throw new Error(`Clip ${i} is empty and black placeholder generation failed`)
+        }
+      }
 
       const vfChain = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1'
 

@@ -67,7 +67,10 @@
       "Bash(npx --yes esbuild app/studio/page.js --bundle=false --loader=jsx --log-level=error)",
       "Bash(npx --yes esbuild app/studio/page.js --bundle=false --loader=jsx)",
       "Bash(npx --yes esbuild --loader:.js=jsx app/studio/page.js --bundle=false)",
-      "Bash(npx --yes esbuild --loader:.js=jsx app/api/agent/route.js --bundle=false)"
+      "Bash(npx --yes esbuild --loader:.js=jsx app/api/agent/route.js --bundle=false)",
+      "Bash(grep -rn \"storage\" /c/Users/Naomi/ugc-studi/ugc-studio-update/ugc-studio-v3/node_modules/@fal-ai/client/dist/*.d.ts)",
+      "Bash(grep -rn \"storage\\\\|upload\" /c/Users/Naomi/ugc-studi/ugc-studio-update/ugc-studio-v3/node_modules/@fal-ai/client/src/*.ts)",
+      "Bash(npx --yes esbuild --loader:.js=jsx app/api/agent/route.js app/api/export/route.js --bundle=false)"
     ]
   }
 }
