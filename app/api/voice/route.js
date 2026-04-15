@@ -1,4 +1,5 @@
 import { checkRateLimit } from '../middleware/rateLimit.js'
+import { cleanHebrewText } from '../../../lib/hebrew-tts.js'
 
 export async function POST(req) {
   // Rate limiting
@@ -22,6 +23,9 @@ export async function POST(req) {
       return Response.json({ error: 'Text is required and must be under 5000 characters' }, { status: 400 })
     }
 
+    // Preprocess Hebrew text to fix known ElevenLabs mispronunciations
+    const cleanedText = cleanHebrewText(text)
+
     // Try V3 first
     let res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: 'POST',
@@ -30,7 +34,7 @@ export async function POST(req) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        text,
+        text: cleanedText,
         model_id: 'eleven_v3',
         voice_settings: { stability: 0.4, similarity_boost: 0.85, style: 0.3, use_speaker_boost: true }
       })
@@ -45,7 +49,7 @@ export async function POST(req) {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          text,
+          text: cleanedText,
           model_id: 'eleven_multilingual_v2',
           voice_settings: { stability: 0.5, similarity_boost: 0.8 }
         })

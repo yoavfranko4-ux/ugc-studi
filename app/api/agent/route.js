@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { checkRateLimit } from '../middleware/rateLimit.js'
 import { validateProductInput, sanitizeForLLM } from '../middleware/validate.js'
+import { cleanHebrewText } from '../../../lib/hebrew-tts.js'
 
 export async function POST(req) {
   // Rate limiting
@@ -255,7 +256,8 @@ Return ONLY JSON:
   const frames = []
   for (let i = 0; i < 4; i++) {
     try {
-      // For business scene 2 (hero shot) — no avatar needed, only product image if available
+      // For business scene 2 (hero shot) — user's reference image is the MAIN image.
+      // We want NanoBanana to stay faithful to the reference, not invent a new AI-looking shot.
       const isHeroShot = isBusiness && i === 1
       const imageUrls = isHeroShot
         ? (productImageUrl ? [productImageUrl] : [finalAvatarUrl])
@@ -265,11 +267,12 @@ Return ONLY JSON:
       // פרומפט עם הוראות עקביות לפי מה שNano Banana מבין
       const hasProduct = !isHeroShot && i >= 1 && productImageUrl
       const anatomyRule = 'correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body'
+      const fidelityRule = 'stay faithful to reference image style, realistic photo quality, not AI-looking, preserve original atmosphere and colors, keep the same lighting colors composition and mood as the reference photo, minimal creative deviation'
       let nbPrompt
       if (isHeroShot) {
         nbPrompt = productImageUrl
-          ? `Using the product/food from Image 1 as the main subject. ${story.scenes[i].nb_prompt}. Make the product/food from Image 1 the hero of the shot, beautifully presented.`
-          : `${story.scenes[i].nb_prompt}.`
+          ? `Recreate the scene from the reference image (Image 1) faithfully. Keep the SAME subject, lighting, colors, composition, and atmosphere as Image 1 — treat Image 1 as the ground truth. Only make subtle improvements: slightly cleaner framing, a touch more vibrance, a natural TikTok hero-shot feel. Do not reinvent the shot, do not add new elements, do not stylize into a generic AI look. ${fidelityRule}. Optional subtle context: ${story.scenes[i].nb_prompt}`
+          : `${story.scenes[i].nb_prompt}. ${fidelityRule}.`
       } else if (hasProduct) {
         nbPrompt = `Using the person from Image 1 as the subject with identical face hair and appearance, and the product from Image 2 in their hands. ${story.scenes[i].nb_prompt}. Keep facial features and identity exactly the same as Image 1. The product from Image 2 is clearly visible with label facing camera. ${anatomyRule}.`
       } else {
@@ -347,11 +350,12 @@ Return ONLY JSON:
   if (elevenKey) {
     try {
       console.log('ElevenLabs: trying V3 with voice:', finalVoiceId)
+      const cleanedVoiceText = cleanHebrewText(story.hebrew_voice)
       const vRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${finalVoiceId}`, {
         method: 'POST',
         headers: { 'xi-api-key': elevenKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: story.hebrew_voice,
+          text: cleanedVoiceText,
           model_id: 'eleven_v3',
           voice_settings: { stability: 0.5, similarity_boost: 0.75 }
         })
