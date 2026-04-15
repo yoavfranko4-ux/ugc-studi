@@ -230,6 +230,9 @@ export default function Home() {
   const [editBuffer, setEditBuffer] = useState('')
   const [hasRerecorded, setHasRerecorded] = useState(false)
   const [rerecording, setRerecording] = useState(false)
+  // Full-voiceover edit panel shown below the audio player
+  const [showRerecordPanel, setShowRerecordPanel] = useState(false)
+  const [rerecordText, setRerecordText] = useState('')
   const videoRef = useRef(null)
   const audioRef = useRef(null)
   const canvasRef = useRef(null)
@@ -298,7 +301,7 @@ export default function Home() {
     const currentCheck = customAvatar || selectedAvatar?.url
     if (!currentCheck) return alert('בחר דמות')
     if (!productName || !productDesc) return alert('הכנס שם ותיאור מוצר')
-    setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' }); setHasRerecorded(false); setEditingSceneIdx(null); setEditBuffer(''); addLog('Agent מתחיל לעבוד...')
+    setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' }); setHasRerecorded(false); setEditingSceneIdx(null); setEditBuffer(''); setShowRerecordPanel(false); setRerecordText(''); addLog('Agent מתחיל לעבוד...')
     try {
       const currentAvatarUrl = customAvatar || selectedAvatar?.url
       addLog('Avatar: ' + (currentAvatarUrl ? currentAvatarUrl.slice(0,40) : 'NONE'), currentAvatarUrl ? '' : 'err')
@@ -406,29 +409,85 @@ export default function Home() {
   }
   const cancelSceneEdit = () => { setEditingSceneIdx(null); setEditBuffer('') }
 
-  const rerecordVoiceover = async () => {
+  // Open the full-voiceover edit panel, pre-filled with the current script.
+  const openRerecordPanel = () => {
     if (hasRerecorded || rerecording) return
-    const scenes = result?.story?.scenes
-    if (!scenes?.length) return
-    const text = scenes.map(s => (s.voiceover || '').trim()).filter(Boolean).join(' ')
-    if (!text) { alert('אין טקסט קריינות לערוך'); return }
+    const scenes = result?.story?.scenes || []
+    const fromScenes = scenes.map(s => (s.voiceover || '').trim()).filter(Boolean).join(' ')
+    const initial = fromScenes || result?.hebrewVoice || ''
+    setRerecordText(initial)
+    setShowRerecordPanel(true)
+  }
+  const closeRerecordPanel = () => { setShowRerecordPanel(false); setRerecordText('') }
+
+  // Rebuild scene subtitles from new word timestamps by slicing the timeline
+  // into N equal-duration segments (one per scene) and collecting the words
+  // that fall into each segment. Returns a new scenes array.
+  const rebuildSubtitleSegments = (scenes, wordTimestamps, duration) => {
+    if (!scenes?.length) return scenes
+    if (!wordTimestamps?.length || !duration) return scenes
+    const n = scenes.length
+    const segDur = duration / n
+    const segs = Array.from({ length: n }, () => [])
+    for (const wt of wordTimestamps) {
+      const mid = (wt.start + wt.end) / 2
+      let idx = Math.min(n - 1, Math.max(0, Math.floor(mid / segDur)))
+      segs[idx].push(wt.word)
+    }
+    return scenes.map((s, i) => {
+      const words = segs[i].join(' ').trim()
+      return words
+        ? { ...s, voiceover: words, subtitle: words }
+        : s
+    })
+  }
+
+  const rerecordVoiceover = async (textOverride) => {
+    if (hasRerecorded || rerecording) return
+    const text = (textOverride ?? rerecordText ?? '').trim()
+    if (!text) { alert('אין טקסט קריינות לשלוח'); return }
     setRerecording(true)
-    addLog('מקליט קריינות מחדש...')
+    addLog('שולח טקסט ל-ElevenLabs...')
     try {
       const vRes = await fetch('/api/voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text })
       })
-      if (!vRes.ok) throw new Error('Voice API failed')
-      const blob = await vRes.blob()
+      if (!vRes.ok) {
+        const errBody = await vRes.json().catch(() => ({}))
+        throw new Error(errBody.error || `Voice API ${vRes.status}`)
+      }
+      const { base64, wordTimestamps = [], duration = 0 } = await vRes.json()
+      if (!base64) throw new Error('No audio returned')
+
+      // Decode base64 → Blob → object URL, swap into the audio element.
+      const bin = atob(base64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      const blob = new Blob([bytes], { type: 'audio/mpeg' })
       if (audioRef.current) {
         if (audioRef.current.src?.startsWith('blob:')) URL.revokeObjectURL(audioRef.current.src)
         audioRef.current.src = URL.createObjectURL(blob)
         audioRef.current.load()
       }
-      setResult(r => r ? { ...r, hebrewVoice: text } : r)
+
+      // Persist the new script, timestamps, duration, and rebuilt per-scene subtitles.
+      setResult(r => {
+        if (!r) return r
+        const rebuilt = rebuildSubtitleSegments(r.story?.scenes, wordTimestamps, duration)
+        return {
+          ...r,
+          hebrewVoice: text,
+          wordTimestamps,
+          voiceDuration: duration,
+          story: { ...r.story, scenes: rebuilt || r.story.scenes }
+        }
+      })
+
       setHasRerecorded(true)
+      setShowRerecordPanel(false)
+      setRerecordText('')
       addLog('קריינות חדשה מוכנה!', 'ok')
     } catch (e) {
       addLog('שגיאה בהקלטה מחדש: ' + e.message, 'err')
@@ -727,7 +786,7 @@ export default function Home() {
     <div style={{ ...pageStyle, maxWidth: 1100 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <h2 style={{ fontSize: 24, fontWeight: 900, color: '#f0f0ff' }}>הסרטון שלך מוכן!</h2>
-        <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setHasRerecorded(false); setEditingSceneIdx(null); setEditBuffer('') }} style={ghostBtn}>
+        <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setHasRerecorded(false); setEditingSceneIdx(null); setEditBuffer(''); setShowRerecordPanel(false); setRerecordText('') }} style={ghostBtn}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           מודעה חדשה
         </button>
@@ -856,29 +915,99 @@ export default function Home() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={cardS}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div style={{ ...secTitle, marginBottom: 0 }}>קריינות עברית</div>
-              <button
-                onClick={rerecordVoiceover}
-                disabled={hasRerecorded || rerecording}
-                title={hasRerecorded ? 'ההקלטה מחדש זמינה פעם אחת בלבד לכל סרטון' : 'הקלט מחדש את הקריינות עם הטקסט המעודכן'}
-                style={{
-                  ...ghostBtn,
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  color: hasRerecorded || rerecording ? '#52525b' : '#a855f7',
-                  borderColor: hasRerecorded || rerecording ? 'rgba(255,255,255,0.06)' : 'rgba(168,85,247,0.3)',
-                  cursor: hasRerecorded || rerecording ? 'not-allowed' : 'pointer',
-                  opacity: hasRerecorded || rerecording ? 0.6 : 1
-                }}>
-                {rerecording
-                  ? <><div style={{ width: 12, height: 12, border: '2px solid rgba(168,85,247,0.3)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> מקליט...</>
-                  : hasRerecorded ? '✓ הוקלט מחדש' : '🎙 הקלט מחדש'}
-              </button>
-            </div>
+            <div style={secTitle}>קריינות עברית</div>
             <audio ref={audioRef} controls style={{ width: '100%', borderRadius: 8 }} />
             <div style={{ marginTop: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#a1a1aa', direction: 'rtl', lineHeight: 1.8, fontFamily: 'Heebo,sans-serif' }}>{result?.hebrewVoice}</div>
-            {hasRerecorded && <div style={{ marginTop: 8, fontSize: 11, color: '#52525b', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>הקלטה מחדש זמינה פעם אחת לכל סרטון.</div>}
+
+            {/* Re-record button — one-shot per video session */}
+            {!showRerecordPanel && (
+              <button
+                onClick={openRerecordPanel}
+                disabled={hasRerecorded || rerecording}
+                title={hasRerecorded ? 'ההקלטה מחדש זמינה פעם אחת בלבד לכל סרטון' : 'ערוך את הטקסט והקלט את הקריינות מחדש'}
+                style={{
+                  marginTop: 12,
+                  width: '100%',
+                  padding: '12px 14px',
+                  background: hasRerecorded ? 'rgba(255,255,255,0.02)' : 'rgba(168,85,247,0.08)',
+                  border: `1px solid ${hasRerecorded ? 'rgba(255,255,255,0.06)' : 'rgba(168,85,247,0.35)'}`,
+                  color: hasRerecorded ? '#52525b' : '#d4d4ff',
+                  borderRadius: 12,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: 'Heebo,sans-serif',
+                  direction: 'rtl',
+                  cursor: hasRerecorded || rerecording ? 'not-allowed' : 'pointer',
+                  opacity: hasRerecorded || rerecording ? 0.6 : 1,
+                  transition: 'all 200ms ease',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
+                }}>
+                {hasRerecorded ? '✓ הוקלט מחדש' : '✎ ערוך וצלם מחדש'}
+              </button>
+            )}
+            {hasRerecorded && (
+              <div style={{ marginTop: 8, fontSize: 11, color: '#52525b', direction: 'rtl', fontFamily: 'Heebo,sans-serif', textAlign: 'center' }}>
+                הקלטה מחדש זמינה פעם אחת לכל סרטון.
+              </div>
+            )}
+
+            {/* Edit panel — textarea + record/cancel */}
+            {showRerecordPanel && (
+              <div style={{ marginTop: 14, padding: 14, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: 12 }}>
+                <div style={{ fontSize: 12, color: '#a855f7', fontWeight: 700, marginBottom: 8, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
+                  עריכת טקסט הקריינות
+                </div>
+                <textarea
+                  value={rerecordText}
+                  onChange={e => setRerecordText(e.target.value)}
+                  disabled={rerecording}
+                  rows={6}
+                  style={{
+                    width: '100%',
+                    background: 'rgba(0,0,0,0.4)',
+                    border: '1px solid rgba(168,85,247,0.3)',
+                    borderRadius: 10,
+                    padding: 12,
+                    color: '#f0f0ff',
+                    fontSize: 14,
+                    fontFamily: 'Heebo,sans-serif',
+                    direction: 'rtl',
+                    lineHeight: 1.8,
+                    outline: 'none',
+                    resize: 'vertical'
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 10, direction: 'rtl' }}>
+                  <button
+                    onClick={() => rerecordVoiceover(rerecordText)}
+                    disabled={rerecording || !rerecordText.trim()}
+                    style={{
+                      flex: 1,
+                      padding: '10px 14px',
+                      background: rerecording || !rerecordText.trim() ? 'rgba(168,85,247,0.2)' : 'linear-gradient(135deg, #7c3aed, #a855f7)',
+                      border: 'none',
+                      color: 'white',
+                      borderRadius: 10,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      fontFamily: 'Heebo,sans-serif',
+                      cursor: rerecording || !rerecordText.trim() ? 'not-allowed' : 'pointer',
+                      opacity: rerecording || !rerecordText.trim() ? 0.6 : 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
+                    }}>
+                    {rerecording
+                      ? <><div style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> מקליט...</>
+                      : <>צלם קריינות מחדש 🎙️</>}
+                  </button>
+                  <button
+                    onClick={closeRerecordPanel}
+                    disabled={rerecording}
+                    style={{ ...ghostBtn, padding: '10px 16px', fontSize: 13, opacity: rerecording ? 0.5 : 1, cursor: rerecording ? 'not-allowed' : 'pointer' }}>
+                    ביטול
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           <div style={cardS}>
             <div style={secTitle}>פירוט הסיפור</div>
