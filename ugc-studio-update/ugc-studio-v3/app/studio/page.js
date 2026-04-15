@@ -294,6 +294,7 @@ const AGENT_STEPS = [
 
 export default function Home() {
   const [step, setStep] = useState('form')
+  const [mode, setMode] = useState('ugc') // 'ugc' | 'business'
   const [selectedAvatar, setSelectedAvatar] = useState(null)
   const [customAvatar, setCustomAvatar] = useState(null)
   const [productName, setProductName] = useState('')
@@ -301,6 +302,10 @@ export default function Home() {
   const [applicationArea, setApplicationArea] = useState('')
   const [productImage, setProductImage] = useState(null)
   const [storyDescription, setStoryDescription] = useState('')
+  // Business mode state
+  const [businessName, setBusinessName] = useState('')
+  const [businessDescription, setBusinessDescription] = useState('')
+  const [businessPhotos, setBusinessPhotos] = useState([]) // array of data URLs (1-4)
   const [voiceId, setVoiceId] = useState('cp6q5qJLs8rR7eAWOepf')
   const [voicePreviewing, setVoicePreviewing] = useState(null)
   const voicePreviewRef = useRef(null)
@@ -537,7 +542,12 @@ export default function Home() {
   const runAgent = async () => {
     const currentCheck = customAvatar || selectedAvatar?.url
     if (!currentCheck) return alert('בחר דמות')
-    if (!productName || !productDesc) return alert('הכנס שם ותיאור מוצר')
+    if (mode === 'ugc') {
+      if (!productName || !productDesc) return alert('הכנס שם ותיאור מוצר')
+    } else {
+      if (!businessName || !businessDescription) return alert('הכנס שם ותיאור עסק')
+      if (businessPhotos.length === 0) return alert('העלה לפחות תמונה אחת של העסק')
+    }
     setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' }); addLog('Agent מתחיל לעבוד...')
     try {
       const currentAvatarUrl = customAvatar || selectedAvatar?.url
@@ -558,7 +568,7 @@ export default function Home() {
       }
       addLog('שולח בקשה ל-Agent...'); setAgentStatus({ script: 'active' })
       let productImageUrl = null
-      if (productImage && productImage.startsWith('data:')) {
+      if (mode === 'ugc' && productImage && productImage.startsWith('data:')) {
         const [ph, pb] = productImage.split(',')
         const pm = ph.match(/:(.*?);/)[1]
         const pbc = atob(pb), pba = new Uint8Array(pbc.length)
@@ -571,9 +581,24 @@ export default function Home() {
         productImageUrl = pupData.url || pupData.access_url
         addLog('מוצר הועלה', 'ok')
       }
+      // In business mode the businessPhotos are already data URLs — send them directly
+      // (the agent route accepts data: URLs via the same prepareUrl path)
+      const bizPayload = mode === 'business' ? {
+        videoType: 'business',
+        businessName,
+        businessDescription,
+        businessPhotos,
+      } : {
+        videoType: 'ugc',
+        product: productDesc,
+        productName,
+        applicationArea,
+        storyDescription,
+        productImageUrl,
+      }
       const agentRes = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl, falKey, elevenKey, voiceId })
+        body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, falKey, elevenKey, voiceId })
       })
       if (!agentRes.ok) throw new Error('Agent failed')
       const { jobId } = await agentRes.json()
@@ -938,6 +963,35 @@ export default function Home() {
         </a>
       </div>
 
+      {/* Mode toggle */}
+      <div style={cardS}>
+        <div style={secTitle}>סוג סרטון</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          {[
+            { id: 'ugc', label: 'סרטון UGC', emoji: '🎬', desc: 'מודעה למוצר' },
+            { id: 'business', label: 'סרטון עסק', emoji: '🏪', desc: 'מודעה לעסק מקומי' },
+          ].map(m => {
+            const sel = mode === m.id
+            return (
+              <button key={m.id} onClick={() => setMode(m.id)}
+                style={{
+                  padding: 18, borderRadius: 14,
+                  border: `2px solid ${sel ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.08)'}`,
+                  background: sel ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12,
+                  direction: 'rtl', fontFamily: 'Heebo,sans-serif', transition: 'all 200ms ease'
+                }}>
+                <div style={{ fontSize: 28 }}>{m.emoji}</div>
+                <div style={{ flex: 1, textAlign: 'right' }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f0ff' }}>{m.label} {m.emoji}</div>
+                  <div style={{ fontSize: 12, color: '#71717a', marginTop: 2 }}>{m.desc}</div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       {/* API Keys */}
       <div style={cardS}>
         <button onClick={() => setKeysOpen(o => !o)} style={{ ...ghostBtn, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -986,7 +1040,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Product Details */}
+      {/* Product / Business Details */}
+      {mode === 'ugc' ? (
       <div style={cardS}>
         <div style={secTitle}>פרטי המוצר</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1015,6 +1070,42 @@ export default function Home() {
           </div>
         </div>
       </div>
+      ) : (
+      <div style={cardS}>
+        <div style={secTitle}>פרטי העסק</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label style={lblS}>שם העסק</label>
+            <input value={businessName} onChange={e => setBusinessName(e.target.value)} placeholder="מסעדת פסטה רומא" style={{ ...inpS, direction: 'rtl', fontFamily: 'Heebo,sans-serif', marginTop: 6 }} />
+          </div>
+          <div>
+            <label style={lblS}>תיאור העסק</label>
+            <textarea value={businessDescription} onChange={e => setBusinessDescription(e.target.value)} placeholder="מסעדה איטלקית בתל אביב, אוכל ביתי, אווירה משפחתית" style={{ ...inpS, height: 90, direction: 'rtl', fontFamily: 'Heebo,sans-serif', resize: 'none', marginTop: 6 }} />
+          </div>
+          <div>
+            <label style={lblS}>תמונות העסק (1-4 תמונות)</label>
+            <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+              {businessPhotos.map((img, i) => (
+                <div key={i} style={{ position: 'relative', aspectRatio: '1', borderRadius: 12, overflow: 'hidden', border: '2px solid rgba(34,197,94,0.4)' }}>
+                  <img src={img} alt={`business-${i}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <button
+                    onClick={() => setBusinessPhotos(p => p.filter((_, j) => j !== i))}
+                    style={{ position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: '50%', background: 'rgba(239,68,68,0.9)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >×</button>
+                </div>
+              ))}
+              {businessPhotos.length < 4 && (
+                <div style={{ position: 'relative', aspectRatio: '1', border: '2px dashed rgba(255,255,255,0.08)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: 'rgba(255,255,255,0.02)' }}>
+                  <input type="file" accept="image/*" onChange={e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => setBusinessPhotos(p => [...p, ev.target.result]); r.readAsDataURL(f) }} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </div>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: '#52525b', marginTop: 6, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>העלה תמונות של המקום, האוכל, המוצרים או האווירה</div>
+          </div>
+        </div>
+      </div>
+      )}
 
       {/* Voice Selection */}
       <div style={cardS}>
@@ -1150,7 +1241,7 @@ export default function Home() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setClipOrder([0,1,2,3]) }} style={ghostBtn}>
+          <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setClipOrder([0,1,2,3]); setBusinessPhotos([]) }} style={ghostBtn}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             מודעה חדשה
           </button>

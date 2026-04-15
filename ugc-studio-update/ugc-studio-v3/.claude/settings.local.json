@@ -62,7 +62,12 @@
       "Bash(winget install:*)",
       "Bash(export PATH=\"/c/Users/Naomi/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.1-full_build/bin:$PATH\")",
       "Bash(ffprobe -version)",
-      "Bash(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 __TRACKED_VAR__/__TRACKED_VAR__)"
+      "Bash(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 __TRACKED_VAR__/__TRACKED_VAR__)",
+      "Bash(node --check app/api/agent/route.js)",
+      "Bash(npx --yes esbuild app/studio/page.js --bundle=false --loader=jsx --log-level=error)",
+      "Bash(npx --yes esbuild app/studio/page.js --bundle=false --loader=jsx)",
+      "Bash(npx --yes esbuild --loader:.js=jsx app/studio/page.js --bundle=false)",
+      "Bash(npx --yes esbuild --loader:.js=jsx app/api/agent/route.js --bundle=false)"
     ]
   }
 }

@@ -106,6 +106,9 @@ async function generateScript(productName, productDesc, applicationArea, hook, v
 Description: ${productDesc}
 How to use: ${applicationArea}
 
+NEW SCENE 2 STRUCTURE (IMPORTANT):
+Scene 2 is now a PRODUCT BEAUTY SHOT — NO avatar in frame. The voiceover describes the product visually (features, what makes it special) — NO pain, NO person.
+
 ${genderInstruction}
 
 STEP 0 — PRODUCT CATEGORY ANALYSIS (do this silently before writing):
@@ -144,8 +147,8 @@ CRITICAL RULES:
 
 1. UGC HOOK FORMULA — THIS IS THE MOST IMPORTANT RULE:
 - Scene 1 (Hook — כאב): Start with a UNIVERSAL, RELATABLE PROBLEM for the product's category. NEVER mention the product name, brand name, or even the product type/category name directly. Sound like a real friend telling you about a struggle. The viewer must feel "זה בדיוק אני!"
-- Scene 2 (Agitate — החמרה): Make the problem WORSE, build tension. Describe failed attempts, frustration, embarrassment. Still NO product name yet.
-- Scene 3 (Solution reveal — פתרון): NOW introduce ${productName} naturally as THE solution. "עד שגיליתי את..." or "ואז מישהי המליצה לי על..." — describe the experience of using it.
+- Scene 2 (Product beauty shot — מוצר): NO AVATAR, NO PERSON visible. This is a pure product close-up — the product is the hero. Voiceover describes the product visually (what it is, what makes it special, its features). NO pain point, NO person mentioned.
+- Scene 3 (Solution reveal — פתרון): NOW the avatar uses ${productName}. "עד שגיליתי את..." or "ואז מישהי המליצה לי על..." — describe the experience of using it.
 - Scene 4 (CTA — קריאה לפעולה): Call to action with urgency. Emotional push to try it now.
 
 ⚠️ ABSOLUTE RULES FOR SCENE 1:
@@ -163,7 +166,7 @@ CRITICAL RULES:
 
 3. VOICEOVER TIMING — STRICT:
 - Scene 1: ~12 Hebrew words (fills 5s naturally — elaborate on the pain)
-- Scene 2: ~12 Hebrew words (fills 5s naturally — make the problem worse)
+- Scene 2: ~14 Hebrew words (fills 5s naturally — describe the product visually, its features and what makes it special. NO pain, NO person.)
 - Scene 3: ~20 Hebrew words (fills 5s naturally — reveal the solution, describe the experience)
 - Scene 4: ~12 Hebrew words (fills 5s naturally — strong CTA with urgency and emotion)
 - Write at NATURAL SPEAKING PACE — each scene must feel complete.
@@ -194,7 +197,7 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 
 7. SCENE STRUCTURE (follows the hook formula):
 - Scene 1 (כאב — Hook): Avatar ALONE showing the specific problem — NO product visible, NO product mentioned
-- Scene 2 (החמרה — Agitate): Avatar showing frustration getting WORSE — failed attempts, embarrassment. Still no product.
+- Scene 2 (מוצר — Product beauty shot): CLOSE-UP OF THE PRODUCT ONLY. NO avatar, NO person visible. Clean background, beautiful natural lighting. Product is the hero of the shot. Unboxing / reveal style. Product details clearly visible. PRESERVE EXACT PRODUCT APPEARANCE FROM REFERENCE IMAGE.
 - Scene 3 (פתרון — Solution): Avatar actively USING the product — product ON the avatar not just held. This is the reveal!
 - Scene 4 (תוצאה — CTA): Avatar genuinely happy with the RESULT — product naturally visible, emotional CTA
 
@@ -212,7 +215,7 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 Return ONLY valid JSON (no markdown):
 {
   "voiceover_scene1": "~12 Hebrew words — UNIVERSAL pain point for this product's category, NEVER the product name, NEVER the brand, sound like a friend venting about a struggle",
-  "voiceover_scene2": "~12 Hebrew words — make the problem WORSE, build tension, failed attempts",
+  "voiceover_scene2": "~14 Hebrew words — describe ${productName} visually — its features, texture, what makes it special. NO pain, NO person, pure product focus",
   "voiceover_scene3": "~20 Hebrew words — reveal ${productName} as the solution, describe the experience in detail",
   "voiceover_scene4": "~12 Hebrew words — emotional CTA with urgency, tell them to try it now",
   "setting": "one-line description of the setting",
@@ -224,9 +227,9 @@ Return ONLY valid JSON (no markdown):
       "subtitle": "same as voiceover_scene1"
     },
     {
-      "type": "החמרה",
-      "nb_prompt": "avatar looking more frustrated, showing failed attempt to solve the problem, disappointed expression, no product visible, correct human anatomy, exactly two arms, no extra limbs, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar in [setting] showing deeper frustration, failed attempt visible, disappointed body language, no product visible, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps",
+      "type": "מוצר",
+      "nb_prompt": "Close-up beauty shot of ${productName}, clean background, beautiful natural lighting, product is the hero of the shot, NO person or avatar visible, product details clearly visible, unboxing or reveal style, preserve exact product appearance from reference image, product shape and colors unchanged from reference",
+      "kling_prompt": "Product ${productName} slowly rotating or being revealed, cinematic close-up, NO person visible, NO avatar visible, clean background, beautiful natural lighting, silent, smooth natural motion only, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene2"
     },
     {
@@ -292,29 +295,52 @@ export async function POST(req) {
   }
 }
 
-async function runJob(jobId, { productName, productDesc, applicationArea, avatarUrl, productImageUrl, voiceId }) {
+async function runJob(jobId, body) {
   try {
+    const {
+      videoType = 'ugc',
+      productName, productDesc, applicationArea,
+      avatarUrl, productImageUrl, voiceId,
+      businessName, businessDescription, businessPhotos,
+    } = body;
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
-    const preparedAvatar = avatarUrl
-      ? (avatarUrl.startsWith('http') || avatarUrl.startsWith('data:') ? avatarUrl : `${baseUrl}${avatarUrl}`)
+    const prepareUrl = (u) => u
+      ? (u.startsWith('http') || u.startsWith('data:') ? u : `${baseUrl}${u}`)
       : null;
-    const preparedProduct = productImageUrl
-      ? (productImageUrl.startsWith('http') || productImageUrl.startsWith('data:') ? productImageUrl : `${baseUrl}${productImageUrl}`)
-      : null;
-    console.log(`[Job ${jobId}] Prepared URLs:`, { avatar: preparedAvatar?.slice(0, 80), product: preparedProduct?.slice(0, 80) });
+    const preparedAvatar = prepareUrl(avatarUrl);
+    const preparedProduct = prepareUrl(productImageUrl);
+    const preparedBusinessPhotos = Array.isArray(businessPhotos)
+      ? businessPhotos.map(prepareUrl).filter(Boolean)
+      : [];
+    console.log(`[Job ${jobId}] videoType=${videoType} Prepared URLs:`, { avatar: preparedAvatar?.slice(0, 80), product: preparedProduct?.slice(0, 80), businessPhotos: preparedBusinessPhotos.length });
 
-    // Script
-    const hook = getHook(productName, productDesc);
     const voiceGender = voiceId === 'nBiC8Jexp2XGyIxATg9S' ? 'male' : 'female';
-    const script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender);
-    const scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
-    if (script) {
-      script.voiceover_scene1 = hook;
-      if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook;
-      script.voiceover = `${hook} ${script.voiceover_scene2 || ''} ${script.voiceover_scene3 || ''} ${script.voiceover_scene4 || ''}`.trim();
+
+    // Script — branch by mode
+    let script, scenes, voiceover, hook;
+    if (videoType === 'business') {
+      hook = getBusinessHook(businessDescription || '', businessName || '');
+      script = await generateBusinessScript(businessName || '', businessDescription || '', hook, voiceGender);
+      scenes = script?.scenes || getBusinessDefaultScenes(businessName || '', businessDescription || '');
+      if (script) {
+        script.voiceover_scene1 = hook;
+        if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook;
+        script.voiceover = `${hook} ${script.voiceover_scene2 || ''} ${script.voiceover_scene3 || ''} ${script.voiceover_scene4 || ''}`.trim();
+      }
+      if (scenes[0]) scenes[0].subtitle = hook;
+      voiceover = script?.voiceover || getBusinessDefaultVoiceover(businessName || '', businessDescription || '', hook);
+    } else {
+      hook = getHook(productName, productDesc);
+      script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender);
+      scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
+      if (script) {
+        script.voiceover_scene1 = hook;
+        if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook;
+        script.voiceover = `${hook} ${script.voiceover_scene2 || ''} ${script.voiceover_scene3 || ''} ${script.voiceover_scene4 || ''}`.trim();
+      }
+      if (scenes[0]) scenes[0].subtitle = hook;
+      voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook);
     }
-    if (scenes[0]) scenes[0].subtitle = hook;
-    const voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook);
 
     // Voice + Frames in parallel (voice doesn't depend on frames)
     const generateAllFrames = async () => {
@@ -323,9 +349,30 @@ async function runJob(jobId, { productName, productDesc, applicationArea, avatar
       for (let i = 0; i < 4; i++) {
         try {
           const imageUrls = [];
-          if (preparedAvatar) imageUrls.push(preparedAvatar);
-          if (prevFrame) imageUrls.push(prevFrame);
-          if (preparedProduct && (i === 1 || i === 2 || i === 3)) imageUrls.push(preparedProduct);
+          if (videoType === 'business') {
+            // Business mode frame references
+            if (i === 1) {
+              // Scene 2 — showcase business using the business photos, NO avatar
+              preparedBusinessPhotos.slice(0, 3).forEach(u => imageUrls.push(u));
+            } else {
+              if (preparedAvatar) imageUrls.push(preparedAvatar);
+              if (prevFrame) imageUrls.push(prevFrame);
+              // Include a business photo for context in solution/CTA scenes
+              if (preparedBusinessPhotos.length > 0 && (i === 2 || i === 3)) {
+                imageUrls.push(preparedBusinessPhotos[0]);
+              }
+            }
+          } else {
+            // UGC mode frame references
+            if (i === 1) {
+              // Scene 2 — pure product beauty shot, NO avatar, NO prev frame
+              if (preparedProduct) imageUrls.push(preparedProduct);
+            } else {
+              if (preparedAvatar) imageUrls.push(preparedAvatar);
+              if (prevFrame) imageUrls.push(prevFrame);
+              if (preparedProduct && (i === 2 || i === 3)) imageUrls.push(preparedProduct);
+            }
+          }
           const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls);
           frames.push(frameUrl);
           if (frameUrl) prevFrame = frameUrl;
@@ -463,7 +510,7 @@ function getHook(productName, productDesc) {
 
 function getDefaultVoiceover(productName, applicationArea, hook) {
   const h = hook || getHook(productName, '');
-  return `${h}. ניסיתי הכל ושום דבר לא עזר לי באמת. עד שגיליתי את ${productName} ואז הכל השתנה, ${applicationArea} והתוצאות מטורפות. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
+  return `${h}. זה ${productName} — פתרון חכם שכולם מדברים עליו. עד שגיליתי את ${productName} ואז הכל השתנה, ${applicationArea} והתוצאות מטורפות. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
 }
 
 const STABLE = 'silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference';
@@ -478,10 +525,10 @@ function getDefaultScenes(productName, applicationArea, productDesc) {
       subtitle: hook
     },
     {
-      type: 'החמרה',
-      nb_prompt: `avatar looking more frustrated, showing failed attempt to solve problem related to ${productDesc}, disappointed expression, no product visible, correct human anatomy, exactly two arms, no extra limbs, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar showing deeper frustration with ${productDesc} problem, failed attempt visible, disappointed body language, no product visible, ${STABLE}`,
-      subtitle: `ניסיתי הכל ושום דבר לא עזר לי באמת.`
+      type: 'מוצר',
+      nb_prompt: `Close-up beauty shot of ${productName}, clean background, beautiful natural lighting, product is the hero of the shot, NO person or avatar visible, product details clearly visible, unboxing or reveal style, preserve exact product appearance from reference image, product shape and colors unchanged from reference`,
+      kling_prompt: `Product ${productName} slowly rotating or being revealed, cinematic close-up, NO person visible, NO avatar visible, clean background, beautiful natural lighting, silent, smooth natural motion only, product shape and colors unchanged from reference`,
+      subtitle: `זה ${productName} — ${productDesc}.`
     },
     {
       type: 'פתרון',
@@ -496,4 +543,167 @@ function getDefaultScenes(productName, applicationArea, productDesc) {
       subtitle: `תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`
     }
   ];
+}
+
+// ============ BUSINESS MODE ============
+
+function getBusinessCategory(desc) {
+  const d = (desc || '').toLowerCase();
+  if (/מסעד|קפה|פיצרי|בר|אוכל|שף|מטבח|restaurant|cafe|bar|food|kitchen|pizza|sushi|burger/.test(d)) return 'restaurant';
+  if (/אופנה|בוטיק|בגד|חולצ|שמל|fashion|boutique|clothing|apparel|shop|store/.test(d)) return 'fashion';
+  if (/קליניק|מרפא|רופא|טיפול|אסתטי|שיני|קוסמטיק|clinic|dental|doctor|therapy|aesthetic|beauty|spa|massage/.test(d)) return 'clinic';
+  if (/מספר|תסרוק|ספר|salon|hair|barber/.test(d)) return 'salon';
+  if (/כושר|חדר כושר|אימון|יוגה|פילאטיס|gym|fitness|yoga|pilates|trainer/.test(d)) return 'fitness';
+  return 'generic';
+}
+
+function getBusinessHook(desc, name) {
+  const cat = getBusinessCategory(desc);
+  const hooks = {
+    restaurant: 'כל פעם שרציתי לצאת לאכול בחוץ, הייתי מתלבטת ונגמר הערב בפלאפל',
+    fashion: 'כל פעם שחיפשתי בגד חדש, בחנויות היה הכל אותו דבר ומשעמם',
+    clinic: 'שנים התלוננתי על הבעיה הזאת וכל מי שהלכתי אליו לא באמת עזר',
+    salon: 'כל פעם שהלכתי להסתפר יצאתי מאוכזבת ולא כמו שדמיינתי',
+    fitness: 'רציתי להתחיל להתאמן כבר שנים אבל שום מקום לא גרם לי להרגיש בנוח',
+    generic: 'היה לי צורך בשירות איכותי וכל מה שמצאתי פשוט לא הרגיש נכון',
+  };
+  return hooks[cat] || hooks.generic;
+}
+
+function getBusinessDefaultVoiceover(name, desc, hook) {
+  const h = hook || getBusinessHook(desc, name);
+  return `${h}. ואז גיליתי את ${name} — ${desc}. הייתי שם בעצמי וזה פשוט שינה לי את החוויה לגמרי. חייבים לבוא ל${name} — תזמינו עכשיו!`;
+}
+
+function getBusinessDefaultScenes(name, desc) {
+  const hook = getBusinessHook(desc, name);
+  return [
+    {
+      type: 'הוק',
+      nb_prompt: `avatar showing relatable situation where ${name} solves a need, natural everyday scene, frustrated or searching expression, NO business name visible, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar showing relatable everyday frustration before discovering the business, NO business name visible, ${STABLE}`,
+      subtitle: hook
+    },
+    {
+      type: 'עסק',
+      nb_prompt: `Beautiful cinematic shot of ${name} business — ${desc}, highlight the space/product/atmosphere, NO person visible, NO avatar, beautiful natural lighting, inviting and warm, preserve exact appearance of business from reference images`,
+      kling_prompt: `Cinematic reveal of the ${name} business space/offering, showcase the atmosphere and highlights, NO person visible, beautiful natural lighting, silent, smooth natural motion only, business appearance unchanged from reference`,
+      subtitle: `זה ${name} — ${desc}`
+    },
+    {
+      type: 'חוויה',
+      nb_prompt: `avatar experiencing ${name}, happily engaged with the business offering, warm and excited expression, business context visible in background, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar genuinely enjoying the experience at ${name}, happy engaged expression, business context visible, ${STABLE}`,
+      subtitle: `הייתי ב${name} — ממש חוויה אחרת, ההבדל ניכר מהרגע הראשון.`
+    },
+    {
+      type: 'CTA',
+      nb_prompt: `avatar smiling warmly recommending ${name}, genuine happy expression, business context visible, natural smile, correct human anatomy, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar warmly recommending ${name} to camera, genuine smile, inviting gesture, ${STABLE}`,
+      subtitle: `חייבים לנסות את ${name} — קבעו עכשיו, אל תפספסו!`
+    }
+  ];
+}
+
+async function generateBusinessScript(name, desc, hook, voiceGender) {
+  if (!ANTHROPIC_KEY) return null;
+  const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
+  const genderInstruction = voiceGender === 'male'
+    ? 'כתוב את הקריינות בלשון זכר'
+    : 'כתוב את הקריינות בלשון נקבה';
+
+  const cat = getBusinessCategory(desc);
+  const categoryHints = {
+    restaurant: 'Focus on food, atmosphere, special dishes, the experience of eating there. Highlight taste, warmth, family/friend vibes.',
+    fashion: 'Focus on style, the collection, the shopping experience, unique pieces, feel good in what you wear.',
+    clinic: 'Focus on expertise, results, client experience, trust, professionalism, before/after feeling.',
+    salon: 'Focus on the styling experience, the result, how the customer feels after leaving.',
+    fitness: 'Focus on the vibe of the place, the trainers, the results, community feel.',
+    generic: 'Focus on what makes this business special, the customer experience, the result.',
+  };
+
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514', max_tokens: 2500,
+    messages: [{ role: 'user', content: `You are a UGC ad expert writing scripts in Hebrew for LOCAL BUSINESSES. Create a viral 4-scene ad for this business:
+
+Business name: "${name}"
+Business description: ${desc}
+Auto-detected category: ${cat}
+Category guidance: ${categoryHints[cat]}
+
+${genderInstruction}
+
+This is a BUSINESS VIDEO (not a product ad). Write in casual conversational Hebrew — feels like a real customer recommending the business to a friend.
+
+SCENE STRUCTURE (business mode):
+- Scene 1 (Hook): relatable situation where THIS BUSINESS solves a need. NO business name mentioned. Universal pain for this business's category.
+- Scene 2 (Show): highlight the business/product using the reference photos. NO avatar, NO person. Just the business space / offering as the hero. Voiceover describes what the business is and what makes it special.
+- Scene 3 (Experience): the avatar experiencing the business — happy, engaged, "I was there". Uses business context from the reference photos.
+- Scene 4 (CTA): visit/order/contact with urgency. Warm recommendation.
+
+VOICEOVER TIMING — STRICT:
+- Scene 1: ~12 Hebrew words
+- Scene 2: ~14 Hebrew words (describe the business, its offering, what's special)
+- Scene 3: ~18 Hebrew words (experience at the business — what it felt like)
+- Scene 4: ~12 Hebrew words (strong CTA — visit, order, contact, with urgency)
+
+HOOK (voiceover_scene1) — PRE-SET:
+voiceover_scene1 is already: "${hook}" — use this EXACT text.
+
+EVERY nb_prompt MUST end with: "correct human anatomy, exactly two arms, no extra limbs, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle"
+(except scene 2 which has no person)
+
+END every Kling prompt with: "silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference"
+
+Return ONLY valid JSON (no markdown):
+{
+  "voiceover_scene1": "~12 Hebrew words — universal pain for this business's category, NO business name",
+  "voiceover_scene2": "~14 Hebrew words — describe ${name} visually, what it is, what makes it special",
+  "voiceover_scene3": "~18 Hebrew words — experience at ${name}, what it felt like being there",
+  "voiceover_scene4": "~12 Hebrew words — warm CTA with urgency: visit/order/contact ${name} now",
+  "setting": "one-line description",
+  "scenes": [
+    {
+      "type": "הוק",
+      "nb_prompt": "avatar showing relatable everyday frustration that ${name} solves, natural setting, NO business name visible, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar showing relatable frustration, NO business name visible, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps",
+      "subtitle": "same as voiceover_scene1"
+    },
+    {
+      "type": "עסק",
+      "nb_prompt": "Beautiful cinematic shot of ${name} — ${desc}, highlight the business space/product/atmosphere, NO person visible, NO avatar, beautiful natural lighting, inviting atmosphere, preserve exact appearance from reference images",
+      "kling_prompt": "Cinematic reveal of ${name}, showcase the atmosphere and highlights, NO person visible, beautiful natural lighting, silent, smooth natural motion only, business appearance unchanged from reference",
+      "subtitle": "same as voiceover_scene2"
+    },
+    {
+      "type": "חוויה",
+      "nb_prompt": "avatar at ${name} enjoying the experience, happy engaged expression, business context visible in background from reference, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar genuinely enjoying the experience at ${name}, business context visible, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference",
+      "subtitle": "same as voiceover_scene3"
+    },
+    {
+      "type": "CTA",
+      "nb_prompt": "avatar warmly recommending ${name}, genuine smile, business context visible, correct human anatomy, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar warmly recommending ${name} to camera, genuine smile, inviting gesture, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference",
+      "subtitle": "same as voiceover_scene4"
+    }
+  ]
+}` }]
+  });
+  const text = message.content?.[0]?.text || '';
+  try {
+    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+    const v1 = parsed.voiceover_scene1 || '';
+    const v2 = parsed.voiceover_scene2 || '';
+    const v3 = parsed.voiceover_scene3 || '';
+    const v4 = parsed.voiceover_scene4 || '';
+    parsed.voiceover = `${v1} ${v2} ${v3} ${v4}`.trim();
+    if (parsed.scenes) {
+      parsed.scenes[0].subtitle = v1;
+      parsed.scenes[1].subtitle = v2;
+      parsed.scenes[2].subtitle = v3;
+      parsed.scenes[3].subtitle = v4;
+    }
+    return parsed;
+  } catch { return null; }
 }
