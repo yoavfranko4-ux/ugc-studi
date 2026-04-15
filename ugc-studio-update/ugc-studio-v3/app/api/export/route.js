@@ -346,8 +346,19 @@ export async function POST(req) {
 
       const vfChain = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1'
 
+      // Error-tolerance input flags for problematic Kling MP4s (corrupt packets,
+      // missing/negative timestamps). These MUST come BEFORE `-i` so FFmpeg
+      // applies them to the demuxer/decoder pass, not the output.
+      const inputTolerance = [
+        '-err_detect', 'ignore_err',
+        '-fflags', '+discardcorrupt+genpts',
+        '-avoid_negative_ts', 'make_zero',
+      ]
+
       const normArgs = [
-        '-y', '-i', inPath,
+        '-y',
+        ...inputTolerance,
+        '-i', inPath,
         '-vf', vfChain,
         '-r', '24',
         '-fps_mode', 'cfr',
@@ -367,15 +378,40 @@ export async function POST(req) {
       console.log(`[Export] Normalize args[${i}]:`, JSON.stringify(normArgs))
       try {
         const r = await execFileAsync(ffmpegPath, normArgs, { timeout: 60000, maxBuffer: 20 * 1024 * 1024 })
-        console.log(`[Export] norm_${i} stderr FULL:\n${r.stderr || '(empty)'}`)
+        const stderr = r.stderr || ''
+        console.log(`[Export] norm_${i} FULL stderr:`, stderr || '(empty)')
         const sz = fs.statSync(normPath).size
         console.log(`[Export] norm_${i}.mp4 size:`, sz, 'bytes')
         normalizedPaths.push(normPath)
       } catch (err) {
+        const stderr = err.stderr || ''
+        const stdout = err.stdout || ''
+        // Log FULL stderr — the last error line before "code null" is usually
+        // the root cause (decoder error, timestamp issue, moov atom, etc.).
+        console.error(`[Export] norm_${i} FULL stderr:`, stderr || '(no stderr)')
+        console.error(`[Export] norm_${i} FULL stdout:`, stdout || '(no stdout)')
         console.error(`[Export] Normalization clip ${i} FAILED. Exit code:`, err.code)
-        console.error(`[Export] Normalize stderr FULL:\n${err.stderr || '(no stderr)'}`)
-        console.error(`[Export] Normalize stdout FULL:\n${err.stdout || '(no stdout)'}`)
-        throw new Error(`Normalize clip ${i} failed (code ${err.code}): ${err.stderr?.slice(-400) || err.message}`)
+
+        // Fallback: retry with a 5-second black placeholder so the export can
+        // still complete even when a clip is unrecoverable.
+        console.warn(`[Export] Retrying clip ${i} as 5-second black placeholder after normalize failure`)
+        const blackFallback = path.join(jobDir, `black_fallback_${i}.mp4`)
+        try {
+          await execFileAsync(ffmpegPath, [
+            '-y',
+            '-f', 'lavfi', '-i', 'color=c=black:s=720x1280:r=24',
+            '-t', '5',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+            '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an',
+            blackFallback
+          ], { timeout: 30000, maxBuffer: 10 * 1024 * 1024 })
+          const sz = fs.statSync(blackFallback).size
+          console.warn(`[Export] Black fallback for clip ${i}: ${sz} bytes`)
+          normalizedPaths.push(blackFallback)
+        } catch (blackErr) {
+          console.error(`[Export] Black fallback for clip ${i} also failed:`, blackErr.stderr?.slice(-400) || blackErr.message)
+          throw new Error(`Normalize clip ${i} failed (code ${err.code}): ${stderr.slice(-400) || err.message}`)
+        }
       }
     }
 
