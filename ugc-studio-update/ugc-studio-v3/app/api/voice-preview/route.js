@@ -1,3 +1,5 @@
+import { cleanHebrewText } from '../../../lib/hebrew-tts.js';
+
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
 
 const SAMPLE_TEXTS = {
@@ -12,7 +14,8 @@ export async function GET(req) {
     if (!voiceId) return Response.json({ error: 'voiceId required' }, { status: 400 });
     if (!ELEVEN_KEY) return Response.json({ error: 'ElevenLabs key missing' }, { status: 500 });
 
-    const text = SAMPLE_TEXTS[voiceId] || 'היי, זו דוגמה לקול שלי.';
+    const rawText = SAMPLE_TEXTS[voiceId] || 'היי, זו דוגמה לקול שלי.';
+    const text = cleanHebrewText(rawText);
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },

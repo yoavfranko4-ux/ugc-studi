@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { fal } from '@fal-ai/client'
 import { supabase } from '../../../lib/supabase'
+import { cleanHebrewText } from '../../../lib/hebrew-tts.js'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { writeFile, readFile, mkdir, rm } from 'fs/promises'
@@ -29,7 +30,7 @@ const SCENE_DURATIONS = [5, 5, 5, 5];
 async function generateNBFrame(prompt, imageUrls, maxRetries = 3) {
   const validUrls = imageUrls.filter(Boolean);
   console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
-  const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real avatar not model, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`;
+  const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real avatar not model, exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`;
   const endpointId = validUrls.length === 0
     ? 'fal-ai/nano-banana-2'
     : 'fal-ai/nano-banana-2/edit';
@@ -62,12 +63,15 @@ async function generateNBFrame(prompt, imageUrls, maxRetries = 3) {
 async function generateVoice(text, voiceId) {
   if (!ELEVEN_KEY || !text) return null;
   const voice = voiceId || ELEVEN_VOICE;
+  // Hebrew preprocessing — fix nikud + add natural pause commas before
+  // sending to ElevenLabs so the TTS doesn't mispronounce common words.
+  const cleanedText = cleanHebrewText(text);
   try {
     // Use with-timestamps endpoint for word-level alignment data
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}/with-timestamps?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, model_id: 'eleven_v3', voice_settings: { stability: 0.55, similarity_boost: 0.75, style: 0.55, use_speaker_boost: true } })
+      body: JSON.stringify({ text: cleanedText, model_id: 'eleven_v3', voice_settings: { stability: 0.55, similarity_boost: 0.75, style: 0.55, use_speaker_boost: true } })
     });
     if (!res.ok) { console.error('ElevenLabs failed:', await res.text()); return null; }
     const json = await res.json();
@@ -205,7 +209,7 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 - NEVER put clothing/fashion scenes in a car. NEVER put dental scenes in a bedroom.
 - NEVER put ANY product in a car scene UNLESS it is explicitly a car accessory. Cars are ONLY for car accessories.
 
-6. EVERY nb_prompt MUST end with: "correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle"
+6. EVERY nb_prompt MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle"
 
 7. SCENE STRUCTURE (follows the hook formula):
 - Scene 1 (כאב — Hook): Avatar ALONE showing the specific problem — NO product visible, NO product mentioned
@@ -771,7 +775,7 @@ VOICEOVER TIMING — STRICT:
 HOOK (voiceover_scene1) — PRE-SET:
 voiceover_scene1 is already: "${hook}" — use this EXACT text.
 
-EVERY nb_prompt MUST end with: "correct human anatomy, exactly two arms, no extra limbs, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle"
+EVERY nb_prompt MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle"
 (except scene 2 which has no person)
 
 END every Kling prompt with: "silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference"

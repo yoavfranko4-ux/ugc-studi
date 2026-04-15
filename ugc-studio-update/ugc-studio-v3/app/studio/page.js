@@ -337,6 +337,13 @@ export default function Home() {
   const [videosReady, setVideosReady] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
+  // Voiceover re-record (one-shot per video session) — works on both fresh
+  // generations and saved-edit restores via ?editId=, since both flows
+  // populate result.hebrewVoice and audioBlobUrl.
+  const [hasRerecorded, setHasRerecorded] = useState(false)
+  const [rerecording, setRerecording] = useState(false)
+  const [showRerecordPanel, setShowRerecordPanel] = useState(false)
+  const [rerecordText, setRerecordText] = useState('')
   const videoRef = useRef(null)           // legacy single ref (still used in some places)
   const videoRefs = useRef([])            // one <video> element per clip — enables seamless back-to-back playback
   const audioRef = useRef(null)
@@ -539,6 +546,83 @@ export default function Home() {
     reader.readAsDataURL(file)
   }
 
+  // ── Voiceover re-record (one-shot per video session) ──
+  // Works for BOTH freshly generated videos AND saved-edit restores via ?editId=
+  // because both flows hydrate result.hebrewVoice and audioBlobUrl identically.
+  const openRerecordPanel = () => {
+    if (hasRerecorded || rerecording) return
+    const initial = (result?.hebrewVoice || '').trim()
+    setRerecordText(initial)
+    setShowRerecordPanel(true)
+  }
+  const closeRerecordPanel = () => { setShowRerecordPanel(false); setRerecordText('') }
+
+  const rerecordVoiceover = async (textOverride) => {
+    if (hasRerecorded || rerecording) return
+    const text = (textOverride ?? rerecordText ?? '').trim()
+    if (!text) { alert('אין טקסט קריינות לשלוח'); return }
+    setRerecording(true)
+    addLog('שולח טקסט ל-ElevenLabs...')
+    try {
+      const vRes = await fetch('/api/voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voiceId })
+      })
+      if (!vRes.ok) {
+        const errBody = await vRes.json().catch(() => ({}))
+        throw new Error(errBody.error || `Voice API ${vRes.status}`)
+      }
+      const { base64, wordTimestamps = [], duration = 0 } = await vRes.json()
+      if (!base64) throw new Error('No audio returned')
+
+      // Decode base64 → Blob → object URL, swap into the audio element AND
+      // update audioBlobUrl.current so the export pipeline sees the new audio.
+      const bin = atob(base64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      const blob = new Blob([bytes], { type: 'audio/mpeg' })
+      const newUrl = URL.createObjectURL(blob)
+      // Free the prior blob URL to avoid memory leaks across re-records
+      if (audioBlobUrl.current && audioBlobUrl.current.startsWith('blob:')) {
+        try { URL.revokeObjectURL(audioBlobUrl.current) } catch {}
+      }
+      audioBlobUrl.current = newUrl
+      if (audioRef.current) {
+        audioRef.current.src = newUrl
+        audioRef.current.load()
+      }
+
+      // Persist new script + timestamps + rebuilt subtitle segments on result.
+      // The export pipeline reads result.audioBase64 and result.wordTimestamps,
+      // so updating both here means the next export uses the new voice.
+      setResult(r => {
+        if (!r) return r
+        const subtitleSegments = wordTimestamps?.length
+          ? buildSubtitleSegments(wordTimestamps, 3)
+          : r.subtitleSegments
+        return {
+          ...r,
+          hebrewVoice: text,
+          audioBase64: base64,
+          wordTimestamps,
+          subtitleSegments,
+          voiceDuration: duration
+        }
+      })
+
+      setHasRerecorded(true)
+      setShowRerecordPanel(false)
+      setRerecordText('')
+      addLog('קריינות חדשה מוכנה!', 'ok')
+    } catch (e) {
+      addLog('שגיאה בהקלטה מחדש: ' + e.message, 'err')
+      alert('שגיאה: ' + e.message)
+    } finally {
+      setRerecording(false)
+    }
+  }
+
   const runAgent = async () => {
     const currentCheck = customAvatar || selectedAvatar?.url
     if (!currentCheck) return alert('בחר דמות')
@@ -548,7 +632,9 @@ export default function Home() {
       if (!businessName || !businessDescription) return alert('הכנס שם ותיאור עסק')
       if (businessPhotos.length === 0) return alert('העלה לפחות תמונה אחת של העסק')
     }
-    setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' }); addLog('Agent מתחיל לעבוד...')
+    setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' });
+    setHasRerecorded(false); setShowRerecordPanel(false); setRerecordText('');
+    addLog('Agent מתחיל לעבוד...')
     try {
       const currentAvatarUrl = customAvatar || selectedAvatar?.url
       addLog('Avatar: ' + (currentAvatarUrl ? currentAvatarUrl.slice(0,40) : 'NONE'), currentAvatarUrl ? '' : 'err')
@@ -1241,7 +1327,7 @@ export default function Home() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setClipOrder([0,1,2,3]); setBusinessPhotos([]) }} style={ghostBtn}>
+          <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setClipOrder([0,1,2,3]); setBusinessPhotos([]); setHasRerecorded(false); setShowRerecordPanel(false); setRerecordText('') }} style={ghostBtn}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             מודעה חדשה
           </button>
@@ -1321,7 +1407,104 @@ export default function Home() {
           <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
             <div style={{ ...secTitle, marginBottom: 10, fontSize: 12 }}>קריינות</div>
             <audio ref={audioRef} controls style={{ width: '100%', borderRadius: 8, height: 32 }} />
+
+            {/* Re-record button — rendered IMMEDIATELY under the audio player.
+                Shown unconditionally on step==='done' (whether the video was
+                just generated OR restored via ?editId=) until first use. */}
+            {step === 'done' && !showRerecordPanel && (
+              <button
+                onClick={openRerecordPanel}
+                disabled={hasRerecorded || rerecording}
+                title={hasRerecorded ? 'ההקלטה מחדש זמינה פעם אחת בלבד לכל סרטון' : 'ערוך את הטקסט והקלט את הקריינות מחדש'}
+                style={{
+                  marginTop: 10,
+                  width: '100%',
+                  padding: '10px 12px',
+                  background: hasRerecorded ? 'rgba(255,255,255,0.02)' : 'linear-gradient(135deg, #7c3aed, #a855f7)',
+                  border: `1px solid ${hasRerecorded ? 'rgba(255,255,255,0.06)' : 'rgba(168,85,247,0.5)'}`,
+                  color: hasRerecorded ? '#52525b' : '#ffffff',
+                  borderRadius: 10,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  fontFamily: 'Heebo,sans-serif',
+                  direction: 'rtl',
+                  cursor: hasRerecorded || rerecording ? 'not-allowed' : 'pointer',
+                  opacity: hasRerecorded || rerecording ? 0.6 : 1,
+                  boxShadow: hasRerecorded ? 'none' : '0 4px 14px rgba(124,58,237,0.25)',
+                  transition: 'all 200ms ease',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+                }}>
+                {hasRerecorded ? '✓ הוקלט מחדש' : '✎ ערוך וצלם מחדש'}
+              </button>
+            )}
+            {hasRerecorded && (
+              <div style={{ marginTop: 6, fontSize: 10, color: '#52525b', direction: 'rtl', fontFamily: 'Heebo,sans-serif', textAlign: 'center' }}>
+                הקלטה מחדש זמינה פעם אחת לכל סרטון.
+              </div>
+            )}
+
+            {/* Voiceover text readout — capped height with scroll so it never
+                pushes the re-record button below the fold. */}
             <div style={{ marginTop: 8, fontSize: 11, color: '#a1a1aa', direction: 'rtl', lineHeight: 1.7, fontFamily: 'Heebo,sans-serif', maxHeight: 80, overflowY: 'auto' }}>{result?.hebrewVoice}</div>
+
+            {/* Edit panel — textarea + record/cancel */}
+            {showRerecordPanel && (
+              <div style={{ marginTop: 10, padding: 10, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: 10 }}>
+                <div style={{ fontSize: 11, color: '#a855f7', fontWeight: 700, marginBottom: 6, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
+                  עריכת טקסט הקריינות
+                </div>
+                <textarea
+                  value={rerecordText}
+                  onChange={e => setRerecordText(e.target.value)}
+                  disabled={rerecording}
+                  rows={5}
+                  style={{
+                    width: '100%',
+                    background: 'rgba(0,0,0,0.4)',
+                    border: '1px solid rgba(168,85,247,0.3)',
+                    borderRadius: 8,
+                    padding: 8,
+                    color: '#f0f0ff',
+                    fontSize: 12,
+                    fontFamily: 'Heebo,sans-serif',
+                    direction: 'rtl',
+                    lineHeight: 1.7,
+                    outline: 'none',
+                    resize: 'vertical',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, direction: 'rtl' }}>
+                  <button
+                    onClick={() => rerecordVoiceover(rerecordText)}
+                    disabled={rerecording || !rerecordText.trim()}
+                    style={{
+                      flex: 1,
+                      padding: '8px 10px',
+                      background: rerecording || !rerecordText.trim() ? 'rgba(168,85,247,0.2)' : 'linear-gradient(135deg, #7c3aed, #a855f7)',
+                      border: 'none',
+                      color: 'white',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      fontFamily: 'Heebo,sans-serif',
+                      cursor: rerecording || !rerecordText.trim() ? 'not-allowed' : 'pointer',
+                      opacity: rerecording || !rerecordText.trim() ? 0.6 : 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+                    }}>
+                    {rerecording
+                      ? <><div style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> מקליט...</>
+                      : <>צלם קריינות מחדש 🎙️</>}
+                  </button>
+                  <button
+                    onClick={closeRerecordPanel}
+                    disabled={rerecording}
+                    style={{ ...ghostBtn, padding: '8px 12px', fontSize: 11, opacity: rerecording ? 0.5 : 1, cursor: rerecording ? 'not-allowed' : 'pointer' }}>
+                    ביטול
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Scene detail for current */}
