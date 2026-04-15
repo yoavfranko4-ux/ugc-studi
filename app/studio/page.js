@@ -915,12 +915,13 @@ export default function Home() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={cardS}>
-            <div style={secTitle}>קריינות עברית</div>
+            <div style={secTitle}>קריינות</div>
             <audio ref={audioRef} controls style={{ width: '100%', borderRadius: 8 }} />
-            <div style={{ marginTop: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#a1a1aa', direction: 'rtl', lineHeight: 1.8, fontFamily: 'Heebo,sans-serif' }}>{result?.hebrewVoice}</div>
 
-            {/* Re-record button — one-shot per video session */}
-            {!showRerecordPanel && (
+            {/* Re-record button — rendered IMMEDIATELY under the audio player
+                so it's always visible without scrolling. Shown unconditionally
+                whenever the edit panel is closed and we're on the editor step. */}
+            {step === 'done' && !showRerecordPanel && (
               <button
                 onClick={openRerecordPanel}
                 disabled={hasRerecorded || rerecording}
@@ -928,17 +929,18 @@ export default function Home() {
                 style={{
                   marginTop: 12,
                   width: '100%',
-                  padding: '12px 14px',
-                  background: hasRerecorded ? 'rgba(255,255,255,0.02)' : 'rgba(168,85,247,0.08)',
-                  border: `1px solid ${hasRerecorded ? 'rgba(255,255,255,0.06)' : 'rgba(168,85,247,0.35)'}`,
-                  color: hasRerecorded ? '#52525b' : '#d4d4ff',
+                  padding: '14px 16px',
+                  background: hasRerecorded ? 'rgba(255,255,255,0.02)' : 'linear-gradient(135deg, #7c3aed, #a855f7)',
+                  border: `1px solid ${hasRerecorded ? 'rgba(255,255,255,0.06)' : 'rgba(168,85,247,0.5)'}`,
+                  color: hasRerecorded ? '#52525b' : '#ffffff',
                   borderRadius: 12,
-                  fontSize: 13,
-                  fontWeight: 600,
+                  fontSize: 14,
+                  fontWeight: 700,
                   fontFamily: 'Heebo,sans-serif',
                   direction: 'rtl',
                   cursor: hasRerecorded || rerecording ? 'not-allowed' : 'pointer',
                   opacity: hasRerecorded || rerecording ? 0.6 : 1,
+                  boxShadow: hasRerecorded ? 'none' : '0 4px 16px rgba(124,58,237,0.25)',
                   transition: 'all 200ms ease',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
                 }}>
@@ -950,6 +952,22 @@ export default function Home() {
                 הקלטה מחדש זמינה פעם אחת לכל סרטון.
               </div>
             )}
+
+            {/* Voiceover text readout — capped height with scroll so it can
+                never push the re-record button below the fold. */}
+            <div style={{
+              marginTop: 12,
+              background: 'rgba(255,255,255,0.02)',
+              borderRadius: 10,
+              padding: '12px 14px',
+              fontSize: 13,
+              color: '#a1a1aa',
+              direction: 'rtl',
+              lineHeight: 1.8,
+              fontFamily: 'Heebo,sans-serif',
+              maxHeight: 140,
+              overflowY: 'auto'
+            }}>{result?.hebrewVoice}</div>
 
             {/* Edit panel — textarea + record/cancel */}
             {showRerecordPanel && (
