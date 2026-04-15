@@ -75,7 +75,7 @@ Create a CONNECTED 4-scene TikTok story for: ${pName} - ${product}. What custome
 
 The 4 scenes must feel like ONE continuous TikTok story.
 
-ANATOMY RULE (CRITICAL): Every nb_prompt MUST include: "correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body"
+ANATOMY RULE (CRITICAL): Every nb_prompt MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body"
 
 HOOK RULE (CRITICAL): voiceover_scene1 MUST name the EXACT specific craving/need of THIS business — never use 'הבעיה הזאת' alone. Be specific: for restaurant say 'חיפשתי מקום עם שווארמה אמיתית כבר חודשים', for salon say 'תמיד יצאתי מאוכזבת מתספורות'. Be specific to the business.
 
@@ -97,7 +97,7 @@ NB PROMPT RULES (CRITICAL — follow for EVERY nb_prompt):
 5. Expression: specific facial expression and energy
 6. MUST end with: "no text overlay, no captions, no watermark, no brand name or writing on product"
 7. MUST end with: "vertical 9:16, TikTok UGC creator style, photorealistic, Nano Banana 2 ultra-realistic"
-8. MUST include: "correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body"
+8. MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body"
 
 For EACH scene, write:
 1. Nano Banana prompt (50 words max): Follow ALL NB PROMPT RULES above. Scenes 1,3,4 start with "same person from reference photo". Scene 2 is a hero shot — no person needed.
@@ -122,7 +122,7 @@ Create a CONNECTED 4-scene TikTok story for: ${pName} - ${product}. Usage: ${pUs
 
 The 4 scenes must feel like ONE continuous story with the SAME person in the SAME setting.
 
-ANATOMY RULE (CRITICAL): Every nb_prompt MUST include: "correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body"
+ANATOMY RULE (CRITICAL): Every nb_prompt MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body"
 
 HOOK RULE (CRITICAL): voiceover_scene1 MUST name the EXACT specific problem of THIS product — never use 'הבעיה הזאת' alone without naming what the problem is. Examples: for teeth whitening say 'שיניים צהובות שמביכות אותי בכל תמונה', for face cream say 'כתמים ואקנה שמופיעים כל בוקר', for dress say 'לא מוצאת שמלה שמחמיאה לדמות שלי'. Be specific to the product.
 
@@ -144,12 +144,12 @@ NB PROMPT RULES (CRITICAL — follow for EVERY nb_prompt):
 5. Expression: specific facial expression and energy
 6. MUST end with: "no text overlay, no captions, no watermark, no brand name or writing on product"
 7. MUST end with: "vertical 9:16, TikTok UGC creator style, photorealistic, Nano Banana 2 ultra-realistic"
-8. MUST include: "correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body"
+8. MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body"
 
 Example nb_prompt style:
-Scene 2: "same person from reference photo, holding product up toward camera with both hands, direct eye contact, authentic excited expression, ring light from front, shot on iPhone, slightly imperfect handheld, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, no text overlay, no captions, no watermark, no brand name or writing on product, vertical 9:16, TikTok UGC creator style, photorealistic, Nano Banana 2 ultra-realistic"
-Scene 3: "same person from reference photo, actively using product mid-action, candid authentic moment, natural setting appropriate for product type, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, no text overlay, no captions, no watermark, no brand name or writing on product, vertical 9:16, TikTok UGC creator style, photorealistic, Nano Banana 2 ultra-realistic"
-Scene 4: "same person from reference photo, genuine happy smile showing result, touching face/wearing product naturally, warm lighting, eye contact with camera, correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body, no text overlay, no captions, no watermark, no brand name or writing on product, vertical 9:16, TikTok UGC creator style, photorealistic, Nano Banana 2 ultra-realistic"
+Scene 2: "same person from reference photo, holding product up toward camera with both hands, direct eye contact, authentic excited expression, ring light from front, shot on iPhone, slightly imperfect handheld, exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, no text overlay, no captions, no watermark, no brand name or writing on product, vertical 9:16, TikTok UGC creator style, photorealistic, Nano Banana 2 ultra-realistic"
+Scene 3: "same person from reference photo, actively using product mid-action, candid authentic moment, natural setting appropriate for product type, exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, no text overlay, no captions, no watermark, no brand name or writing on product, vertical 9:16, TikTok UGC creator style, photorealistic, Nano Banana 2 ultra-realistic"
+Scene 4: "same person from reference photo, genuine happy smile showing result, touching face/wearing product naturally, warm lighting, eye contact with camera, exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, no text overlay, no captions, no watermark, no brand name or writing on product, vertical 9:16, TikTok UGC creator style, photorealistic, Nano Banana 2 ultra-realistic"
 
 For EACH scene, write:
 1. Nano Banana prompt (50 words max): Follow ALL NB PROMPT RULES above. Start scenes 2-4 with "same person from reference photo".
@@ -185,7 +185,7 @@ Return ONLY JSON:
 
   // Fallback story if Claude unavailable
   if (!story) {
-    const anatomyRule = 'correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body'
+    const anatomyRule = 'exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body'
     const noText = 'no text overlay, no captions, no watermark, no brand name or writing on product'
     const format = 'vertical 9:16, TikTok UGC creator style, photorealistic, Nano Banana 2 ultra-realistic'
 
@@ -266,17 +266,18 @@ Return ONLY JSON:
 
       // פרומפט עם הוראות עקביות לפי מה שNano Banana מבין
       const hasProduct = !isHeroShot && i >= 1 && productImageUrl
-      const anatomyRule = 'correct human anatomy, exactly two arms, no extra limbs, no floating hands, no third arm, anatomically correct body'
+      const anatomyRule = 'exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body'
+      const negativeConcepts = 'Negative (avoid): extra limbs, disembodied hands, third arm, floating hands, hands from outside frame, anatomically incorrect.'
       const fidelityRule = 'stay faithful to reference image style, realistic photo quality, not AI-looking, preserve original atmosphere and colors, keep the same lighting colors composition and mood as the reference photo, minimal creative deviation'
       let nbPrompt
       if (isHeroShot) {
         nbPrompt = productImageUrl
-          ? `Recreate the scene from the reference image (Image 1) faithfully. Keep the SAME subject, lighting, colors, composition, and atmosphere as Image 1 — treat Image 1 as the ground truth. Only make subtle improvements: slightly cleaner framing, a touch more vibrance, a natural TikTok hero-shot feel. Do not reinvent the shot, do not add new elements, do not stylize into a generic AI look. ${fidelityRule}. Optional subtle context: ${story.scenes[i].nb_prompt}`
-          : `${story.scenes[i].nb_prompt}. ${fidelityRule}.`
+          ? `Recreate the scene from the reference image (Image 1) faithfully. Keep the SAME subject, lighting, colors, composition, and atmosphere as Image 1 — treat Image 1 as the ground truth. Only make subtle improvements: slightly cleaner framing, a touch more vibrance, a natural TikTok hero-shot feel. Do not reinvent the shot, do not add new elements, do not stylize into a generic AI look. ${fidelityRule}. ${negativeConcepts} Optional subtle context: ${story.scenes[i].nb_prompt}`
+          : `${story.scenes[i].nb_prompt}. ${fidelityRule}. ${negativeConcepts}`
       } else if (hasProduct) {
-        nbPrompt = `Using the person from Image 1 as the subject with identical face hair and appearance, and the product from Image 2 in their hands. ${story.scenes[i].nb_prompt}. Keep facial features and identity exactly the same as Image 1. The product from Image 2 is clearly visible with label facing camera. ${anatomyRule}.`
+        nbPrompt = `Using the person from Image 1 as the subject with identical face hair and appearance, and the product from Image 2 in their hands. ${story.scenes[i].nb_prompt}. Keep facial features and identity exactly the same as Image 1. The product from Image 2 is clearly visible with label facing camera. ${anatomyRule}. ${negativeConcepts}`
       } else {
-        nbPrompt = `Using the person from Image 1 as the subject with identical face hair and appearance. ${story.scenes[i].nb_prompt}. Keep facial features and identity exactly the same as Image 1. ${anatomyRule}.`
+        nbPrompt = `Using the person from Image 1 as the subject with identical face hair and appearance. ${story.scenes[i].nb_prompt}. Keep facial features and identity exactly the same as Image 1. ${anatomyRule}. ${negativeConcepts}`
       }
 
       const nbRes = await fetch('https://fal.run/fal-ai/nano-banana-2/edit', {
