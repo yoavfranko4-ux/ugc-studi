@@ -30,7 +30,10 @@ const SCENE_DURATIONS = [5, 5, 5, 5];
 async function generateNBFrame(prompt, imageUrls, maxRetries = 3) {
   const validUrls = imageUrls.filter(Boolean);
   console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
-  const enhancedPrompt = `${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real avatar not model, exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`;
+  const anatomyPrefix = 'CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body.';
+  const negativeConcepts = 'Negative (avoid): extra arms, extra hands, third hand, disembodied limbs, floating hands, phantom limbs, multiple arms, anatomically incorrect, deformed hands, mutant hands, extra fingers, six fingers, hands from outside frame, partial limbs entering from edges.';
+  const singleHandRule = 'If holding a product, hold it with ONE hand only, other hand visible and relaxed at side, never two items at once.';
+  const enhancedPrompt = `${anatomyPrefix} ${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real avatar not model, ${singleHandRule} exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle. ${negativeConcepts}`;
   const endpointId = validUrls.length === 0
     ? 'fal-ai/nano-banana-2'
     : 'fal-ai/nano-banana-2/edit';
@@ -110,13 +113,32 @@ async function generateVoice(text, voiceId) {
   } catch (e) { console.error('Voice error:', e.message); return null; }
 }
 
+// Detect feminine markers in text for a male voice, or masculine markers for a female voice.
+// Used to flag gender-mismatched scripts from Claude so we can regenerate.
+const FEMALE_ONLY_PATTERNS = [
+  /\bמביכה\b/, /\bמובכת\b/, /\bבטוחה\b/, /\bחייבת\b/, /\bמחפשת\b/,
+  /\bמוכנה\b/, /\bמשתמשת\b/, /\bהייתי מובכת\b/, /\bהייתי מביכה\b/,
+  /\bמרוצה\s+אני\b/, /\bעייפה\b/, /\bשמחה\b/, /\bעצובה\b/, /\bכועסת\b/
+];
+const MALE_ONLY_PATTERNS = [
+  /\bמובך\b/, /\bבטוח\b/, /\bחייב\b/, /\bמחפש\b/,
+  /\bמוכן\b/, /\bמשתמש\b/, /\bהייתי מובך\b/,
+  /\bעייף\b/, /\bשמח\b/, /\bעצוב\b/, /\bכועס\b/
+];
+function scriptGenderMismatch(text, voiceGender) {
+  if (!text) return false;
+  if (voiceGender === 'male') return FEMALE_ONLY_PATTERNS.some(re => re.test(text));
+  if (voiceGender === 'female') return MALE_ONLY_PATTERNS.some(re => re.test(text));
+  return false;
+}
+
 async function generateScript(productName, productDesc, applicationArea, hook, voiceGender) {
   if (!ANTHROPIC_KEY) return null;
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
   const genderInstruction = voiceGender === 'male'
-    ? 'כתוב את הקריינות בלשון זכר'
-    : 'כתוב את הקריינות בלשון נקבה';
-  const message = await anthropic.messages.create({
+    ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'/'מובכת'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר. אל תערבב לשון נקבה.`
+    : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה. אל תערבב לשון זכר.`;
+  const callClaude = async (extra = '') => anthropic.messages.create({
     model: 'claude-sonnet-4-20250514', max_tokens: 2500,
     messages: [{ role: 'user', content: `You are a UGC ad expert writing scripts in Hebrew. Create a viral 4-scene ad for: "${productName}".
 Description: ${productDesc}
@@ -209,7 +231,7 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 - NEVER put clothing/fashion scenes in a car. NEVER put dental scenes in a bedroom.
 - NEVER put ANY product in a car scene UNLESS it is explicitly a car accessory. Cars are ONLY for car accessories.
 
-6. EVERY nb_prompt MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle"
+6. EVERY nb_prompt MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". If the avatar holds a product, say "holding the product with ONE hand only, other hand visible and relaxed at side". Avoid describing multiple items held at once or hands doing multiple simultaneous actions.
 
 7. SCENE STRUCTURE (follows the hook formula):
 - Scene 1 (כאב — Hook): Avatar ALONE showing the specific problem — NO product visible, NO product mentioned
@@ -261,24 +283,37 @@ Return ONLY valid JSON (no markdown):
       "subtitle": "same as voiceover_scene4"
     }
   ]
-}` }]
+}${extra}` }]
   });
-  const text = message.content?.[0]?.text || '';
-  try {
-    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-    const v1 = parsed.voiceover_scene1 || '';
-    const v2 = parsed.voiceover_scene2 || '';
-    const v3 = parsed.voiceover_scene3 || '';
-    const v4 = parsed.voiceover_scene4 || '';
-    parsed.voiceover = `${v1} ${v2} ${v3} ${v4}`.trim();
-    if (parsed.scenes) {
-      parsed.scenes[0].subtitle = v1;
-      parsed.scenes[1].subtitle = v2;
-      parsed.scenes[2].subtitle = v3;
-      parsed.scenes[3].subtitle = v4;
-    }
-    return parsed;
-  } catch { return null; }
+  const parseResponse = (message) => {
+    const text = message.content?.[0]?.text || '';
+    try {
+      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+      const v1 = parsed.voiceover_scene1 || '';
+      const v2 = parsed.voiceover_scene2 || '';
+      const v3 = parsed.voiceover_scene3 || '';
+      const v4 = parsed.voiceover_scene4 || '';
+      parsed.voiceover = `${v1} ${v2} ${v3} ${v4}`.trim();
+      if (parsed.scenes) {
+        parsed.scenes[0].subtitle = v1;
+        parsed.scenes[1].subtitle = v2;
+        parsed.scenes[2].subtitle = v3;
+        parsed.scenes[3].subtitle = v4;
+      }
+      return parsed;
+    } catch { return null; }
+  };
+
+  // First attempt
+  let parsed = parseResponse(await callClaude());
+  // Validate gender — regenerate once if Claude mixed male/female forms
+  if (parsed && scriptGenderMismatch(parsed.voiceover, voiceGender)) {
+    console.warn(`[generateScript] Gender mismatch (wanted ${voiceGender}), regenerating...`);
+    const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD WRONG GENDER. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${voiceGender}). Do NOT mix genders. Verify every single word.`;
+    const retry = parseResponse(await callClaude(extraInstruction));
+    if (retry) parsed = retry;
+  }
+  return parsed;
 }
 
 export async function POST(req) {
@@ -426,7 +461,7 @@ async function runJob(jobId, body) {
     // Script — branch by mode
     let script, scenes, voiceover, hook;
     if (videoType === 'business') {
-      hook = getBusinessHook(businessDescription || '', businessName || '');
+      hook = getBusinessHook(businessDescription || '', businessName || '', voiceGender);
       script = await generateBusinessScript(businessName || '', businessDescription || '', hook, voiceGender);
       scenes = script?.scenes || getBusinessDefaultScenes(businessName || '', businessDescription || '');
       if (script) {
@@ -435,9 +470,9 @@ async function runJob(jobId, body) {
         script.voiceover = `${hook} ${script.voiceover_scene2 || ''} ${script.voiceover_scene3 || ''} ${script.voiceover_scene4 || ''}`.trim();
       }
       if (scenes[0]) scenes[0].subtitle = hook;
-      voiceover = script?.voiceover || getBusinessDefaultVoiceover(businessName || '', businessDescription || '', hook);
+      voiceover = script?.voiceover || getBusinessDefaultVoiceover(businessName || '', businessDescription || '', hook, voiceGender);
     } else {
-      hook = getHook(productName, productDesc);
+      hook = getHook(productName, productDesc, voiceGender);
       script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender);
       scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
       if (script) {
@@ -446,7 +481,7 @@ async function runJob(jobId, body) {
         script.voiceover = `${hook} ${script.voiceover_scene2 || ''} ${script.voiceover_scene3 || ''} ${script.voiceover_scene4 || ''}`.trim();
       }
       if (scenes[0]) scenes[0].subtitle = hook;
-      voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook);
+      voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook, voiceGender);
     }
 
     // Voice + Frames in parallel (voice doesn't depend on frames)
@@ -566,76 +601,104 @@ async function runJob(jobId, body) {
   }
 }
 
-function getHook(productName, productDesc) {
+// Map feminine Hebrew verb/adjective forms → masculine equivalents.
+// Used by getHook / getDefaultVoiceover to produce gender-correct fallback text
+// when the voice is male (Daniel) and Claude was unavailable.
+const FEMININE_TO_MASCULINE = [
+  ['חיפשתי', 'חיפשתי'], // same
+  ['התאים לי', 'התאים לי'], // same
+  ['מביכה', 'מובך'],
+  ['מובכת', 'מובך'],
+  ['הרגשתי נורא', 'הרגשתי נורא'],
+  ['ניסיתי', 'ניסיתי'],
+  ['עזר לי', 'עזר לי'],
+  ['נראו זולים', 'נראו זולים'],
+  ['הרגשתי בנוח', 'הרגשתי בנוח'],
+  ['מתהפכת', 'מתהפך'],
+  ['מתהפכ', 'מתהפכ'],
+  ['הייתי כל כך עייפה', 'הייתי כל כך עייף'],
+  ['עייפה', 'עייף'],
+  ['ידעתי', 'ידעתי'],
+  ['ראיתי', 'ראיתי'],
+  ['בזבזתי', 'בזבזתי'],
+  ['מבזבזת', 'מבזבז'],
+  ['מבזבז זמן', 'מבזבז זמן'],
+  ['הייתה אומללה', 'הייתה אומללה'],
+  ['לא עבד לי', 'לא עבד לי'],
+  ['לא עבד', 'לא עבד']
+];
+function toMasculine(text) {
+  if (!text) return text;
+  let out = text;
+  for (const [fem, mas] of FEMININE_TO_MASCULINE) {
+    if (fem === mas) continue;
+    out = out.split(fem).join(mas);
+  }
+  return out;
+}
+
+function getHook(productName, productDesc, voiceGender = 'female') {
   const desc = ((productDesc || '') + ' ' + (productName || '')).toLowerCase();
+  let raw = 'ניסיתי המון דברים כדי לפתור את זה ושום דבר פשוט לא עבד לי';
 
   // Fashion / clothing
   if (/שמלה|בגד|חולצה|מכנס|נעל|תיק|אופנה|dress|shirt|clothes|fashion|pants|shoes|bag/.test(desc))
-    return 'כל פעם שחיפשתי משהו לאירוע זה היה יקר מדי או לא התאים לי';
-
+    raw = 'כל פעם שחיפשתי משהו לאירוע זה היה יקר מדי או לא התאים לי';
   // Dental / teeth
-  if (/שינ|דנטל|לבן|משחת|teeth|dental|whiten/.test(desc))
-    return 'הייתי מביכה לחייך בתמונות בגלל השיניים שלי והרגשתי נורא';
-
+  else if (/שינ|דנטל|לבן|משחת|teeth|dental|whiten/.test(desc))
+    raw = 'הייתי מביכה לחייך בתמונות בגלל השיניים שלי והרגשתי נורא';
   // Skincare
-  if (/קרם|פנים|אקנה|עור|סרום|skincare|cream|serum|acne|face/.test(desc))
-    return 'ניסיתי כל קרם בשוק ושום דבר לא עזר לי עם העור שלי';
-
+  else if (/קרם|פנים|אקנה|עור|סרום|skincare|cream|serum|acne|face/.test(desc))
+    raw = 'ניסיתי כל קרם בשוק ושום דבר לא עזר לי עם העור שלי';
   // Hair
-  if (/שיער|hair|שמפו/.test(desc))
-    return 'השיער שלי היה נושר ונשבר וכלום לא עזר לי באמת';
-
+  else if (/שיער|hair|שמפו/.test(desc))
+    raw = 'השיער שלי היה נושר ונשבר וכלום לא עזר לי באמת';
   // Jewelry / accessories
-  if (/שעון|תכשיט|צמיד|שרשרת|watch|jewelry|bracelet|necklace/.test(desc))
-    return 'האביזרים שלי תמיד נראו זולים ולא הרגשתי בנוח איתם';
-
+  else if (/שעון|תכשיט|צמיד|שרשרת|watch|jewelry|bracelet|necklace/.test(desc))
+    raw = 'האביזרים שלי תמיד נראו זולים ולא הרגשתי בנוח איתם';
   // Sleep
-  if (/שינה|לישון|כרית|מזרון|sleep|pillow|mattress/.test(desc))
-    return 'כל לילה הייתי מתהפכת במיטה שעות בלי להצליח להירדם';
-
+  else if (/שינה|לישון|כרית|מזרון|sleep|pillow|mattress/.test(desc))
+    raw = 'כל לילה הייתי מתהפכת במיטה שעות בלי להצליח להירדם';
   // Food / restaurant / meal kit
-  if (/אוכל|מסעדה|ארוחה|מזון|תזונה|food|meal|restaurant|diet/.test(desc))
-    return 'הייתי כל כך עייפה מלבשל כל יום ולא ידעתי מה לעשות';
-
+  else if (/אוכל|מסעדה|ארוחה|מזון|תזונה|food|meal|restaurant|diet/.test(desc))
+    raw = 'הייתי כל כך עייפה מלבשל כל יום ולא ידעתי מה לעשות';
   // Supplement / vitamin
-  if (/ויטמין|תוסף|חלבון|supplement|vitamin|protein/.test(desc))
-    return 'הרגשתי עייפה כל היום וכלום לא נתן לי באמת אנרגיה';
-
+  else if (/ויטמין|תוסף|חלבון|supplement|vitamin|protein/.test(desc))
+    raw = 'הרגשתי עייפה כל היום וכלום לא נתן לי באמת אנרגיה';
   // Fitness / workout
-  if (/כושר|אימון|ספורט|הרזיה|דיאטה|fitness|workout|gym|weight|exercise/.test(desc))
-    return 'ניסיתי כל שיטה בעולם ופשוט לא ראיתי שום תוצאות';
-
+  else if (/כושר|אימון|ספורט|הרזיה|דיאטה|fitness|workout|gym|weight|exercise/.test(desc))
+    raw = 'ניסיתי כל שיטה בעולם ופשוט לא ראיתי שום תוצאות';
   // Tech / gadget / app
-  if (/אפליקציה|גאדג׳ט|טכנולוגיה|מכשיר|app|tech|gadget|device|software/.test(desc))
-    return 'בזבזתי שעות כל יום על משהו שהיה אמור להיות פשוט';
-
+  else if (/אפליקציה|גאדג׳ט|טכנולוגיה|מכשיר|app|tech|gadget|device|software/.test(desc))
+    raw = 'בזבזתי שעות כל יום על משהו שהיה אמור להיות פשוט';
   // Cleaning
-  if (/ניקוי|ניקיון|כביסה|cleaning|detergent|clean/.test(desc))
-    return 'בזבזתי שעות על ניקיון והבית עדיין נראה לא נקי';
-
+  else if (/ניקוי|ניקיון|כביסה|cleaning|detergent|clean/.test(desc))
+    raw = 'בזבזתי שעות על ניקיון והבית עדיין נראה לא נקי';
   // Baby / kids
-  if (/תינוק|ילד|baby|kid|child/.test(desc))
-    return 'הילדים שלי לא היו מפסיקים להתעצבן ולא ידעתי מה לעשות';
-
+  else if (/תינוק|ילד|baby|kid|child/.test(desc))
+    raw = 'הילדים שלי לא היו מפסיקים להתעצבן ולא ידעתי מה לעשות';
   // Home / furniture / decor
-  if (/בית|ריהוט|עיצוב|home|furniture|decor/.test(desc))
-    return 'הבית שלי אף פעם לא הרגיש מסודר למרות שניסיתי הכל';
-
+  else if (/בית|ריהוט|עיצוב|home|furniture|decor/.test(desc))
+    raw = 'הבית שלי אף פעם לא הרגיש מסודר למרות שניסיתי הכל';
   // Pet
-  if (/כלב|חתול|חיית|pet|dog|cat/.test(desc))
-    return 'החיה שלי הייתה אומללה וכל מה שניסיתי פשוט לא עבד';
-
+  else if (/כלב|חתול|חיית|pet|dog|cat/.test(desc))
+    raw = 'החיה שלי הייתה אומללה וכל מה שניסיתי פשוט לא עבד';
   // Car accessories
-  if (/רכב|אוטו|מכונית|car|vehicle/.test(desc))
-    return 'כל נסיעה הייתה מעצבנת אותי והרגשתי שאני מבזבזת זמן';
+  else if (/רכב|אוטו|מכונית|car|vehicle/.test(desc))
+    raw = 'כל נסיעה הייתה מעצבנת אותי והרגשתי שאני מבזבזת זמן';
 
-  // Generic fallback — universal pain, no product name
-  return 'ניסיתי המון דברים כדי לפתור את זה ושום דבר פשוט לא עבד לי';
+  return voiceGender === 'male' ? toMasculine(raw) : raw;
 }
 
-function getDefaultVoiceover(productName, applicationArea, hook) {
-  const h = hook || getHook(productName, '');
-  return `${h}. זה ${productName} — פתרון חכם שכולם מדברים עליו. עד שגיליתי את ${productName} ואז הכל השתנה, ${applicationArea} והתוצאות מטורפות. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
+// Helper: apply masculine conversion if voice gender is male
+function applyGender(text, voiceGender) {
+  return voiceGender === 'male' ? toMasculine(text) : text;
+}
+
+function getDefaultVoiceover(productName, applicationArea, hook, voiceGender = 'female') {
+  const h = hook || getHook(productName, '', voiceGender);
+  const raw = `${h}. זה ${productName} — פתרון חכם שכולם מדברים עליו. עד שגיליתי את ${productName} ואז הכל השתנה, ${applicationArea} והתוצאות מטורפות. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
+  return applyGender(raw, voiceGender);
 }
 
 const STABLE = 'silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference';
@@ -682,7 +745,7 @@ function getBusinessCategory(desc) {
   return 'generic';
 }
 
-function getBusinessHook(desc, name) {
+function getBusinessHook(desc, name, voiceGender = 'female') {
   const cat = getBusinessCategory(desc);
   const hooks = {
     restaurant: 'כל פעם שרציתי לצאת לאכול בחוץ, הייתי מתלבטת ונגמר הערב בפלאפל',
@@ -692,12 +755,23 @@ function getBusinessHook(desc, name) {
     fitness: 'רציתי להתחיל להתאמן כבר שנים אבל שום מקום לא גרם לי להרגיש בנוח',
     generic: 'היה לי צורך בשירות איכותי וכל מה שמצאתי פשוט לא הרגיש נכון',
   };
-  return hooks[cat] || hooks.generic;
+  // Masculine equivalents for Daniel (male) voice
+  const hooksMale = {
+    restaurant: 'כל פעם שרציתי לצאת לאכול בחוץ, הייתי מתלבט ונגמר הערב בפלאפל',
+    fashion: 'כל פעם שחיפשתי בגד חדש, בחנויות היה הכל אותו דבר ומשעמם',
+    clinic: 'שנים התלוננתי על הבעיה הזאת וכל מי שהלכתי אליו לא באמת עזר',
+    salon: 'כל פעם שהלכתי להסתפר יצאתי מאוכזב ולא כמו שדמיינתי',
+    fitness: 'רציתי להתחיל להתאמן כבר שנים אבל שום מקום לא גרם לי להרגיש בנוח',
+    generic: 'היה לי צורך בשירות איכותי וכל מה שמצאתי פשוט לא הרגיש נכון',
+  };
+  const map = voiceGender === 'male' ? hooksMale : hooks;
+  return map[cat] || map.generic;
 }
 
-function getBusinessDefaultVoiceover(name, desc, hook) {
-  const h = hook || getBusinessHook(desc, name);
-  return `${h}. ואז גיליתי את ${name} — ${desc}. הייתי שם בעצמי וזה פשוט שינה לי את החוויה לגמרי. חייבים לבוא ל${name} — תזמינו עכשיו!`;
+function getBusinessDefaultVoiceover(name, desc, hook, voiceGender = 'female') {
+  const h = hook || getBusinessHook(desc, name, voiceGender);
+  const raw = `${h}. ואז גיליתי את ${name} — ${desc}. הייתי שם בעצמי וזה פשוט שינה לי את החוויה לגמרי. חייבים לבוא ל${name} — תזמינו עכשיו!`;
+  return voiceGender === 'male' ? toMasculine(raw) : raw;
 }
 
 function getBusinessDefaultScenes(name, desc) {
@@ -734,8 +808,8 @@ async function generateBusinessScript(name, desc, hook, voiceGender) {
   if (!ANTHROPIC_KEY) return null;
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
   const genderInstruction = voiceGender === 'male'
-    ? 'כתוב את הקריינות בלשון זכר'
-    : 'כתוב את הקריינות בלשון נקבה';
+    ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'/'מובכת'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר. אל תערבב לשון נקבה.`
+    : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה. אל תערבב לשון זכר.`;
 
   const cat = getBusinessCategory(desc);
   const categoryHints = {
@@ -747,7 +821,7 @@ async function generateBusinessScript(name, desc, hook, voiceGender) {
     generic: 'Focus on what makes this business special, the customer experience, the result.',
   };
 
-  const message = await anthropic.messages.create({
+  const callClaude = async (extra = '') => anthropic.messages.create({
     model: 'claude-sonnet-4-20250514', max_tokens: 2500,
     messages: [{ role: 'user', content: `You are a UGC ad expert writing scripts in Hebrew for LOCAL BUSINESSES. Create a viral 4-scene ad for this business:
 
@@ -775,8 +849,8 @@ VOICEOVER TIMING — STRICT:
 HOOK (voiceover_scene1) — PRE-SET:
 voiceover_scene1 is already: "${hook}" — use this EXACT text.
 
-EVERY nb_prompt MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle"
-(except scene 2 which has no person)
+EVERY nb_prompt MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". If the avatar holds something, use only ONE hand, other hand relaxed at side.
+(except scene 2 which has no person — the anatomy rule doesn't apply there)
 
 END every Kling prompt with: "silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference"
 
@@ -813,22 +887,33 @@ Return ONLY valid JSON (no markdown):
       "subtitle": "same as voiceover_scene4"
     }
   ]
-}` }]
+}${extra}` }]
   });
-  const text = message.content?.[0]?.text || '';
-  try {
-    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-    const v1 = parsed.voiceover_scene1 || '';
-    const v2 = parsed.voiceover_scene2 || '';
-    const v3 = parsed.voiceover_scene3 || '';
-    const v4 = parsed.voiceover_scene4 || '';
-    parsed.voiceover = `${v1} ${v2} ${v3} ${v4}`.trim();
-    if (parsed.scenes) {
-      parsed.scenes[0].subtitle = v1;
-      parsed.scenes[1].subtitle = v2;
-      parsed.scenes[2].subtitle = v3;
-      parsed.scenes[3].subtitle = v4;
-    }
-    return parsed;
-  } catch { return null; }
+  const parseResponse = (message) => {
+    const text = message.content?.[0]?.text || '';
+    try {
+      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+      const v1 = parsed.voiceover_scene1 || '';
+      const v2 = parsed.voiceover_scene2 || '';
+      const v3 = parsed.voiceover_scene3 || '';
+      const v4 = parsed.voiceover_scene4 || '';
+      parsed.voiceover = `${v1} ${v2} ${v3} ${v4}`.trim();
+      if (parsed.scenes) {
+        parsed.scenes[0].subtitle = v1;
+        parsed.scenes[1].subtitle = v2;
+        parsed.scenes[2].subtitle = v3;
+        parsed.scenes[3].subtitle = v4;
+      }
+      return parsed;
+    } catch { return null; }
+  };
+
+  let parsed = parseResponse(await callClaude());
+  if (parsed && scriptGenderMismatch(parsed.voiceover, voiceGender)) {
+    console.warn(`[generateBusinessScript] Gender mismatch (wanted ${voiceGender}), regenerating...`);
+    const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD WRONG GENDER. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${voiceGender}). Do NOT mix genders. Verify every single word.`;
+    const retry = parseResponse(await callClaude(extraInstruction));
+    if (retry) parsed = retry;
+  }
+  return parsed;
 }
