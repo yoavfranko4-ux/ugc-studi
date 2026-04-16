@@ -9,7 +9,7 @@ export async function POST(req) {
   if (rateLimitRes) return rateLimitRes
 
   const req_data = await req.json()
-  const { avatarUrl, productImageUrl, businessType } = req_data
+  const { avatarUrl, productImageUrl, businessType, voiceId: requestedVoiceId } = req_data
   const isBusiness = businessType === 'business'
 
   // Input validation
@@ -28,9 +28,20 @@ export async function POST(req) {
   // Server-side keys ONLY — never from client
   const falKey = process.env.FAL_API_KEY || ''
   const elevenKey = process.env.ELEVENLABS_API_KEY || ''
-  const voiceId = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW'
+  const voiceId = requestedVoiceId || process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW'
 
-  console.log('Keys available:', { hasFal: !!falKey, hasEleven: !!elevenKey, voiceId })
+  // ── Voice → gender mapping ──
+  // nBiC8Jexp2XGyIxATg9S = Daniel (male), cp6q5qJLs8rR7eAWOepf = Noa (female)
+  const MALE_VOICE_IDS = new Set(['nBiC8Jexp2XGyIxATg9S'])
+  const FEMALE_VOICE_IDS = new Set(['cp6q5qJLs8rR7eAWOepf'])
+  const voiceGender = MALE_VOICE_IDS.has(voiceId)
+    ? 'male'
+    : FEMALE_VOICE_IDS.has(voiceId)
+      ? 'female'
+      : 'female'
+  const isMale = voiceGender === 'male'
+
+  console.log('Keys available:', { hasFal: !!falKey, hasEleven: !!elevenKey, voiceId, voiceGender })
 
   const pName = rawProductName || 'המוצר'
   const pUse = applicationArea || 'מורחים על האזור הבעייתי'
@@ -64,6 +75,35 @@ export async function POST(req) {
 
   console.log('Agent started:', { productName: rawProductName, applicationArea, hasAvatar: !!finalAvatarUrl, isDataUrl: avatarUrl?.startsWith('data:'), hasProduct: !!productImageUrl })
 
+  // ── Gender instruction for the Hebrew script ──
+  const genderInstruction = isMale
+    ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר.`
+    : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה.`
+
+  // ── Gender validator: detect mismatches in a generated script ──
+  const MALE_ONLY_PATTERNS = [
+    /\bמובך\b/, /\bבטוח\b/, /\bחייב\b/, /\bמחפש\b/, /\bמוכן\b/, /\bמשתמש\b/, /\bהייתי מובך\b/
+  ]
+  const FEMALE_ONLY_PATTERNS = [
+    /\bמובכת\b/, /\bבטוחה\b/, /\bחייבת\b/, /\bמחפשת\b/, /\bמוכנה\b/, /\bמשתמשת\b/, /\bהייתי מובכת\b/,
+    /\bמביכה\b/, /\bמרוצה אני\b/, /\bהתאכזבתי.*?אני.*?מחפשת\b/
+  ]
+  const hasFeminineMarkers = (text) => {
+    if (!text) return false
+    return FEMALE_ONLY_PATTERNS.some(re => re.test(text))
+  }
+  const hasMasculineMarkers = (text) => {
+    if (!text) return false
+    return MALE_ONLY_PATTERNS.some(re => re.test(text))
+  }
+  const scriptGenderMismatch = (storyObj) => {
+    if (!storyObj?.hebrew_voice) return false
+    const fullText = storyObj.hebrew_voice + ' ' + (storyObj.scenes || []).map(s => s.voiceover || '').join(' ')
+    if (isMale && hasFeminineMarkers(fullText)) return true
+    if (!isMale && hasMasculineMarkers(fullText)) return true
+    return false
+  }
+
   // ── STEP 1: Claude writes the full story ──
   let story = null
   if (process.env.ANTHROPIC_API_KEY) {
@@ -75,7 +115,9 @@ Create a CONNECTED 4-scene TikTok story for: ${pName} - ${product}. What custome
 
 The 4 scenes must feel like ONE continuous TikTok story.
 
-ANATOMY RULE (CRITICAL): Every nb_prompt MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body"
+${genderInstruction}
+
+ANATOMY RULE (CRITICAL): Every nb_prompt MUST START with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body". Avoid describing hands holding multiple items — ONE item at a time max.
 
 HOOK RULE (CRITICAL): voiceover_scene1 MUST name the EXACT specific craving/need of THIS business — never use 'הבעיה הזאת' alone. Be specific: for restaurant say 'חיפשתי מקום עם שווארמה אמיתית כבר חודשים', for salon say 'תמיד יצאתי מאוכזבת מתספורות'. Be specific to the business.
 
@@ -130,7 +172,9 @@ Create a CONNECTED 4-scene TikTok story for: ${pName} - ${product}. Usage: ${pUs
 
 The 4 scenes must feel like ONE continuous story with the SAME person in the SAME setting.
 
-ANATOMY RULE (CRITICAL): Every nb_prompt MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body"
+${genderInstruction}
+
+ANATOMY RULE (CRITICAL): Every nb_prompt MUST START with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body". For scenes where hands hold the product, say explicitly: "person holding product with ONE hand only, other hand visible and relaxed at side". Never describe multiple items held simultaneously.
 
 HOOK RULE (CRITICAL): voiceover_scene1 MUST name the EXACT specific problem of THIS product — never use 'הבעיה הזאת' alone without naming what the problem is. Examples: for teeth whitening say 'שיניים צהובות שמביכות אותי בכל תמונה', for face cream say 'כתמים ואקנה שמופיעים כל בוקר', for dress say 'לא מוצאת שמלה שמחמיאה לדמות שלי'. Be specific to the product.
 
@@ -185,14 +229,27 @@ Return ONLY JSON:
   ],
   "hebrew_voice": "concatenation of the 4 scene voiceover chunks exactly, no extra words"
 }`
-      const message = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content: promptContent }]
-      })
-      const rawText = message.content[0].text.trim().replace(/```json|```/g, '')
-      console.log('Claude response:', rawText.slice(0, 500))
-      story = JSON.parse(rawText.slice(rawText.indexOf('{'), rawText.lastIndexOf('}') + 1))
+      // Try up to 2 times — if gender mismatch detected, regenerate with louder instruction
+      let attempts = 0
+      let currentPrompt = promptContent
+      while (attempts < 2) {
+        const message = await anthropic.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 2000,
+          messages: [{ role: 'user', content: currentPrompt }]
+        })
+        const rawText = message.content[0].text.trim().replace(/```json|```/g, '')
+        console.log('Claude response:', rawText.slice(0, 500))
+        const parsed = JSON.parse(rawText.slice(rawText.indexOf('{'), rawText.lastIndexOf('}') + 1))
+        if (!scriptGenderMismatch(parsed)) {
+          story = parsed
+          break
+        }
+        console.warn(`Gender mismatch detected on attempt ${attempts + 1}, regenerating...`)
+        attempts++
+        currentPrompt = `${promptContent}\n\nPREVIOUS ATTEMPT HAD WRONG GENDER. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${isMale ? 'male/זכר' : 'female/נקבה'}). Do NOT mix genders. Verify every single word.`
+        story = parsed // keep in case next attempt fails
+      }
     } catch (e) {
       console.error('Claude SDK error:', e.message)
       /* use fallback */
@@ -201,77 +258,102 @@ Return ONLY JSON:
 
   // Fallback story if Claude unavailable
   if (!story) {
+    const anatomyPrefix = 'CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body.'
     const anatomyRule = 'exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body'
     const noText = 'no text overlay, no captions, no watermark, no brand name or writing on product'
     const format = 'vertical 9:16, TikTok UGC creator style, photorealistic, Nano Banana 2 ultra-realistic'
+    const personDesc = isMale ? 'young man mid-20s' : 'young woman mid-20s'
 
     if (isBusiness) {
+      const vo1 = isMale
+        ? `אני כבר חודשים מחפש מקום טוב באמת. ניסיתי המון ותמיד התאכזבתי`
+        : `אני כבר חודשים מחפשת מקום טוב באמת. ניסיתי המון ותמיד התאכזבתי`
+      const vo2 = isMale
+        ? `עד שחבר המליץ לי על ${pName} ואמרתי יאללה ננסה`
+        : `עד שחברה המליצה לי על ${pName} ואמרתי יאללה ננסה`
+      const vo3 = isMale
+        ? `אני אגיד לכם — מהרגע הראשון הבנתי שזה ברמה אחרת לגמרי. ${pUse}. אין מילים`
+        : `אני אגיד לכם — מהרגע הראשון הבנתי שזה ברמה אחרת לגמרי. ${pUse}. אין מילים`
+      const vo4 = `אתם חייבים לנסות את ${pName}, תגיעו ותגידו לי אחר כך`
       story = {
         scenes: [
           {
             id: 1, label: '😩 צורך',
-            nb_prompt: `same person from reference photo, young woman mid-20s walking on busy street looking at phone disappointed, casual outfit jeans and t-shirt, crowded sidewalk with shops in background, searching expression frustrated, iPhone handheld street style, natural daylight, ${anatomyRule}, ${noText}, ${format}`,
+            nb_prompt: `${anatomyPrefix} same person from reference photo, ${personDesc} walking on busy street looking at phone disappointed, casual outfit jeans and t-shirt, crowded sidewalk with shops in background, searching expression frustrated, iPhone handheld street style, natural daylight, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Person walks slowly looking at phone sighs with disappointment looks around searching, handheld camera slight shake natural street sounds then settles`,
-            subtitle: `כבר חודשים שאני מחפשת מקום טוב`,
-            voiceover: `אני כבר חודשים מחפשת מקום טוב באמת. ניסיתי המון ותמיד התאכזבתי`
+            subtitle: isMale ? `כבר חודשים שאני מחפש מקום טוב` : `כבר חודשים שאני מחפשת מקום טוב`,
+            voiceover: vo1
           },
           {
             id: 2, label: '🍽️ הירו שוט',
             nb_prompt: `beautiful close-up hero shot of the food or service offering from ${pName}, steam rising, vibrant colors, professional food photography style, warm golden lighting, shallow depth of field, appetizing details visible, TikTok food creator style, ${noText}, ${format}`,
             kling_prompt: `Steam rising slowly from food, gentle camera push-in revealing details, warm light catching textures, slight movement of fresh ingredients then settles`,
             subtitle: `${pName} — פשוט ברמה אחרת`,
-            voiceover: `עד שחברה המליצה לי על ${pName} ואמרתי יאללה ננסה`
+            voiceover: vo2
           },
           {
             id: 3, label: '😍 חוויה',
-            nb_prompt: `same person from reference photo, sitting at table experiencing ${pName} for the first time, eyes wide genuine amazement, mid-bite or mid-experience candid moment, warm interior lighting, cozy restaurant atmosphere in background, authentic happiness, iPhone handheld, ${anatomyRule}, ${noText}, ${format}`,
+            nb_prompt: `${anatomyPrefix} same person from reference photo, sitting at table experiencing ${pName} for the first time, eyes wide genuine amazement, mid-bite or mid-experience candid moment, warm interior lighting, cozy restaurant atmosphere in background, authentic happiness, iPhone handheld, person holding utensil with ONE hand only other hand visible and relaxed, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Continuing from previous scene same person takes first bite or experiences service, eyes light up with genuine surprise, nods approvingly with amazed expression then settles`,
             subtitle: `אוקיי וואו זה טעים ברמות`,
-            voiceover: `אני אגיד לכם — מהרגע הראשון הבנתי שזה ברמה אחרת לגמרי. ${pUse}. אין מילים`
+            voiceover: vo3
           },
           {
             id: 4, label: '🚀 המלצה',
-            nb_prompt: `same person from reference photo, standing outside ${pName} pointing at the place behind, talking directly to camera with excited genuine recommendation smile, golden hour warm lighting, iPhone selfie style, enthusiastic energy, ${anatomyRule}, ${noText}, ${format}`,
+            nb_prompt: `${anatomyPrefix} same person from reference photo, standing outside ${pName} pointing at the place behind with ONE hand only other hand relaxed at side, talking directly to camera with excited genuine recommendation smile, golden hour warm lighting, iPhone selfie style, enthusiastic energy, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Continuing from previous scene same person points enthusiastically at place behind, looks at camera with big excited smile, gestures with hands recommending then settles`,
             subtitle: `אתם חייבים לנסות את ${pName}!`,
-            voiceover: `אתם חייבים לנסות את ${pName}, תגיעו ותגידו לי אחר כך`
+            voiceover: vo4
           }
         ],
-        hebrew_voice: `אני כבר חודשים מחפשת מקום טוב באמת. ניסיתי המון ותמיד התאכזבתי. עד שחברה המליצה לי על ${pName} ואמרתי יאללה ננסה. אני אגיד לכם — מהרגע הראשון הבנתי שזה ברמה אחרת לגמרי. ${pUse}. אין מילים. אתם חייבים לנסות את ${pName}, תגיעו ותגידו לי אחר כך.`
+        hebrew_voice: `${vo1}. ${vo2}. ${vo3}. ${vo4}.`
       }
     } else {
+      const personDescProduct = isMale
+        ? 'frustrated young man mid-20s with short hair in a plain t-shirt'
+        : 'frustrated young woman mid-20s with messy bun hair in oversized t-shirt'
+      const vo1 = isMale
+        ? `אתם לא מאמינים כמה זמן בזבזתי על הבעיה הזאת. ניסיתי הכל ושום דבר לא עבד`
+        : `אתם לא מאמינים כמה זמן בזבזתי על הבעיה הזאת. ניסיתי הכל ושום דבר לא עבד`
+      const vo2 = isMale
+        ? `עד שמישהו המליץ לי על ${pName} ולא הכרתי אותו בכלל`
+        : `עד שמישהו המליץ לי על ${pName} ולא הכרתי אותו בכלל`
+      const vo3 = isMale
+        ? `התחלתי להשתמש, ${pUse}, ופשוט לא האמנתי לתוצאות. שבוע אחד ואני לגמרי מרוצה`
+        : `התחלתי להשתמש, ${pUse}, ופשוט לא האמנתי לתוצאות. שבוע אחד ואני לגמרי מרוצה`
+      const vo4 = `אין לכם מה להפסיד, פשוט תנסו את ${pName}`
       story = {
         scenes: [
           {
             id: 1, label: '😟 כאב',
-            nb_prompt: `frustrated young woman mid-20s with messy bun hair in oversized t-shirt, standing in front of bathroom mirror, stressed expression hand on forehead, white tile bathroom with morning natural daylight from window, iPhone handheld selfie style, slightly imperfect framing, ${anatomyRule}, ${noText}, ${format}`,
+            nb_prompt: `${anatomyPrefix} ${personDescProduct}, standing in front of bathroom mirror, stressed expression hand on forehead, white tile bathroom with morning natural daylight from window, iPhone handheld selfie style, slightly imperfect framing, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Person sighs looks at mirror frustrated shakes head overwhelmed, slight camera shake handheld iPhone natural light then settles`,
             subtitle: `כל כך נמאס לי מהבעיה הזאת`,
-            voiceover: `אתם לא מאמינים כמה זמן בזבזתי על הבעיה הזאת. ניסיתי הכל ושום דבר לא עבד`
+            voiceover: vo1
           },
           {
             id: 2, label: '💡 גילוי',
-            nb_prompt: `same person from reference photo, holding ${pName} box up toward camera with both hands label facing forward, direct eye contact, authentic excited curious expression, ring light from front, shot on iPhone slightly imperfect handheld, bathroom counter with products in background, ${anatomyRule}, ${noText}, ${format}`,
+            nb_prompt: `${anatomyPrefix} same person from reference photo, holding ${pName} box up toward camera with ONE hand only label facing forward other hand visible and relaxed at side, direct eye contact, authentic excited curious expression, ring light from front, shot on iPhone slightly imperfect handheld, bathroom counter with products in background, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Continuing from previous scene same person picks up ${pName} reads label eyes widen with curiosity holds it toward camera then settles`,
-            subtitle: `מצאתי את ${pName} ולא האמנתי`,
-            voiceover: `עד שמישהו המליץ לי על ${pName} ולא הכרתי אותו בכלל`
+            subtitle: isMale ? `מצאתי את ${pName} ולא האמנתי` : `מצאתי את ${pName} ולא האמנתי`,
+            voiceover: vo2
           },
           {
             id: 3, label: '✨ שימוש',
-            nb_prompt: `same person from reference photo, actively using ${pName} mid-action ${pUse}, candid authentic moment, genuine amazed expression looking at mirror, natural bathroom setting with warm lighting, close-up showing application detail, ${anatomyRule}, ${noText}, ${format}`,
+            nb_prompt: `${anatomyPrefix} same person from reference photo, actively using ${pName} mid-action ${pUse} with ONE hand only other hand visible and relaxed, candid authentic moment, genuine amazed expression looking at mirror, natural bathroom setting with warm lighting, close-up showing application detail, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Continuing from previous scene same person ${pUse} carefully shows process to camera touches treated area with surprised satisfied reaction then settles`,
             subtitle: `שבוע אחד ולא האמנתי לתוצאות`,
-            voiceover: `התחלתי להשתמש, ${pUse}, ופשוט לא האמנתי לתוצאות. שבוע אחד ואני לגמרי מרוצה`
+            voiceover: vo3
           },
           {
             id: 4, label: '🚀 CTA',
-            nb_prompt: `same person from reference photo, genuine happy smile showing result, holding ${pName} up confidently, pointing at camera with other hand, warm bathroom lighting, eye contact with camera, excited grateful energy, ${anatomyRule}, ${noText}, ${format}`,
+            nb_prompt: `${anatomyPrefix} same person from reference photo, genuine happy smile showing result, holding ${pName} up confidently with ONE hand only other hand relaxed at side, warm bathroom lighting, eye contact with camera, excited grateful energy, ${anatomyRule}, ${noText}, ${format}`,
             kling_prompt: `Continuing from previous scene same person holds ${pName} up points directly at camera with big excited smile thumbs up enthusiastic energy then settles`,
             subtitle: `תנסו את ${pName} — יש אחריות מלאה!`,
-            voiceover: `אין לכם מה להפסיד, פשוט תנסו את ${pName}`
+            voiceover: vo4
           }
         ],
-        hebrew_voice: `אתם לא מאמינים כמה זמן בזבזתי על הבעיה הזאת. ניסיתי הכל ושום דבר לא עבד. עד שמישהו המליץ לי על ${pName} ולא הכרתי אותו בכלל. התחלתי להשתמש, ${pUse}, ופשוט לא האמנתי לתוצאות. שבוע אחד ואני לגמרי מרוצה. אין לכם מה להפסיד, פשוט תנסו את ${pName}.`
+        hebrew_voice: `${vo1}. ${vo2}. ${vo3}. ${vo4}.`
       }
     }
   }
@@ -301,18 +383,20 @@ Return ONLY JSON:
 
       // פרומפט עם הוראות עקביות לפי מה שNano Banana מבין
       const hasProduct = !isHeroShot && i >= 1 && productImageUrl
+      const anatomyPrefix = 'CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body.'
       const anatomyRule = 'exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body'
-      const negativeConcepts = 'Negative (avoid): extra limbs, disembodied hands, third arm, floating hands, hands from outside frame, anatomically incorrect.'
+      const singleHandRule = 'person holding product with ONE hand only, other hand visible and relaxed at side, never two items at once'
+      const negativeConcepts = 'Negative (avoid): extra arms, extra hands, third hand, disembodied limbs, floating hands, phantom limbs, multiple arms, anatomically incorrect, deformed hands, mutant hands, extra fingers, six fingers, hands from outside frame, partial limbs entering from edges.'
       const fidelityRule = 'stay faithful to reference image style, realistic photo quality, not AI-looking, preserve original atmosphere and colors, keep the same lighting colors composition and mood as the reference photo, minimal creative deviation'
       let nbPrompt
       if (isHeroShot) {
         nbPrompt = productImageUrl
           ? `Recreate the scene from the reference image (Image 1) faithfully. Keep the SAME subject, lighting, colors, composition, and atmosphere as Image 1 — treat Image 1 as the ground truth. Only make subtle improvements: slightly cleaner framing, a touch more vibrance, a natural TikTok hero-shot feel. Do not reinvent the shot, do not add new elements, do not stylize into a generic AI look. ${fidelityRule}. ${negativeConcepts} Optional subtle context: ${story.scenes[i].nb_prompt}`
-          : `${story.scenes[i].nb_prompt}. ${fidelityRule}. ${negativeConcepts}`
+          : `${anatomyPrefix} ${story.scenes[i].nb_prompt}. ${fidelityRule}. ${negativeConcepts}`
       } else if (hasProduct) {
-        nbPrompt = `Using the person from Image 1 as the subject with identical face hair and appearance, and the product from Image 2 in their hands. ${story.scenes[i].nb_prompt}. Keep facial features and identity exactly the same as Image 1. The product from Image 2 is clearly visible with label facing camera. ${anatomyRule}. ${negativeConcepts}`
+        nbPrompt = `${anatomyPrefix} Using the person from Image 1 as the subject with identical face hair and appearance, and the product from Image 2 held in ONE hand only. ${story.scenes[i].nb_prompt}. Keep facial features and identity exactly the same as Image 1. The product from Image 2 is clearly visible with label facing camera. ${singleHandRule}. ${anatomyRule}. ${negativeConcepts}`
       } else {
-        nbPrompt = `Using the person from Image 1 as the subject with identical face hair and appearance. ${story.scenes[i].nb_prompt}. Keep facial features and identity exactly the same as Image 1. ${anatomyRule}. ${negativeConcepts}`
+        nbPrompt = `${anatomyPrefix} Using the person from Image 1 as the subject with identical face hair and appearance. ${story.scenes[i].nb_prompt}. Keep facial features and identity exactly the same as Image 1. ${anatomyRule}. ${negativeConcepts}`
       }
 
       const nbRes = await fetch('https://fal.run/fal-ai/nano-banana-2/edit', {
