@@ -371,6 +371,9 @@ export function cleanHebrewText(text) {
 
   let out = text
 
+  // Remove artificial line breaks — ElevenLabs interprets them as long pauses.
+  out = out.replace(/[\r\n]+/g, ' ')
+
   // Replace standalone integers with Hebrew words (only when surrounded by non-digit chars)
   out = out.replace(/(^|[^\d])(\d+)(?=$|[^\d])/g, (_, pre, num) => `${pre}${spellNumber(num)}`)
 
@@ -390,6 +393,17 @@ export function cleanHebrewText(text) {
   // Apply natural pauses last, so comma insertions don't interfere with
   // the word-level regex matching above.
   out = addNaturalPauses(out)
+
+  // Final space normalization: kill any residual double spaces, and ensure
+  // exactly ONE space after commas/periods so ElevenLabs doesn't add extra
+  // pauses at sentence boundaries.
+  out = out
+    .replace(/\s+/g, ' ')                // collapse any run of whitespace
+    .replace(/\s*,\s*/g, ', ')           // comma → exactly one trailing space
+    .replace(/\s*\.\s*/g, '. ')          // period → exactly one trailing space
+    .replace(/\s*!\s*/g, '! ')
+    .replace(/\s*\?\s*/g, '? ')
+    .replace(/\s+$/u, '')                // trim trailing space
 
   return out
 }

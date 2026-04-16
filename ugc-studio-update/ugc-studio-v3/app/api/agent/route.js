@@ -27,13 +27,26 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 const SCENE_DURATIONS = [5, 5, 5, 5];
 
-async function generateNBFrame(prompt, imageUrls, maxRetries = 3) {
+async function generateNBFrame(prompt, imageUrls, maxRetries = 3, opts = {}) {
   const validUrls = imageUrls.filter(Boolean);
-  console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
-  const anatomyPrefix = 'CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body.';
-  const negativeConcepts = 'Negative (avoid): extra arms, extra hands, third hand, disembodied limbs, floating hands, phantom limbs, multiple arms, anatomically incorrect, deformed hands, mutant hands, extra fingers, six fingers, hands from outside frame, partial limbs entering from edges.';
-  const singleHandRule = 'If holding a product, hold it with ONE hand only, other hand visible and relaxed at side, never two items at once.';
-  const enhancedPrompt = `${anatomyPrefix} ${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real avatar not model, ${singleHandRule} exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle. ${negativeConcepts}`;
+  const productOnly = opts.productOnly === true;
+  console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, productOnly, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
+
+  let enhancedPrompt;
+  if (productOnly) {
+    // Scene 2 — strict product-only composition. Do NOT include anatomy/person
+    // language that could make NanoBanana insert a model. Push very loudly that
+    // the frame must contain zero humans.
+    const productOnlyRule = 'PRODUCT ONLY SHOT — absolutely no person, no human, no hands holding the product, no face, no body parts, no avatar, no model. The frame contains ONLY the product resting on a surface. Pure product photography, studio-style, no humans in frame whatsoever.';
+    const productNegatives = 'Negative (STRICT): person, human, woman, man, hands, face, body, avatar, model, people, arms, fingers, holding, selfie, skin, hair, limbs, silhouette.';
+    enhancedPrompt = `${productOnlyRule} ${prompt}, realistic product photography, product clearly resting on a physical surface with contact shadow, soft natural lighting, clean uncluttered background, photorealistic. ${productNegatives}`;
+  } else {
+    const anatomyPrefix = 'CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body.';
+    const negativeConcepts = 'Negative (avoid): extra arms, extra hands, third hand, disembodied limbs, floating hands, phantom limbs, multiple arms, anatomically incorrect, deformed hands, mutant hands, extra fingers, six fingers, hands from outside frame, partial limbs entering from edges.';
+    const singleHandRule = 'If holding a product, hold it with ONE hand only, other hand visible and relaxed at side, never two items at once.';
+    enhancedPrompt = `${anatomyPrefix} ${prompt}, authentic UGC selfie look, natural skin texture with visible pores, amateur iPhone vertical photo, slight overexposure from window light, candid unposed feel, no retouching, no studio lighting, real avatar not model, ${singleHandRule} exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle. ${negativeConcepts}`;
+  }
+
   const endpointId = validUrls.length === 0
     ? 'fal-ai/nano-banana-2'
     : 'fal-ai/nano-banana-2/edit';
@@ -63,6 +76,28 @@ async function generateNBFrame(prompt, imageUrls, maxRetries = 3) {
   }
 }
 
+// Join 4 scene voiceovers into ONE continuous paragraph for ElevenLabs.
+// We strip trailing sentence terminators on all-but-last chunks and glue with
+// a single space, so ElevenLabs reads the entire script as one flowing
+// paragraph rather than inserting long pauses at each scene boundary.
+function joinVoiceoverChunks(chunks) {
+  const cleaned = chunks
+    .map(c => (c || '').trim())
+    .filter(Boolean);
+  if (cleaned.length === 0) return '';
+  const last = cleaned.length - 1;
+  const stripped = cleaned.map((c, i) => {
+    if (i === last) return c;
+    // Strip trailing . ! ? … and whitespace so the next chunk flows on naturally.
+    return c.replace(/[.!?…\s]+$/u, '');
+  });
+  let joined = stripped.join(' ').replace(/\s+/g, ' ').trim();
+  // Guarantee exactly one terminal period.
+  joined = joined.replace(/[.!?…\s]+$/u, '');
+  if (joined) joined += '.';
+  return joined;
+}
+
 async function generateVoice(text, voiceId) {
   if (!ELEVEN_KEY || !text) return null;
   const voice = voiceId || ELEVEN_VOICE;
@@ -70,11 +105,13 @@ async function generateVoice(text, voiceId) {
   // sending to ElevenLabs so the TTS doesn't mispronounce common words.
   const cleanedText = cleanHebrewText(text);
   try {
-    // Use with-timestamps endpoint for word-level alignment data
+    // Use with-timestamps endpoint for word-level alignment data.
+    // stability 0.5 / similarity 0.75 favours a smoother, more continuous
+    // delivery vs the jittery scene-boundary pauses we saw with higher values.
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}/with-timestamps?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: cleanedText, model_id: 'eleven_v3', voice_settings: { stability: 0.55, similarity_boost: 0.75, style: 0.55, use_speaker_boost: true } })
+      body: JSON.stringify({ text: cleanedText, model_id: 'eleven_v3', voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.3, use_speaker_boost: true } })
     });
     if (!res.ok) { console.error('ElevenLabs failed:', await res.text()); return null; }
     const json = await res.json();
@@ -304,8 +341,8 @@ Return ONLY valid JSON (no markdown):
     },
     {
       "type": "מוצר",
-      "nb_prompt": "Close-up beauty shot of ${productName} resting naturally on a realistic surface — on a wooden table, marble counter, bathroom sink, or being held stably in one hand. Product must have clear physical support and cast a realistic shadow underneath. Clean background, beautiful soft natural lighting, product is the hero of the shot, NO person or avatar visible (other than a steady hand holding it if appropriate), product details clearly visible, preserve exact product appearance from reference image, product shape and colors unchanged from reference. Negative: product NOT floating, NOT levitating, NOT suspended in air, NOT hovering, always has physical contact with a surface or hand, realistic gravity, realistic shadow and reflection.",
-      "kling_prompt": "Camera slowly orbits around ${productName} resting on a stable surface, product stays stationary and grounded with clear contact shadow, subtle zoom-in, cinematic product shot, soft natural light, silent, smooth natural motion only, no floating, no levitating, no hovering, product shape and colors unchanged from reference",
+      "nb_prompt": "PRODUCT ONLY SHOT — absolutely no person, no human, no hands, no face, no body parts, no avatar, no model. Close-up beauty shot of ${productName} resting naturally on a realistic surface — on a wooden table, marble counter, or bathroom sink. Product must have clear physical support and cast a realistic contact shadow underneath. Clean background, beautiful soft natural lighting, product is the hero of the shot and the ONLY subject in frame, product details clearly visible, preserve exact product appearance from reference image, product shape and colors unchanged from reference. Negative: person, human, woman, man, hands, face, body, arms, fingers, holding, selfie, hair, skin, limbs, silhouette. Also: product NOT floating, NOT levitating, NOT suspended in air, NOT hovering.",
+      "kling_prompt": "Camera slowly orbits around ${productName} resting on a stable surface, product stays stationary and grounded with clear contact shadow, subtle zoom-in, cinematic product shot, soft natural light, no person in frame, no hands, silent, smooth natural motion only, no floating, no levitating, no hovering, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene2"
     },
     {
@@ -331,7 +368,7 @@ Return ONLY valid JSON (no markdown):
       const v2 = parsed.voiceover_scene2 || '';
       const v3 = parsed.voiceover_scene3 || '';
       const v4 = parsed.voiceover_scene4 || '';
-      parsed.voiceover = `${v1} ${v2} ${v3} ${v4}`.trim();
+      parsed.voiceover = joinVoiceoverChunks([v1, v2, v3, v4]);
       if (parsed.scenes) {
         parsed.scenes[0].subtitle = v1;
         parsed.scenes[1].subtitle = v2;
@@ -512,7 +549,7 @@ async function runJob(jobId, body) {
       if (script) {
         script.voiceover_scene1 = hook;
         if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook;
-        script.voiceover = `${hook} ${script.voiceover_scene2 || ''} ${script.voiceover_scene3 || ''} ${script.voiceover_scene4 || ''}`.trim();
+        script.voiceover = joinVoiceoverChunks([hook, script.voiceover_scene2, script.voiceover_scene3, script.voiceover_scene4]);
       }
       if (scenes[0]) scenes[0].subtitle = hook;
       voiceover = script?.voiceover || getBusinessDefaultVoiceover(businessName || '', businessDescription || '', hook, voiceGender);
@@ -523,7 +560,7 @@ async function runJob(jobId, body) {
       if (script) {
         script.voiceover_scene1 = hook;
         if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook;
-        script.voiceover = `${hook} ${script.voiceover_scene2 || ''} ${script.voiceover_scene3 || ''} ${script.voiceover_scene4 || ''}`.trim();
+        script.voiceover = joinVoiceoverChunks([hook, script.voiceover_scene2, script.voiceover_scene3, script.voiceover_scene4]);
       }
       if (scenes[0]) scenes[0].subtitle = hook;
       voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook, voiceGender);
@@ -536,9 +573,12 @@ async function runJob(jobId, body) {
       for (let i = 0; i < 4; i++) {
         try {
           const imageUrls = [];
+          // Scene 2 is "product only" in both modes — strictly NO avatar reference.
+          const isScene2 = i === 1;
+          const productOnly = isScene2 && videoType !== 'business';
           if (videoType === 'business') {
             // Business mode frame references
-            if (i === 1) {
+            if (isScene2) {
               // Scene 2 — showcase business using the business photos, NO avatar
               preparedBusinessPhotos.slice(0, 3).forEach(u => imageUrls.push(u));
             } else {
@@ -551,8 +591,10 @@ async function runJob(jobId, body) {
             }
           } else {
             // UGC mode frame references
-            if (i === 1) {
-              // Scene 2 — pure product beauty shot, NO avatar, NO prev frame
+            if (isScene2) {
+              // Scene 2 — PURE product beauty shot. ONLY the product image; NO
+              // avatar, NO prev frame, nothing that could leak a person into the
+              // frame.
               if (preparedProduct) imageUrls.push(preparedProduct);
             } else {
               if (preparedAvatar) imageUrls.push(preparedAvatar);
@@ -560,7 +602,7 @@ async function runJob(jobId, body) {
               if (preparedProduct && (i === 2 || i === 3)) imageUrls.push(preparedProduct);
             }
           }
-          const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls);
+          const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, { productOnly });
           frames.push(frameUrl);
           if (frameUrl) prevFrame = frameUrl;
         } catch (e) {
@@ -578,49 +620,64 @@ async function runJob(jobId, body) {
     const audioBase64 = voiceResult?.base64 || null;
     const wordTimestamps = voiceResult?.wordTimestamps || null;
 
-    // Kling videos — run all 4 in parallel
+    // Kling videos — run all 4 in parallel with per-scene retry + static fallback
     console.log(`[Job ${jobId}] Starting all 4 Kling videos in parallel...`);
-    const videos = await Promise.all(frames.map(async (frameUrl, i) => {
-      if (!frameUrl) return null;
-      try {
-        console.log(`[Job ${jobId}] Kling scene ${i+1}: starting...`);
-        const result = await fal.subscribe('fal-ai/kling-video/v3/pro/image-to-video', {
-          input: {
-            prompt: scenes[i].kling_prompt,
-            image_url: frameUrl,
-            duration: '5',
-            aspect_ratio: '9:16',
-            cfg_scale: 0.45,
-            negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
-          },
-          pollInterval: 5000
-        });
-        const videoUrl = result.data.video?.url || null;
-        console.log(`[Job ${jobId}] Kling scene ${i+1}:`, videoUrl ? 'OK' : 'no URL');
+    const videoMeta = new Array(4).fill('none'); // 'kling' | 'static' | 'none'
+    const runKlingOnce = async (i, frameUrl) => {
+      const result = await fal.subscribe('fal-ai/kling-video/v3/pro/image-to-video', {
+        input: {
+          prompt: scenes[i].kling_prompt,
+          image_url: frameUrl,
+          duration: '5',
+          aspect_ratio: '9:16',
+          cfg_scale: 0.45,
+          negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
+        },
+        pollInterval: 5000
+      });
+      const videoUrl = result.data.video?.url || null;
+      const valid = videoUrl ? await verifyVideoUrl(videoUrl) : false;
+      return { videoUrl, valid };
+    };
 
-        // Validate Kling output is a real, non-empty video. Kling sometimes
-        // returns a URL but the file is empty/corrupt — especially for the
-        // person-less product shot in scene 2.
-        const valid = videoUrl ? await verifyVideoUrl(videoUrl) : false;
-        if (!valid) {
-          console.warn(`[Job ${jobId}] Kling scene ${i+1} produced empty/invalid video — falling back to static frame video`);
-          const staticUrl = await frameToStaticVideo(frameUrl, 5);
-          console.log(`[Job ${jobId}] Static fallback for scene ${i+1}:`, staticUrl ? 'OK' : 'failed');
-          return staticUrl || null;
-        }
-        return videoUrl;
-      } catch (e) {
-        console.error(`[Job ${jobId}] Kling scene ${i+1} error:`, e.message);
-        // Last resort: try to build a static video from the NB frame so the export
-        // still has 4 valid clips and doesn't crash on "speed=0x" empty input.
+    const videos = await Promise.all(frames.map(async (frameUrl, i) => {
+      if (!frameUrl) { videoMeta[i] = 'none'; return null; }
+      // Try Kling up to 3 times with 3s delay between retries. Log the full
+      // error response (status + body) each time so we can debug why scene N
+      // keeps producing empty videos.
+      for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const staticUrl = await frameToStaticVideo(frameUrl, 5);
-          console.log(`[Job ${jobId}] Static fallback after Kling error for scene ${i+1}:`, staticUrl ? 'OK' : 'failed');
-          return staticUrl || null;
-        } catch {}
-        return null;
+          console.log(`[Job ${jobId}] Kling scene ${i+1}: attempt ${attempt}/3...`);
+          const { videoUrl, valid } = await runKlingOnce(i, frameUrl);
+          if (videoUrl && valid) {
+            console.log(`[Job ${jobId}] Kling scene ${i+1}: OK on attempt ${attempt}`);
+            videoMeta[i] = 'kling';
+            return videoUrl;
+          }
+          console.warn(`[Job ${jobId}] Kling scene ${i+1} attempt ${attempt}: ${videoUrl ? 'empty/invalid video' : 'no URL returned'}`);
+        } catch (e) {
+          const status = e.status || e.statusCode || 'unknown';
+          const body = e.body || e.message || String(e);
+          console.error(`[Job ${jobId}] Kling scene ${i+1} attempt ${attempt} error — status: ${status}, body:`, JSON.stringify(body).slice(0, 600));
+        }
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 3000));
+        }
       }
+      // All 3 Kling attempts failed → static video fallback from NB frame.
+      console.warn(`[Job ${jobId}] Kling scene ${i+1} failed after 3 attempts — falling back to static frame video`);
+      try {
+        const staticUrl = await frameToStaticVideo(frameUrl, 5);
+        console.log(`[Job ${jobId}] Static fallback for scene ${i+1}:`, staticUrl ? 'OK' : 'failed');
+        if (staticUrl) { videoMeta[i] = 'static'; return staticUrl; }
+      } catch (e) {
+        console.error(`[Job ${jobId}] Static fallback scene ${i+1} crashed:`, e.message);
+      }
+      videoMeta[i] = 'none';
+      return null;
     }));
+
+    console.log(`[Job ${jobId}] Video sources:`, videoMeta.map((m, i) => `scene${i+1}=${m}`).join(', '));
 
     const result = {
       story: { scenes, hebrew_voice: voiceover },
@@ -759,8 +816,8 @@ function getDefaultScenes(productName, applicationArea, productDesc) {
     },
     {
       type: 'מוצר',
-      nb_prompt: `Close-up beauty shot of ${productName} resting naturally on a realistic surface — on a wooden table, marble counter, bathroom sink, or being held stably in one hand. Product must have clear physical support and cast a realistic shadow underneath. Clean background, beautiful soft natural lighting, product is the hero of the shot, NO person or avatar visible (other than a steady hand holding it if appropriate), product details clearly visible, preserve exact product appearance from reference image, product shape and colors unchanged from reference. Negative: product NOT floating, NOT levitating, NOT suspended in air, NOT hovering, always has physical contact with a surface or hand, realistic gravity, realistic shadow and reflection.`,
-      kling_prompt: `Camera slowly orbits around ${productName} resting on a stable surface, product stays stationary and grounded with clear contact shadow, subtle zoom-in, cinematic product shot, soft natural light, silent, smooth natural motion only, no floating, no levitating, no hovering, product shape and colors unchanged from reference`,
+      nb_prompt: `PRODUCT ONLY SHOT — absolutely no person, no human, no hands, no face, no body parts, no avatar, no model. Close-up beauty shot of ${productName} resting naturally on a realistic surface — on a wooden table, marble counter, or bathroom sink. Product must have clear physical support and cast a realistic contact shadow underneath. Clean background, beautiful soft natural lighting, product is the hero of the shot and the ONLY subject in frame, product details clearly visible, preserve exact product appearance from reference image, product shape and colors unchanged from reference. Negative: person, human, woman, man, hands, face, body, arms, fingers, holding, selfie, hair, skin, limbs, silhouette. Also: product NOT floating, NOT levitating, NOT suspended in air, NOT hovering.`,
+      kling_prompt: `Camera slowly orbits around ${productName} resting on a stable surface, product stays stationary and grounded with clear contact shadow, subtle zoom-in, cinematic product shot, soft natural light, no person in frame, no hands, silent, smooth natural motion only, no floating, no levitating, no hovering, product shape and colors unchanged from reference`,
       subtitle: `זה ${productName} — ${productDesc}.`
     },
     {
@@ -948,7 +1005,7 @@ Return ONLY valid JSON (no markdown):
       const v2 = parsed.voiceover_scene2 || '';
       const v3 = parsed.voiceover_scene3 || '';
       const v4 = parsed.voiceover_scene4 || '';
-      parsed.voiceover = `${v1} ${v2} ${v3} ${v4}`.trim();
+      parsed.voiceover = joinVoiceoverChunks([v1, v2, v3, v4]);
       if (parsed.scenes) {
         parsed.scenes[0].subtitle = v1;
         parsed.scenes[1].subtitle = v2;
