@@ -1,7 +1,6 @@
 import { cleanHebrewText } from '../../../lib/hebrew-tts.js'
 
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY
-const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW'
 
 // Convert ElevenLabs char-level alignment into word-level timestamps
 // (same shape the agent route already returns: { word, start, end }).
@@ -46,7 +45,11 @@ export async function POST(req) {
     if (text.length > 5000) {
       return Response.json({ error: 'text too long' }, { status: 400 })
     }
-    const voice = voiceId || ELEVEN_VOICE
+    if (!voiceId || typeof voiceId !== 'string') {
+      return Response.json({ error: 'voiceId required' }, { status: 400 })
+    }
+    const voice = voiceId
+    console.log('[/api/voice] using voiceId:', voice)
 
     // Hebrew preprocessing — inject nikud on known mispronounced words and
     // sprinkle in natural pause commas before connectors.

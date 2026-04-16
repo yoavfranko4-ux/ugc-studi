@@ -307,6 +307,7 @@ export default function Home() {
   const [businessDescription, setBusinessDescription] = useState('')
   const [businessPhotos, setBusinessPhotos] = useState([]) // array of data URLs (1-4)
   const [voiceId, setVoiceId] = useState('cp6q5qJLs8rR7eAWOepf')
+  const [voiceGender, setVoiceGender] = useState('female')
   const [voicePreviewing, setVoicePreviewing] = useState(null)
   const voicePreviewRef = useRef(null)
   const [falKey, setFalKey] = useState('')
@@ -400,6 +401,8 @@ export default function Home() {
         if (d.bg_music) setBgMusic(d.bg_music)
         if (d.sfx_enabled !== undefined) setSfxEnabled(d.sfx_enabled)
         if (d.transition) setTransition(d.transition)
+        if (d.voice_id) setVoiceId(d.voice_id)
+        if (d.voice_gender) setVoiceGender(d.voice_gender)
 
         // Rebuild result object for the editor
         const restoredResult = {
@@ -1009,6 +1012,8 @@ export default function Home() {
         hebrew_voice: result.hebrewVoice,
         audio_base64: result.audioBase64 || null,
         word_timestamps: result.wordTimestamps || null,
+        voice_id: voiceId,
+        voice_gender: voiceGender,
         thumbnail: thumbnail,
       }
       const { error } = await supabase.from('saved_edits').insert({
@@ -1206,7 +1211,7 @@ export default function Home() {
             return (
               <div
                 key={v.id}
-                onClick={() => setVoiceId(v.id)}
+                onClick={() => { setVoiceId(v.id); setVoiceGender(v.gender) }}
                 style={{
                   padding: 18,
                   borderRadius: 14,
