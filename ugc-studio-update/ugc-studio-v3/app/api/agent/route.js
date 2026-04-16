@@ -685,7 +685,10 @@ async function runJob(jobId, body) {
       videos,
       audioBase64,
       wordTimestamps,
-      hebrewVoice: voiceover
+      hebrewVoice: voiceover,
+      // Expose the voiceId the job ran with so the client can re-record
+      // using the SAME voice and avoid gender drift on re-record.
+      voiceId: voiceId || ELEVEN_VOICE
     };
 
     await supabase
@@ -847,61 +850,104 @@ function getBusinessCategory(desc) {
   return 'generic';
 }
 
+// Category-driven wardrobe / close-up action / scene-3 activity / venue.
+// The avatar plays the SILENT employee or owner of the business — never talks.
+function getCategoryUniform(cat) {
+  switch (cat) {
+    case 'restaurant': return 'chef coat or clean apron over a casual work shirt';
+    case 'salon': return 'stylist apron over a stylish casual outfit';
+    case 'clinic': return 'white medical coat over professional attire';
+    case 'fitness': return 'activewear and professional trainer outfit';
+    case 'fashion': return 'on-brand stylish outfit matching a modern boutique';
+    default: return 'professional business attire appropriate for the venue';
+  }
+}
+function getCategoryCloseUp(cat) {
+  switch (cat) {
+    case 'restaurant': return 'hands cutting fresh ingredients, plating food, garnishing a dish, steam rising from the pan';
+    case 'salon': return 'scissors trimming hair in motion, blow-dryer airflow, brush shaping strands, color application';
+    case 'clinic': return 'gloved hands applying product, professional device in use, close-up of treatment technique on skin';
+    case 'fitness': return 'weights moving, hands gripping equipment, resistance band under tension, feet driving through a rep';
+    case 'fashion': return 'hands sliding clothes on a rack, fabric texture detail, hanger in motion, folding a garment';
+    default: return 'hands performing the core service action of the business';
+  }
+}
+function getCategoryScene3Action(cat) {
+  switch (cat) {
+    case 'restaurant': return 'plating a finished dish at the pass, stirring a pot, focused on the food, adjusting garnish';
+    case 'salon': return 'styling a client whose back is to the camera, holding scissors mid-cut, finishing a blowout';
+    case 'clinic': return 'performing a treatment on a reclined client, holding a professional device, focused on technique';
+    case 'fitness': return 'demonstrating an exercise, spotting a trainee, setting up equipment with focus';
+    case 'fashion': return 'arranging clothes on a display, greeting a customer at the rack, folding a garment with care';
+    default: return 'performing the core service of the business with focused professional expression';
+  }
+}
+function getCategoryVenue(cat) {
+  switch (cat) {
+    case 'restaurant': return 'restaurant kitchen and dining area';
+    case 'salon': return 'hair salon with chairs, mirrors and styling stations';
+    case 'clinic': return 'modern clean clinic treatment room';
+    case 'fitness': return 'modern gym or training studio';
+    case 'fashion': return 'stylish boutique interior with clothing racks and display';
+    default: return 'professional business interior';
+  }
+}
+
+// New business hook — third-person / customer-perspective narration.
+// The avatar is the SILENT employee; the voiceover describes the business
+// from an outside narrator's POV (never "היי אני" from the avatar).
 function getBusinessHook(desc, name, voiceGender = 'female') {
   const cat = getBusinessCategory(desc);
   const hooks = {
-    restaurant: 'כל פעם שרציתי לצאת לאכול בחוץ, הייתי מתלבטת ונגמר הערב בפלאפל',
-    fashion: 'כל פעם שחיפשתי בגד חדש, בחנויות היה הכל אותו דבר ומשעמם',
-    clinic: 'שנים התלוננתי על הבעיה הזאת וכל מי שהלכתי אליו לא באמת עזר',
-    salon: 'כל פעם שהלכתי להסתפר יצאתי מאוכזבת ולא כמו שדמיינתי',
-    fitness: 'רציתי להתחיל להתאמן כבר שנים אבל שום מקום לא גרם לי להרגיש בנוח',
-    generic: 'היה לי צורך בשירות איכותי וכל מה שמצאתי פשוט לא הרגיש נכון',
+    restaurant: `${name || 'המסעדה הזאת'} — המקום שכולם מדברים עליו`,
+    fashion: `${name || 'הבוטיק הזה'} — מוצאים כאן חתיכות שלא תמצאו בשום מקום`,
+    clinic: `${name || 'הקליניקה הזאת'} — כאן מקבלים יחס אמיתי ותוצאות`,
+    salon: `${name || 'המספרה הזאת'} — יוצאים מכאן אחרים`,
+    fitness: `${name || 'הסטודיו הזה'} — מתאמנים כאן אחרת`,
+    generic: `${name || 'העסק הזה'} — זה לא סתם עוד עסק בשכונה`,
   };
-  // Masculine equivalents for Daniel (male) voice
-  const hooksMale = {
-    restaurant: 'כל פעם שרציתי לצאת לאכול בחוץ, הייתי מתלבט ונגמר הערב בפלאפל',
-    fashion: 'כל פעם שחיפשתי בגד חדש, בחנויות היה הכל אותו דבר ומשעמם',
-    clinic: 'שנים התלוננתי על הבעיה הזאת וכל מי שהלכתי אליו לא באמת עזר',
-    salon: 'כל פעם שהלכתי להסתפר יצאתי מאוכזב ולא כמו שדמיינתי',
-    fitness: 'רציתי להתחיל להתאמן כבר שנים אבל שום מקום לא גרם לי להרגיש בנוח',
-    generic: 'היה לי צורך בשירות איכותי וכל מה שמצאתי פשוט לא הרגיש נכון',
-  };
-  const map = voiceGender === 'male' ? hooksMale : hooks;
-  return map[cat] || map.generic;
+  // Third-person narration works for any gender; keep consistent.
+  return hooks[cat] || hooks.generic;
 }
 
 function getBusinessDefaultVoiceover(name, desc, hook, voiceGender = 'female') {
   const h = hook || getBusinessHook(desc, name, voiceGender);
-  const raw = `${h}. ואז גיליתי את ${name} — ${desc}. הייתי שם בעצמי וזה פשוט שינה לי את החוויה לגמרי. חייבים לבוא ל${name} — תזמינו עכשיו!`;
-  return voiceGender === 'male' ? toMasculine(raw) : raw;
+  // Third-person / customer perspective — avatar does NOT talk.
+  return `${h}. הסוד? כל פרט נעשה בידיים, טרי, מהרגע הראשון. ב${name} מרגישים את ההבדל מיד — ${desc || 'חוויה אמיתית'}, וזה מה שגורם ללקוחות לחזור. בואו ל${name} — אתם חייבים לנסות את זה.`;
 }
 
 function getBusinessDefaultScenes(name, desc) {
   const hook = getBusinessHook(desc, name);
+  const cat = getBusinessCategory(desc);
+  const uniform = getCategoryUniform(cat);
+  const closeUp = getCategoryCloseUp(cat);
+  const scene3Action = getCategoryScene3Action(cat);
+  const venue = getCategoryVenue(cat);
+  const silentRule = 'silent, NOT speaking, NOT looking like talking, mouth closed or natural relaxed smile, no open-mouth expression, no lip movement implied';
   return [
     {
-      type: 'הוק',
-      nb_prompt: `avatar showing relatable situation where ${name} solves a need, natural everyday scene, frustrated or searching expression, NO business name visible, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar showing relatable everyday frustration before discovering the business, NO business name visible, ${STABLE}`,
+      type: 'הכנסה',
+      nb_prompt: `avatar wearing ${uniform} inside a ${venue}, starting their workday with calm confident posture, ${silentRule}, iPhone handheld documentary style, natural daylight, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar adjusts apron or uniform and looks around the workspace with calm confidence, subtle natural body motion, ${STABLE}`,
       subtitle: hook
     },
     {
-      type: 'עסק',
-      nb_prompt: `Beautiful cinematic shot of ${name} business — ${desc}, highlight the space/product/atmosphere, NO person visible, NO avatar, beautiful natural lighting, inviting and warm, preserve exact appearance of business from reference images`,
-      kling_prompt: `Cinematic reveal of the ${name} business space/offering, showcase the atmosphere and highlights, NO person visible, beautiful natural lighting, silent, smooth natural motion only, business appearance unchanged from reference`,
-      subtitle: `זה ${name} — ${desc}`
+      type: 'פעולה',
+      nb_prompt: `extreme close-up of ${closeUp}, NO face visible, NO full person, only hands and tools, cinematic shallow depth of field, warm natural lighting, professional documentary close-up, preserve atmosphere and colors from reference images`,
+      kling_prompt: `Slow cinematic motion of ${closeUp}, hands working smoothly with clear purpose, NO person visible, silent, smooth natural motion only, business appearance unchanged from reference`,
+      subtitle: `כל פרט נעשה בידיים`
     },
     {
-      type: 'חוויה',
-      nb_prompt: `avatar experiencing ${name}, happily engaged with the business offering, warm and excited expression, business context visible in background, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar genuinely enjoying the experience at ${name}, happy engaged expression, business context visible, ${STABLE}`,
-      subtitle: `הייתי ב${name} — ממש חוויה אחרת, ההבדל ניכר מהרגע הראשון.`
+      type: 'בפעולה',
+      nb_prompt: `avatar wearing ${uniform} ${scene3Action}, inside the ${venue}, focused professional expression with mouth closed, authentic documentary moment, warm interior lighting, ${silentRule}, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar ${scene3Action}, natural working motion, hands moving with purpose, focused expression, ${STABLE}`,
+      subtitle: `ב${name} עושים את זה ברמה אחרת`
     },
     {
-      type: 'CTA',
-      nb_prompt: `avatar smiling warmly recommending ${name}, genuine happy expression, business context visible, natural smile, correct human anatomy, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar warmly recommending ${name} to camera, genuine smile, inviting gesture, ${STABLE}`,
-      subtitle: `חייבים לנסות את ${name} — קבעו עכשיו, אל תפספסו!`
+      type: 'הזמנה',
+      nb_prompt: `avatar wearing ${uniform} standing at the entrance of ${name} near the sign, open welcoming gesture with hands, warm relaxed smile with mouth closed, business signage visible in background, golden hour warm lighting, inviting atmosphere, ${silentRule}, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
+      kling_prompt: `Avatar stands near ${name} sign, gentle welcoming gesture with open hands, slight head nod, mouth-closed warm smile, ${STABLE}`,
+      subtitle: `בואו ל${name} — אתם חייבים לנסות`
     }
   ];
 }
@@ -914,84 +960,101 @@ async function generateBusinessScript(name, desc, hook, voiceGender) {
     : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה. אל תערבב לשון זכר.`;
 
   const cat = getBusinessCategory(desc);
+  const uniform = getCategoryUniform(cat);
+  const closeUp = getCategoryCloseUp(cat);
+  const scene3Action = getCategoryScene3Action(cat);
+  const venue = getCategoryVenue(cat);
   const categoryHints = {
-    restaurant: 'Focus on food, atmosphere, special dishes, the experience of eating there. Highlight taste, warmth, family/friend vibes.',
-    fashion: 'Focus on style, the collection, the shopping experience, unique pieces, feel good in what you wear.',
-    clinic: 'Focus on expertise, results, client experience, trust, professionalism, before/after feeling.',
-    salon: 'Focus on the styling experience, the result, how the customer feels after leaving.',
-    fitness: 'Focus on the vibe of the place, the trainers, the results, community feel.',
-    generic: 'Focus on what makes this business special, the customer experience, the result.',
+    restaurant: 'Focus on the craft of the food, freshness, the kitchen energy, what customers taste and feel.',
+    fashion: 'Focus on the boutique vibe, the pieces, the feel of the fabric, the personal touch.',
+    clinic: 'Focus on expertise, care, results, the calm professionalism of the treatment room.',
+    salon: 'Focus on the styling craft, the finish, the confidence customers leave with.',
+    fitness: 'Focus on the energy of the space, the trainers, how members feel leaving a session.',
+    generic: 'Focus on what the owner does uniquely well and why customers keep coming back.',
   };
 
   const callClaude = async (extra = '') => anthropic.messages.create({
     model: 'claude-sonnet-4-20250514', max_tokens: 2500,
-    messages: [{ role: 'user', content: `You are a UGC ad expert writing scripts in Hebrew for LOCAL BUSINESSES. Create a viral 4-scene ad for this business:
+    messages: [{ role: 'user', content: `You are a UGC ad expert writing Hebrew scripts for LOCAL BUSINESSES. Redesigned business-video format:
 
 Business name: "${name}"
 Business description: ${desc}
 Auto-detected category: ${cat}
+Venue: ${venue}
+Uniform: ${uniform}
+Close-up action: ${closeUp}
+Scene-3 activity: ${scene3Action}
 Category guidance: ${categoryHints[cat]}
 
 ${genderInstruction}
 
-This is a BUSINESS VIDEO (not a product ad). Write in casual conversational Hebrew — feels like a real customer recommending the business to a friend.
+CRITICAL ROLE RULES — THE AVATAR PLAYS THE SILENT EMPLOYEE/OWNER:
+- The avatar represents the employee or owner of "${name}" — NOT a customer.
+- The avatar NEVER talks, NEVER appears to talk, NEVER opens the mouth wide.
+- The avatar's mouth must be closed or a natural relaxed smile in every scene with the avatar.
+- Voiceover plays OVER the 4 scenes as background narration — it is NOT spoken by the avatar.
 
-SCENE STRUCTURE (business mode):
-- Scene 1 (Hook): relatable situation where THIS BUSINESS solves a need. NO business name mentioned. Universal pain for this business's category.
-- Scene 2 (Show): highlight the business/product using the reference photos. NO avatar, NO person. Just the business space / offering as the hero. Voiceover describes what the business is and what makes it special.
-- Scene 3 (Experience): the avatar experiencing the business — happy, engaged, "I was there". Uses business context from the reference photos.
-- Scene 4 (CTA): visit/order/contact with urgency. Warm recommendation.
+NARRATION STYLE (CRITICAL — NOT FIRST PERSON FROM THE AVATAR):
+- The voiceover is third-person or customer-perspective narration ABOUT "${name}".
+- NEVER write "היי אני ..." or anything that sounds like the avatar speaking.
+- Natural Israeli narration like: "במסעדה הזאת כל מנה מוכנה טריה", "אם אתם מחפשים ...", "הסוד של ${name} זה ...", "כל מי שמגיע ל${name} מבין מיד ...".
+
+NEW 4-SCENE STRUCTURE:
+- Scene 1 (👋 הכנסה): avatar wearing ${uniform}, inside the ${venue}, starting their workday — putting on apron / standing behind the counter / arriving at the workspace. Mouth closed. Voiceover HOOK.
+- Scene 2 (✨ פעולה): EXTREME CLOSE-UP of ${closeUp}. NO face, NO full person — only hands and tools/products. Uses business/product reference photos for authenticity. Voiceover describes the craft.
+- Scene 3 (🏪 בפעולה): avatar ${scene3Action} inside the ${venue}. Mouth closed, focused professional expression. Voiceover describes the story / unique value of ${name}.
+- Scene 4 (🚀 הזמנה): avatar at entrance of ${name}, near the sign/logo or behind the counter. Open welcoming gesture, warm relaxed mouth-closed smile. Voiceover CTA.
 
 VOICEOVER TIMING — STRICT:
-- Scene 1: ~12 Hebrew words
-- Scene 2: ~14 Hebrew words (describe the business, its offering, what's special)
-- Scene 3: ~18 Hebrew words (experience at the business — what it felt like)
-- Scene 4: ~12 Hebrew words (strong CTA — visit, order, contact, with urgency)
+- Scene 1: ~10 Hebrew words — hook about ${name}, third-person narration.
+- Scene 2: ~12 Hebrew words — describe the craft/action shown in the close-up.
+- Scene 3: ~16 Hebrew words — unique value / story of ${name}, what customers get.
+- Scene 4: ~10 Hebrew words — direct CTA: "בואו ל${name}", "תזמינו עכשיו", "אתם חייבים לנסות".
 
 SENTENCE COMPLETENESS (CRITICAL):
-כל משפט חייב להסתיים בתוך הסצנה שלו. אסור שמשפט ימשיך לסצנה הבאה. כל סצנה = משפט שלם או שניים שלמים.
-- Each voiceover_sceneN must be a SELF-CONTAINED complete sentence (or two) ending with . ? or !.
-- NEVER end a scene mid-phrase and NEVER start a scene with a word that only makes sense as a continuation of the previous one.
-- If you read a single scene's voiceover in isolation, it must be a grammatically complete Hebrew sentence.
+כל משפט חייב להסתיים בתוך הסצנה שלו. כל סצנה = משפט שלם או שניים שלמים.
+- Each voiceover_sceneN must be a SELF-CONTAINED Hebrew sentence ending with . ? or !.
+- NEVER end a scene mid-phrase; NEVER start a scene with a word that depends on the previous one.
 
 HOOK (voiceover_scene1) — PRE-SET:
 voiceover_scene1 is already: "${hook}" — use this EXACT text.
 
-EVERY nb_prompt MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". If the avatar holds something, use only ONE hand, other hand relaxed at side.
-(except scene 2 which has no person — the anatomy rule doesn't apply there)
+EVERY nb_prompt for scenes 1, 3, 4 MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". Scene 2 (hands-only close-up) must explicitly say "NO face visible, NO full person, only hands and tools".
+
+EVERY nb_prompt for scenes with the avatar MUST include: "silent, NOT speaking, NOT looking like talking, mouth closed or natural relaxed smile, no open-mouth expression, no lip movement implied".
 
 END every Kling prompt with: "silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference"
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "~12 Hebrew words — universal pain for this business's category, NO business name",
-  "voiceover_scene2": "~14 Hebrew words — describe ${name} visually, what it is, what makes it special",
-  "voiceover_scene3": "~18 Hebrew words — experience at ${name}, what it felt like being there",
-  "voiceover_scene4": "~12 Hebrew words — warm CTA with urgency: visit/order/contact ${name} now",
-  "setting": "one-line description",
+  "voiceover_scene1": "~10 Hebrew words — third-person hook about ${name}",
+  "voiceover_scene2": "~12 Hebrew words — describe the craft/action shown in the hands-only close-up",
+  "voiceover_scene3": "~16 Hebrew words — unique value / story of ${name}, what customers experience",
+  "voiceover_scene4": "~10 Hebrew words — direct CTA to visit ${name}",
+  "setting": "one-line description of the ${venue}",
   "scenes": [
     {
-      "type": "הוק",
-      "nb_prompt": "avatar showing relatable everyday frustration that ${name} solves, natural setting, NO business name visible, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar showing relatable frustration, NO business name visible, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps",
+      "type": "הכנסה",
+      "nb_prompt": "avatar wearing ${uniform} inside a ${venue}, starting their workday with calm confident posture, mouth closed with natural relaxed expression, silent NOT speaking, iPhone handheld documentary style, natural daylight, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar adjusts apron or uniform and looks around the workspace with calm confidence, subtle natural body motion, silent no talking no lip movement mouth closed or naturally relaxed, smooth natural motion only, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference",
       "subtitle": "same as voiceover_scene1"
     },
     {
-      "type": "עסק",
-      "nb_prompt": "Beautiful cinematic shot of ${name} — ${desc}, highlight the business space/product/atmosphere, NO person visible, NO avatar, beautiful natural lighting, inviting atmosphere, preserve exact appearance from reference images",
-      "kling_prompt": "Cinematic reveal of ${name}, showcase the atmosphere and highlights, NO person visible, beautiful natural lighting, silent, smooth natural motion only, business appearance unchanged from reference",
+      "type": "פעולה",
+      "nb_prompt": "extreme close-up of ${closeUp}, NO face visible, NO full person, only hands and tools, cinematic shallow depth of field, warm natural lighting, professional documentary close-up, preserve exact appearance from reference images",
+      "kling_prompt": "Slow cinematic motion of ${closeUp}, hands working smoothly with clear purpose, NO person visible, silent smooth natural motion only, business appearance unchanged from reference",
       "subtitle": "same as voiceover_scene2"
     },
     {
-      "type": "חוויה",
-      "nb_prompt": "avatar at ${name} enjoying the experience, happy engaged expression, business context visible in background from reference, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar genuinely enjoying the experience at ${name}, business context visible, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference",
+      "type": "בפעולה",
+      "nb_prompt": "avatar wearing ${uniform} ${scene3Action}, inside the ${venue}, focused professional expression with mouth closed, silent NOT speaking, authentic documentary moment, warm interior lighting, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar ${scene3Action}, natural working motion hands moving with purpose focused expression, silent no talking no lip movement mouth closed or naturally relaxed, smooth natural motion only, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference",
       "subtitle": "same as voiceover_scene3"
     },
     {
-      "type": "CTA",
-      "nb_prompt": "avatar warmly recommending ${name}, genuine smile, business context visible, correct human anatomy, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar warmly recommending ${name} to camera, genuine smile, inviting gesture, silent, no talking, no lip movement, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference",
+      "type": "הזמנה",
+      "nb_prompt": "avatar wearing ${uniform} standing at the entrance of ${name} near the sign, open welcoming gesture with hands, warm relaxed smile with mouth closed, business signage visible in background, golden hour warm lighting, inviting atmosphere, silent NOT speaking, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar stands near ${name} sign, gentle welcoming gesture with open hands slight head nod, mouth-closed warm smile, silent no talking no lip movement, smooth natural motion only, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference",
       "subtitle": "same as voiceover_scene4"
     }
   ]
