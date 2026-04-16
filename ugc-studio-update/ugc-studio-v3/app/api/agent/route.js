@@ -132,6 +132,36 @@ function scriptGenderMismatch(text, voiceGender) {
   return false;
 }
 
+// Words that indicate a scene voiceover is a mid-sentence continuation rather
+// than a complete, self-contained clause. If scene N starts with one of these
+// it grammatically depends on scene N-1, which produces the "לא יכולתי השיניים
+// / שלי" broken-subtitle effect.
+const MID_SENTENCE_STARTERS = new Set([
+  'שלי', 'שלך', 'שלו', 'שלה', 'שלנו', 'שלכם', 'שלהם',
+  'ואז', 'אבל', 'כי', 'אז', 'עד', 'וגם', 'גם',
+  'ו', 'ב', 'ל', 'מ', 'כ',
+  'אותי', 'אותך', 'אותו', 'אותה', 'אותנו', 'אותם',
+  'הזה', 'הזו', 'האלה', 'ההוא', 'ההיא'
+]);
+function scenesHaveBrokenSentences(scenes) {
+  if (!Array.isArray(scenes)) return false;
+  const chunks = scenes.map(s => (s?.subtitle || s?.voiceover || '').trim()).filter(Boolean);
+  for (let i = 0; i < chunks.length; i++) {
+    const c = chunks[i];
+    // Scene must end with sentence terminator (. ! ? …)
+    const last = c.replace(/["')\]\s]+$/, '').slice(-1);
+    if (!/[.!?…]/.test(last)) return true;
+    // Scene i+1 should not start with a mid-sentence word
+    if (i + 1 < chunks.length) {
+      const nextFirstWord = chunks[i + 1].split(/\s+/)[0] || '';
+      // Strip leading quotes/punctuation
+      const cleaned = nextFirstWord.replace(/^["'(\[]+/, '');
+      if (MID_SENTENCE_STARTERS.has(cleaned)) return true;
+    }
+  }
+  return false;
+}
+
 async function generateScript(productName, productDesc, applicationArea, hook, voiceGender) {
   if (!ANTHROPIC_KEY) return null;
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
@@ -211,6 +241,14 @@ CRITICAL RULES:
 - voiceover MUST fill the full duration naturally — no silence gaps
 - AIM FOR ~20 SECONDS TOTAL of spoken Hebrew
 
+3a. SENTENCE COMPLETENESS (CRITICAL — THE MOST IMPORTANT TIMING RULE):
+כל משפט חייב להסתיים בתוך הסצנה שלו. אסור שמשפט ימשיך לסצנה הבאה. כל סצנה = משפט שלם או שניים שלמים.
+- Each voiceover_sceneN must be a SELF-CONTAINED complete sentence (or two complete sentences) that ends with a period / question mark / exclamation mark.
+- NEVER end a scene mid-phrase (e.g. ending scene 1 with "השיניים" and continuing scene 2 with "שלי" — FORBIDDEN).
+- NEVER start a scene with a word that only makes sense as a continuation of the previous scene (e.g. starting scene 2 with "שלי", "אבל", "ואז רציתי שוב" that grammatically needs a previous clause).
+- The combined script must flow naturally when read end-to-end, AND each chunk must stand on its own when read in isolation.
+- Test: if you deleted any single scene's voiceover, the remaining 3 scenes should still each be grammatically complete Hebrew sentences.
+
 4. HOOK (voiceover_scene1) — PRE-SET, DO NOT CHANGE:
 voiceover_scene1 is already set to: "${hook}"
 You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
@@ -266,8 +304,8 @@ Return ONLY valid JSON (no markdown):
     },
     {
       "type": "מוצר",
-      "nb_prompt": "Close-up beauty shot of ${productName}, clean background, beautiful natural lighting, product is the hero of the shot, NO person or avatar visible, product details clearly visible, unboxing or reveal style, preserve exact product appearance from reference image, product shape and colors unchanged from reference",
-      "kling_prompt": "Product ${productName} slowly rotating or being revealed, cinematic close-up, NO person visible, NO avatar visible, clean background, beautiful natural lighting, silent, smooth natural motion only, product shape and colors unchanged from reference",
+      "nb_prompt": "Close-up beauty shot of ${productName} resting naturally on a realistic surface — on a wooden table, marble counter, bathroom sink, or being held stably in one hand. Product must have clear physical support and cast a realistic shadow underneath. Clean background, beautiful soft natural lighting, product is the hero of the shot, NO person or avatar visible (other than a steady hand holding it if appropriate), product details clearly visible, preserve exact product appearance from reference image, product shape and colors unchanged from reference. Negative: product NOT floating, NOT levitating, NOT suspended in air, NOT hovering, always has physical contact with a surface or hand, realistic gravity, realistic shadow and reflection.",
+      "kling_prompt": "Camera slowly orbits around ${productName} resting on a stable surface, product stays stationary and grounded with clear contact shadow, subtle zoom-in, cinematic product shot, soft natural light, silent, smooth natural motion only, no floating, no levitating, no hovering, product shape and colors unchanged from reference",
       "subtitle": "same as voiceover_scene2"
     },
     {
@@ -310,6 +348,13 @@ Return ONLY valid JSON (no markdown):
   if (parsed && scriptGenderMismatch(parsed.voiceover, voiceGender)) {
     console.warn(`[generateScript] Gender mismatch (wanted ${voiceGender}), regenerating...`);
     const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD WRONG GENDER. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${voiceGender}). Do NOT mix genders. Verify every single word.`;
+    const retry = parseResponse(await callClaude(extraInstruction));
+    if (retry) parsed = retry;
+  }
+  // Validate sentence completeness — regenerate once if any scene ends mid-sentence
+  if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
+    console.warn('[generateScript] Broken sentences across scenes, regenerating...');
+    const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES (e.g. scene N ended with "השיניים" and scene N+1 started with "שלי"). REWRITE so each voiceover_sceneN is a SELF-CONTAINED grammatically complete Hebrew sentence ending with . ? or ! — and no scene starts with a word like שלי / שלו / אותי / הזה that depends on the previous scene.`;
     const retry = parseResponse(await callClaude(extraInstruction));
     if (retry) parsed = retry;
   }
@@ -714,8 +759,8 @@ function getDefaultScenes(productName, applicationArea, productDesc) {
     },
     {
       type: 'מוצר',
-      nb_prompt: `Close-up beauty shot of ${productName}, clean background, beautiful natural lighting, product is the hero of the shot, NO person or avatar visible, product details clearly visible, unboxing or reveal style, preserve exact product appearance from reference image, product shape and colors unchanged from reference`,
-      kling_prompt: `Product ${productName} slowly rotating or being revealed, cinematic close-up, NO person visible, NO avatar visible, clean background, beautiful natural lighting, silent, smooth natural motion only, product shape and colors unchanged from reference`,
+      nb_prompt: `Close-up beauty shot of ${productName} resting naturally on a realistic surface — on a wooden table, marble counter, bathroom sink, or being held stably in one hand. Product must have clear physical support and cast a realistic shadow underneath. Clean background, beautiful soft natural lighting, product is the hero of the shot, NO person or avatar visible (other than a steady hand holding it if appropriate), product details clearly visible, preserve exact product appearance from reference image, product shape and colors unchanged from reference. Negative: product NOT floating, NOT levitating, NOT suspended in air, NOT hovering, always has physical contact with a surface or hand, realistic gravity, realistic shadow and reflection.`,
+      kling_prompt: `Camera slowly orbits around ${productName} resting on a stable surface, product stays stationary and grounded with clear contact shadow, subtle zoom-in, cinematic product shot, soft natural light, silent, smooth natural motion only, no floating, no levitating, no hovering, product shape and colors unchanged from reference`,
       subtitle: `זה ${productName} — ${productDesc}.`
     },
     {
@@ -846,6 +891,12 @@ VOICEOVER TIMING — STRICT:
 - Scene 3: ~18 Hebrew words (experience at the business — what it felt like)
 - Scene 4: ~12 Hebrew words (strong CTA — visit, order, contact, with urgency)
 
+SENTENCE COMPLETENESS (CRITICAL):
+כל משפט חייב להסתיים בתוך הסצנה שלו. אסור שמשפט ימשיך לסצנה הבאה. כל סצנה = משפט שלם או שניים שלמים.
+- Each voiceover_sceneN must be a SELF-CONTAINED complete sentence (or two) ending with . ? or !.
+- NEVER end a scene mid-phrase and NEVER start a scene with a word that only makes sense as a continuation of the previous one.
+- If you read a single scene's voiceover in isolation, it must be a grammatically complete Hebrew sentence.
+
 HOOK (voiceover_scene1) — PRE-SET:
 voiceover_scene1 is already: "${hook}" — use this EXACT text.
 
@@ -912,6 +963,12 @@ Return ONLY valid JSON (no markdown):
   if (parsed && scriptGenderMismatch(parsed.voiceover, voiceGender)) {
     console.warn(`[generateBusinessScript] Gender mismatch (wanted ${voiceGender}), regenerating...`);
     const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD WRONG GENDER. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${voiceGender}). Do NOT mix genders. Verify every single word.`;
+    const retry = parseResponse(await callClaude(extraInstruction));
+    if (retry) parsed = retry;
+  }
+  if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
+    console.warn('[generateBusinessScript] Broken sentences across scenes, regenerating...');
+    const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES. REWRITE so each voiceover_sceneN is a SELF-CONTAINED grammatically complete Hebrew sentence ending with . ? or ! — and no scene starts with a word that depends on the previous scene.`;
     const retry = parseResponse(await callClaude(extraInstruction));
     if (retry) parsed = retry;
   }
