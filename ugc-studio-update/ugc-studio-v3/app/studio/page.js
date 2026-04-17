@@ -404,7 +404,8 @@ export default function Home() {
         if (d.voice_id) setVoiceId(d.voice_id)
         if (d.voice_gender) setVoiceGender(d.voice_gender)
 
-        // Rebuild result object for the editor
+        // Rebuild result object for the editor. Carry voiceId so re-record
+        // picks the original voice even when state drifted for any reason.
         const restoredResult = {
           wordTimestamps: d.word_timestamps || null,
           story: d.story || null,
@@ -412,6 +413,7 @@ export default function Home() {
           videos: d.videos || [],
           audioBase64: d.audio_base64 || null,
           hebrewVoice: d.hebrew_voice || '',
+          voiceId: d.voice_id || null,
         }
         // Rebuild voiceover blob URL from saved base64
         if (d.audio_base64) {
@@ -564,13 +566,24 @@ export default function Home() {
     if (hasRerecorded || rerecording) return
     const text = (textOverride ?? rerecordText ?? '').trim()
     if (!text) { alert('אין טקסט קריינות לשלוח'); return }
+    // Prefer the voiceId the job actually ran with (persisted on the result
+    // object by /api/agent). Fall back to the selected state only if the
+    // result didn't carry one through (e.g. legacy saved edits). This guards
+    // against state drift if the user re-opens the voice picker after
+    // generation and accidentally changes the selection.
+    const effectiveVoiceId = result?.voiceId || voiceId
+    if (!effectiveVoiceId) {
+      alert('voiceId חסר — לא ניתן להקליט מחדש')
+      return
+    }
     setRerecording(true)
     addLog('שולח טקסט ל-ElevenLabs...')
+    console.log('[Studio] rerecord POST /api/voice voiceId=', effectiveVoiceId, '(state=', voiceId, ', result=', result?.voiceId, ')')
     try {
       const vRes = await fetch('/api/voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voiceId })
+        body: JSON.stringify({ text, voiceId: effectiveVoiceId })
       })
       if (!vRes.ok) {
         const errBody = await vRes.json().catch(() => ({}))
@@ -731,6 +744,11 @@ export default function Home() {
         data.subtitleSegments = buildSubtitleSegments(data.wordTimestamps, 3)
         console.log('[Studio] Subtitle segments from alignment:', data.subtitleSegments.length, 'segments')
       }
+      // Guarantee the voiceId the user selected is on the result, even if the
+      // server response ever drops the field — re-record reads result.voiceId
+      // first. Logged so we can verify end-to-end voice routing.
+      if (!data.voiceId) data.voiceId = voiceId
+      console.log('[Studio] Generation complete, result.voiceId=', data.voiceId, '(state voiceId=', voiceId, ')')
       setResult(data)
       const hasVideos = data.videos?.some(v => v)
       if (hasVideos) { setStep('done') } else { addLog('לא נוצרו סרטונים — נשאר בדף הלוגים', 'err') }
@@ -1012,7 +1030,10 @@ export default function Home() {
         hebrew_voice: result.hebrewVoice,
         audio_base64: result.audioBase64 || null,
         word_timestamps: result.wordTimestamps || null,
-        voice_id: voiceId,
+        // Persist the voiceId the job actually ran with so re-record after
+        // a reload picks the original voice, even if the state selector
+        // has since been changed by the user.
+        voice_id: result?.voiceId || voiceId,
         voice_gender: voiceGender,
         thumbnail: thumbnail,
       }
