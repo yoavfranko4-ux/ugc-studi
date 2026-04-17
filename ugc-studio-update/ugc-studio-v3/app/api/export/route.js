@@ -1,8 +1,8 @@
-import { execFile, execSync } from 'child_process'
+import { execFile, execSync, spawn } from 'child_process'
 import { promisify } from 'util'
-import { writeFile, mkdir, readFile, rm } from 'fs/promises'
+import { writeFile, mkdir, readFile, rm, copyFile } from 'fs/promises'
 import fs from 'fs'
-import { randomUUID } from 'crypto'
+import { randomUUID, createHash } from 'crypto'
 import { createRequire } from 'module'
 import path from 'path'
 
@@ -13,35 +13,45 @@ const ffmpegStaticPath = require('ffmpeg-static')
 // and libfreetype — required for Hebrew subtitle burn-in via the `subtitles=` filter.
 // ffmpeg-static lacks those libs. We only fall back to it if nothing else exists.
 function resolveFfmpegPath() {
-  // 1. `which ffmpeg` — works when PATH points at the nix profile
   try {
     const w = execSync('which ffmpeg', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
     if (w && fs.existsSync(w)) return w
   } catch {}
-  // 2. Standard UNIX locations
   for (const p of ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/run/current-system/sw/bin/ffmpeg', '/root/.nix-profile/bin/ffmpeg']) {
     if (fs.existsSync(p)) return p
   }
-  // 3. Scan /nix/store for an ffmpeg binary (nixpacks installs it there)
   try {
     const found = execSync("find /nix/store -maxdepth 4 -type f -name ffmpeg 2>/dev/null | head -1", { encoding: 'utf8', shell: '/bin/sh' }).trim()
     if (found && fs.existsSync(found)) return found
   } catch {}
-  // 4. Last resort — bundled static binary (no libass)
   return ffmpegStaticPath
 }
-const ffmpegPath = resolveFfmpegPath()
-console.log('[Export] Resolved ffmpeg binary:', ffmpegPath, '(ffmpeg-static =', ffmpegStaticPath, ')')
 
-// Log ffmpeg version + libass availability ONCE at module load
+function resolveFfprobePath(ffmpegBin) {
+  // ffprobe is typically next to ffmpeg
+  const sibling = ffmpegBin.replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1')
+  if (sibling !== ffmpegBin && fs.existsSync(sibling)) return sibling
+  try {
+    const w = execSync('which ffprobe', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+    if (w && fs.existsSync(w)) return w
+  } catch {}
+  for (const p of ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe', '/run/current-system/sw/bin/ffprobe', '/root/.nix-profile/bin/ffprobe']) {
+    if (fs.existsSync(p)) return p
+  }
+  return null
+}
+
+const ffmpegPath = resolveFfmpegPath()
+const ffprobePath = resolveFfprobePath(ffmpegPath)
+console.log('[Export] Resolved ffmpeg binary:', ffmpegPath, '(ffmpeg-static =', ffmpegStaticPath, ')')
+console.log('[Export] Resolved ffprobe binary:', ffprobePath || '(none — will skip fast-path probe)')
+
 try {
   const ver = execSync(`"${ffmpegPath}" -version 2>&1 | head -3`, { encoding: 'utf8', shell: '/bin/sh', stdio: ['pipe', 'pipe', 'ignore'] })
   console.log('[Export] ffmpeg version:\n' + ver)
 } catch (e) { console.warn('[Export] Could not run ffmpeg -version:', e.message) }
 
 // === Embedded font (checked into repo at public/fonts/) ===
-// libass loads this directly via fontsdir= — bypasses fontconfig entirely,
-// so it works regardless of whether DejaVu/Noto are installed at the OS level.
 const EMBEDDED_FONT_DIR    = path.join(process.cwd(), 'public', 'fonts')
 const EMBEDDED_FONT_FILE   = path.join(EMBEDDED_FONT_DIR, 'NotoSansHebrew-Bold.ttf')
 const EMBEDDED_FONT_FAMILY = 'Noto Sans Hebrew'
@@ -49,16 +59,64 @@ const EMBEDDED_FONT_FAMILY = 'Noto Sans Hebrew'
 console.log('[Export] Embedded font dir:', EMBEDDED_FONT_DIR)
 console.log('[Export] Embedded font file:', EMBEDDED_FONT_FILE, 'exists:', fs.existsSync(EMBEDDED_FONT_FILE))
 
-const hebrewFontPath = fs.existsSync(EMBEDDED_FONT_FILE) ? EMBEDDED_FONT_FILE : null
+// === Normalized clip cache ===
+// Re-exporting the same project shouldn't re-normalize the same source clip.
+// Key = sha256 of (source URL OR first-16KB+size of raw bytes) + target params.
+const NORMALIZE_CACHE_DIR = path.join('/tmp', 'ugc-norm-cache')
+try { fs.mkdirSync(NORMALIZE_CACHE_DIR, { recursive: true }) } catch {}
+// Basic LRU-ish eviction — purge cache entries older than 24h on module load.
+try {
+  const now = Date.now()
+  for (const f of fs.readdirSync(NORMALIZE_CACHE_DIR)) {
+    const p = path.join(NORMALIZE_CACHE_DIR, f)
+    try {
+      const st = fs.statSync(p)
+      if (now - st.mtimeMs > 24 * 3600 * 1000) fs.unlinkSync(p)
+    } catch {}
+  }
+} catch {}
 
 const execFileAsync = promisify(execFile)
 
-// Reverse a Hebrew string so drawtext (which lacks BiDi/libass) renders it visually right-to-left.
-// Hack for pure-Hebrew short phrases; not linguistically correct for mixed content, but readable.
-function reverseIfHebrew(text) {
-  if (!text) return text
-  if (!/[\u0590-\u05FF]/.test(text)) return text
-  return text.split('').reverse().join('')
+// Run an ffmpeg command and stream -progress pipe:1 output for server-side monitoring.
+function runFfmpegWithProgress(args, label, { timeout = 120000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, [...args, '-progress', 'pipe:1', '-nostats'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stderr = ''
+    let lastLoggedFrame = 0
+    const to = setTimeout(() => {
+      try { proc.kill('SIGKILL') } catch {}
+      reject(new Error(`[${label}] ffmpeg timed out after ${timeout}ms`))
+    }, timeout)
+
+    proc.stdout.on('data', chunk => {
+      // -progress pipe:1 emits key=value lines per ~100ms block.
+      const s = chunk.toString()
+      const frameMatch = s.match(/frame=(\d+)/)
+      if (frameMatch) {
+        const frame = parseInt(frameMatch[1], 10)
+        if (frame - lastLoggedFrame >= 24 * 5) { // log every ~5s of output video
+          lastLoggedFrame = frame
+          const speedMatch = s.match(/speed=([\d.]+)x/)
+          console.log(`[${label}] progress: frame=${frame}${speedMatch ? ` speed=${speedMatch[1]}x` : ''}`)
+        }
+      }
+    })
+    proc.stderr.on('data', c => { stderr += c.toString() })
+    proc.on('error', err => { clearTimeout(to); reject(err) })
+    proc.on('close', code => {
+      clearTimeout(to)
+      if (code === 0) resolve({ stderr })
+      else {
+        const err = new Error(`[${label}] ffmpeg exited with code ${code}: ${stderr.slice(-400)}`)
+        err.code = code
+        err.stderr = stderr
+        reject(err)
+      }
+    })
+  })
 }
 
 // Escape a string value for use inside an ffmpeg filter_complex argument
@@ -66,17 +124,6 @@ function escapeFilterValue(s) {
   return String(s).replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'")
 }
 
-// Format seconds → SRT timestamp (HH:MM:SS,mmm)
-function fmtSrtTime(sec) {
-  if (!Number.isFinite(sec) || sec < 0) sec = 0
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = Math.floor(sec % 60)
-  const ms = Math.round((sec - Math.floor(sec)) * 1000)
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`
-}
-
-// Format seconds → ASS timestamp (H:MM:SS.cc — centiseconds)
 function fmtAssTime(sec) {
   if (!Number.isFinite(sec) || sec < 0) sec = 0
   const h = Math.floor(sec / 3600)
@@ -86,20 +133,18 @@ function fmtAssTime(sec) {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`
 }
 
-// Build an ASS (Advanced SubStation Alpha) subtitle file. libass + libfribidi handle
-// the Hebrew RTL shaping correctly, so we pass logical-order text straight through.
-function buildAssFile(subtitles, wordTimestamps, fontFamily) {
+function buildAssFile(subtitles, wordTimestamps, fontFamily, playResX = 720, playResY = 1280, fontSize = 56) {
   const fam = fontFamily || 'DejaVu Sans'
   const header = `[Script Info]
 ScriptType: v4.00+
-PlayResX: 720
-PlayResY: 1280
+PlayResX: ${playResX}
+PlayResY: ${playResY}
 WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fam},56,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,1,2,30,30,140,1
+Style: Default,${fam},${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,1,2,30,30,140,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -108,7 +153,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   const escapeAss = (s) => String(s).replace(/\\/g, '\\\\').replace(/\n/g, '\\N').replace(/\{/g, '\\{').replace(/\}/g, '\\}')
 
   if (Array.isArray(wordTimestamps) && wordTimestamps.length) {
-    // Group ~3 words per caption segment for readable word-level timing
     const GROUP = 3
     for (let i = 0; i < wordTimestamps.length; i += GROUP) {
       const group = wordTimestamps.slice(i, i + GROUP)
@@ -130,387 +174,405 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   return header + events.join('\n') + '\n'
 }
 
+// Probe a clip with ffprobe. Returns null if probe fails or ffprobe unavailable.
+async function probeClip(filePath) {
+  if (!ffprobePath || !filePath) return null
+  try {
+    const { stdout } = await execFileAsync(ffprobePath, [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=codec_name,width,height,r_frame_rate,pix_fmt',
+      '-of', 'json',
+      filePath,
+    ], { timeout: 8000, maxBuffer: 1024 * 1024 })
+    const info = JSON.parse(stdout).streams?.[0]
+    if (!info) return null
+    const [num, den] = String(info.r_frame_rate || '0/1').split('/').map(Number)
+    return {
+      codec: info.codec_name,
+      width: info.width,
+      height: info.height,
+      fps: den > 0 ? num / den : 0,
+      pix_fmt: info.pix_fmt,
+    }
+  } catch (e) {
+    console.warn('[Export] probeClip failed for', filePath, ':', e.message)
+    return null
+  }
+}
+
+function clipsAllMatch(probes, targetW, targetH, targetFps) {
+  if (!probes.length || !probes.every(Boolean)) return false
+  return probes.every(p => (
+    p.codec === 'h264' &&
+    p.width === targetW &&
+    p.height === targetH &&
+    p.pix_fmt === 'yuv420p' &&
+    Math.abs(p.fps - targetFps) < 0.5
+  ))
+}
+
+function hashBytesForCache(buf) {
+  // Use first 16KB + size — way faster than hashing whole file, still unique enough for normalize cache.
+  const head = buf.slice(0, Math.min(16384, buf.length))
+  return createHash('sha256').update(head).update(String(buf.length)).digest('hex').slice(0, 32)
+}
+
 export const runtime = 'nodejs'
-export const maxDuration = 240   // 4 normalize passes + 1 concat — bumped from 120
+export const maxDuration = 180
 
 export async function POST(req) {
   const jobDir = path.join('/tmp', `export-${randomUUID()}`)
+  const startedAt = Date.now()
 
   try {
     const body = await req.json()
-    const { videoClipsB64, videoUrls, audioBase64, audioFormat, subtitles, wordTimestamps, bgMusic, bgMusicUrl, subtitleStyle } = body
+    const {
+      videoClipsB64,
+      videoUrls,
+      audioBase64,
+      audioFormat,
+      subtitles,
+      wordTimestamps,
+      bgMusic,
+      bgMusicUrl,
+      subtitleStyle,
+      fastExport,   // NEW: boolean → 540x960 output for speed
+    } = body
 
-    const hasB64Clips = videoClipsB64?.length > 0
-    const hasUrls = videoUrls?.length > 0 && videoUrls.some(Boolean)
+    const hasB64Clips = Array.isArray(videoClipsB64) && videoClipsB64.some(Boolean)
+    const hasUrls = Array.isArray(videoUrls) && videoUrls.some(Boolean)
     if (!hasB64Clips && !hasUrls) {
       return Response.json({ error: 'No video clips provided' }, { status: 400 })
     }
 
-    console.log('[Export] FFmpeg path:', ffmpegPath)
+    // Target encode params
+    const TARGET_W   = fastExport ? 540 : 720
+    const TARGET_H   = fastExport ? 960 : 1280
+    const TARGET_FPS = 24
+    const PRESET     = 'ultrafast'
+    const CRF        = '28'
+    const FONT_SIZE  = fastExport ? 42 : 56
+
+    console.log('[Export] FFmpeg path:', ffmpegPath, '| fastExport:', !!fastExport, '| target:', `${TARGET_W}x${TARGET_H}@${TARGET_FPS}`)
     await mkdir(jobDir, { recursive: true })
 
-    // 1. Write video clips to /tmp
-    const clipPaths = []
-    if (hasB64Clips) {
-      console.log('[Export] Writing', videoClipsB64.length, 'base64 clips...')
-      // Log base64 payload lengths BEFORE decoding so we can tell whether the
-      // client sent bad data (short/empty string) vs. valid base64 that
-      // decodes to a corrupt MP4.
-      videoClipsB64.forEach((b64, i) => {
-        const len = b64?.length ?? 0
-        console.log(`[Export] videoClipsB64[${i}] base64 length: ${len} chars` + (len === 0 ? ' (EMPTY)' : ''))
-      })
-      for (let i = 0; i < videoClipsB64.length; i++) {
-        if (!videoClipsB64[i]) {
-          console.warn(`[Export] videoClipsB64[${i}] is empty — will be filled with black placeholder in Step 1`)
-          continue
+    // -----------------------------------------------------------
+    // 1. Materialize clips onto disk — prefer URL download (parallel)
+    //    over base64 decode. Falls back to base64 per-index on failure.
+    // -----------------------------------------------------------
+    const expectedCount = Math.max(
+      Array.isArray(videoUrls) ? videoUrls.length : 0,
+      Array.isArray(videoClipsB64) ? videoClipsB64.length : 0,
+    )
+    const clipPaths = new Array(expectedCount).fill(null)
+    const clipSources = new Array(expectedCount).fill(null)  // for cache keying: URL if we have it
+
+    await Promise.all(Array.from({ length: expectedCount }, async (_, i) => {
+      const url = Array.isArray(videoUrls) ? videoUrls[i] : null
+      const b64 = Array.isArray(videoClipsB64) ? videoClipsB64[i] : null
+      const clipPath = path.join(jobDir, `clip${i}.mp4`)
+
+      // Try URL first
+      if (url && typeof url === 'string') {
+        try {
+          const resp = await fetch(url)
+          if (resp.ok) {
+            const buf = Buffer.from(await resp.arrayBuffer())
+            await writeFile(clipPath, buf)
+            clipPaths[i] = clipPath
+            clipSources[i] = { type: 'url', key: createHash('sha256').update(url).digest('hex').slice(0, 32) }
+            console.log(`[Export] Clip ${i} from URL: ${(buf.length / 1024 / 1024).toFixed(1)}MB`)
+            return
+          }
+          console.warn(`[Export] Clip ${i} URL HTTP ${resp.status} — falling back to base64`)
+        } catch (e) {
+          console.warn(`[Export] Clip ${i} URL fetch failed (${e.message}) — falling back to base64`)
         }
-        const clipPath = path.join(jobDir, `clip${i}.mp4`)
-        const buf = Buffer.from(videoClipsB64[i], 'base64')
-        await writeFile(clipPath, buf)
-        clipPaths[i] = clipPath
-        console.log(`[Export] Clip ${i} on disk: ${buf.length} bytes (${(buf.length / 1024 / 1024).toFixed(2)}MB)`)
       }
-    } else {
-      console.log('[Export] Downloading', videoUrls.length, 'clips from URLs...')
-      await Promise.all(videoUrls.filter(Boolean).map(async (url, i) => {
-        const clipPath = path.join(jobDir, `clip${i}.mp4`)
-        const resp = await fetch(url)
-        if (!resp.ok) throw new Error(`Failed to download clip ${i}: HTTP ${resp.status}`)
-        const buf = Buffer.from(await resp.arrayBuffer())
-        await writeFile(clipPath, buf)
-        clipPaths[i] = clipPath
-        console.log(`[Export] Clip ${i}: ${(buf.length / 1024 / 1024).toFixed(1)}MB`)
+
+      // Fall back to base64
+      if (b64) {
+        const buf = Buffer.from(b64, 'base64')
+        if (buf.length > 0) {
+          await writeFile(clipPath, buf)
+          clipPaths[i] = clipPath
+          clipSources[i] = { type: 'bytes', key: hashBytesForCache(buf) }
+          console.log(`[Export] Clip ${i} from base64: ${(buf.length / 1024 / 1024).toFixed(2)}MB`)
+          return
+        }
+      }
+      console.warn(`[Export] Clip ${i} has no valid source — will use black placeholder`)
+    }))
+
+    if (!clipPaths.some(Boolean)) throw new Error('No clips materialized successfully')
+
+    // -----------------------------------------------------------
+    // 2. Black placeholder generator (shared between paths)
+    // -----------------------------------------------------------
+    const MIN_CLIP_BYTES = 50 * 1024
+    async function makeBlackPlaceholder(i, tag = 'ph') {
+      const p = path.join(jobDir, `black_${tag}_${i}.mp4`)
+      await execFileAsync(ffmpegPath, [
+        '-y',
+        '-f', 'lavfi', '-i', `color=c=black:s=${TARGET_W}x${TARGET_H}:r=${TARGET_FPS}`,
+        '-t', '5',
+        '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF,
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an',
+        p,
+      ], { timeout: 20000, maxBuffer: 10 * 1024 * 1024 })
+      return p
+    }
+
+    // Replace any missing/tiny clips with black placeholders (parallel)
+    const validPaths = await Promise.all(clipPaths.map(async (p, i) => {
+      let size = 0
+      if (p) { try { size = fs.statSync(p).size } catch {} }
+      if (!p || size < MIN_CLIP_BYTES) {
+        console.warn(`[Export] Clip ${i} ${!p ? 'missing' : `only ${size}B`} — substituting black placeholder`)
+        return await makeBlackPlaceholder(i, 'slot')
+      }
+      return p
+    }))
+
+    const totalDuration = validPaths.length * 5
+
+    // -----------------------------------------------------------
+    // 3. Probe clips in parallel. If they already match target params,
+    //    we can skip per-clip normalize and fold scale/fps into the
+    //    single filter_complex concat pass below.
+    // -----------------------------------------------------------
+    const probes = await Promise.all(validPaths.map(probeClip))
+    probes.forEach((p, i) => console.log(`[Export] probe[${i}]:`, p ? `${p.codec} ${p.width}x${p.height}@${p.fps.toFixed(2)} ${p.pix_fmt}` : '(unavailable)'))
+    const canSkipNormalize = clipsAllMatch(probes, TARGET_W, TARGET_H, TARGET_FPS)
+    console.log('[Export] canSkipNormalize:', canSkipNormalize)
+
+    // -----------------------------------------------------------
+    // 4. If normalize is needed, do it in PARALLEL (one ffmpeg per
+    //    clip) with a disk cache keyed by (source-hash, target-dims).
+    // -----------------------------------------------------------
+    let normalizedPaths = validPaths
+    if (!canSkipNormalize) {
+      const paramTag = `${TARGET_W}x${TARGET_H}_${TARGET_FPS}`
+      normalizedPaths = await Promise.all(validPaths.map(async (inPath, i) => {
+        const src = clipSources[i]
+        const cacheFile = src?.key
+          ? path.join(NORMALIZE_CACHE_DIR, `${src.key}_${paramTag}.mp4`)
+          : null
+
+        if (cacheFile && fs.existsSync(cacheFile)) {
+          const stats = fs.statSync(cacheFile)
+          if (stats.size > MIN_CLIP_BYTES) {
+            console.log(`[Export] norm[${i}] cache HIT — reusing ${cacheFile} (${stats.size} bytes)`)
+            // bump mtime so LRU purge keeps hot entries around
+            try { fs.utimesSync(cacheFile, new Date(), new Date()) } catch {}
+            return cacheFile
+          }
+        }
+
+        const normPath = path.join(jobDir, `norm_${i}.mp4`)
+        const vfChain = `scale=${TARGET_W}:${TARGET_H}:force_original_aspect_ratio=increase,crop=${TARGET_W}:${TARGET_H},setsar=1`
+        const normArgs = [
+          '-y',
+          '-err_detect', 'ignore_err',
+          '-fflags', '+discardcorrupt+genpts',
+          '-avoid_negative_ts', 'make_zero',
+          '-i', inPath,
+          '-vf', vfChain,
+          '-r', String(TARGET_FPS),
+          '-fps_mode', 'cfr',
+          '-pix_fmt', 'yuv420p',
+          '-c:v', 'libx264',
+          '-preset', PRESET,
+          '-tune', 'zerolatency',
+          '-crf', CRF,
+          '-video_track_timescale', String(TARGET_FPS * 1000),
+          '-movflags', '+faststart',
+          '-an',
+          normPath,
+        ]
+        console.log(`[Export] norm[${i}] encoding → ${normPath}`)
+        try {
+          await execFileAsync(ffmpegPath, normArgs, { timeout: 60000, maxBuffer: 20 * 1024 * 1024 })
+        } catch (err) {
+          console.error(`[Export] norm[${i}] FAILED (code ${err.code}):`, (err.stderr || '').slice(-400))
+          console.warn(`[Export] norm[${i}] → retrying with black placeholder`)
+          return await makeBlackPlaceholder(i, 'normfail')
+        }
+
+        // Populate cache (best-effort copy — don't fail if we can't)
+        if (cacheFile) {
+          try { await copyFile(normPath, cacheFile) } catch (e) { console.warn('[Export] cache write failed:', e.message) }
+        }
+        return normPath
       }))
     }
-    // Keep positional slots — an empty/missing slot gets a black placeholder
-    // in Step 1 instead of being silently dropped. This way clip indices stay
-    // aligned with subtitles/wordTimestamps that key off scene position.
-    const expectedCount = hasB64Clips ? videoClipsB64.length : videoUrls.length
-    const validClipPaths = []
-    for (let i = 0; i < expectedCount; i++) validClipPaths[i] = clipPaths[i] || null
-    if (!validClipPaths.some(Boolean)) throw new Error('No clips written successfully')
 
-    // 2. Write voiceover audio if provided
-    //    Preferred path: client sends audioFormat='wav' (raw PCM) — FFmpeg reads it flawlessly.
-    //    Legacy path: MP3 — we pre-convert to AAC to dodge ffmpeg-static MP3 decoder bugs.
+    // -----------------------------------------------------------
+    // 5. Voice audio (WAV preferred — raw PCM, no decoder risk)
+    // -----------------------------------------------------------
     let voicePath = null
     if (audioBase64) {
       const fmt = audioFormat === 'wav' ? 'wav' : 'mp3'
-      const ext = fmt
-      console.log('[Export] audioBase64 encoded string length:', audioBase64.length, 'chars (format=' + fmt + ')')
-      const rawPath = path.join(jobDir, `voice.${ext}`)
+      const rawPath = path.join(jobDir, `voice.${fmt}`)
       const audioBuf = Buffer.from(audioBase64, 'base64')
-      console.log('[Export] audioBuf decoded length:', audioBuf.length, 'bytes')
       await writeFile(rawPath, audioBuf)
-      try {
-        const diskStats = fs.statSync(rawPath)
-        console.log(`[Export] voice.${ext} on disk:`, diskStats.size, 'bytes')
-      } catch (e) { console.warn(`[Export] statSync voice.${ext} failed:`, e.message) }
-
-      // Probe via ffmpeg -i
-      try {
-        const probeRes = await execFileAsync(ffmpegPath, ['-hide_banner', '-i', rawPath, '-f', 'null', '-'], { maxBuffer: 4 * 1024 * 1024 }).catch(e => ({ stderr: e.stderr || e.message }))
-        console.log(`[Export] ffmpeg probe voice.${ext}:`, (probeRes.stderr || '').slice(-1200))
-      } catch (e) { console.warn('[Export] probe failed:', e.message) }
+      console.log(`[Export] voice.${fmt} on disk: ${audioBuf.length} bytes`)
 
       if (fmt === 'wav') {
-        // WAV is raw PCM — use directly, no pre-conversion needed
         voicePath = rawPath
-        console.log('[Export] Using WAV voice directly — no pre-conversion')
       } else {
-        // MP3 legacy path — pre-convert to AAC
+        // MP3 → AAC pre-conversion (legacy path — bypasses ffmpeg-static MP3 decoder bugs)
         const convertedPath = path.join(jobDir, 'voice_converted.m4a')
         try {
-          const convRes = await execFileAsync(ffmpegPath, [
+          await execFileAsync(ffmpegPath, [
             '-y', '-i', rawPath,
             '-vn', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
-            convertedPath
-          ], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
-          const convStats = fs.statSync(convertedPath)
-          console.log('[Export] voice_converted.m4a:', convStats.size, 'bytes')
-          console.log('[Export] Converter stderr tail:', convRes.stderr?.slice(-400) || '(empty)')
+            convertedPath,
+          ], { maxBuffer: 10 * 1024 * 1024, timeout: 25000 })
           voicePath = convertedPath
         } catch (convErr) {
-          console.error('[Export] Voice AAC conversion FAILED:', convErr.stderr?.slice(-800) || convErr.message)
+          console.warn('[Export] voice MP3→AAC conversion failed, using raw:', convErr.message)
           voicePath = rawPath
         }
       }
     }
 
-    // Load background music. For relative paths (e.g. "/music/track1.mp3") we read
-    // the file off local disk from public/. Absolute http(s) URLs still fetch.
+    // -----------------------------------------------------------
+    // 6. Background music
+    // -----------------------------------------------------------
     let musicPath = null
     if (bgMusic && bgMusic !== 'none' && bgMusicUrl) {
       try {
         let musicBuf = null
         const isHttp = /^https?:\/\//i.test(bgMusicUrl)
         if (!isHttp) {
-          // Relative path → resolve against public/
           const rel = bgMusicUrl.replace(/^\/+/, '')
           const diskPath = path.join(process.cwd(), 'public', rel)
-          const exists = fs.existsSync(diskPath)
-          console.log('[Export] music local lookup:', bgMusicUrl, '→', diskPath, 'exists:', exists)
-          if (exists) {
-            const stats = fs.statSync(diskPath)
-            console.log('[Export] music file size on disk:', stats.size, 'bytes')
-            musicBuf = await readFile(diskPath)
-          } else {
-            console.warn('[Export] music file NOT FOUND on disk:', diskPath)
-          }
+          if (fs.existsSync(diskPath)) musicBuf = await readFile(diskPath)
+          else console.warn('[Export] music file not found:', diskPath)
         } else {
           const resp = await fetch(bgMusicUrl)
-          if (resp.ok) {
-            musicBuf = Buffer.from(await resp.arrayBuffer())
-            console.log('[Export] music downloaded:', musicBuf.length, 'bytes from', bgMusicUrl)
-          } else {
-            console.warn('[Export] music fetch HTTP', resp.status, 'for', bgMusicUrl)
-          }
+          if (resp.ok) musicBuf = Buffer.from(await resp.arrayBuffer())
+          else console.warn('[Export] music fetch HTTP', resp.status)
         }
-
         if (musicBuf) {
           const musicRaw = path.join(jobDir, 'music_raw.mp3')
           await writeFile(musicRaw, musicBuf)
-          console.log('[Export] music raw written:', musicBuf.length, 'bytes')
-          // Convert to AAC too for consistency
-          const musicConv = path.join(jobDir, 'music.m4a')
-          try {
-            await execFileAsync(ffmpegPath, ['-y', '-i', musicRaw, '-vn', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', musicConv], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
-            musicPath = musicConv
-            console.log('[Export] music.m4a ready at', musicConv)
-          } catch (me) {
-            console.warn('[Export] music AAC conversion failed, using raw:', me.stderr?.slice(-300) || me.message)
-            musicPath = musicRaw
-          }
+          // Skip pre-conversion — the final filter_complex re-encodes audio anyway.
+          musicPath = musicRaw
         }
       } catch (e) { console.warn('[Export] music load failed:', e.message) }
     }
 
-    // =============================================================
-    // TWO-STEP encode: (1) normalize each clip individually, (2) concat demuxer + audio mix.
-    // Avoids timebase/tbn errors from filter_complex concat on variable-framerate Kling MP4s.
-    // =============================================================
-    const outputPath = path.join(jobDir, 'output.mp4')
-
-    // --- Step 1: normalize every clip to identical codec/fps/size/pix_fmt (no subtitles) ---
-    // Subtitle burn-in happens in Step 2 via libass (system ffmpeg-full has libass + libfribidi for Hebrew RTL).
-    const normalizedPaths = []
-    const totalDuration = validClipPaths.length * 5
-
-    const MIN_CLIP_BYTES = 50 * 1024 // 50KB — anything smaller is almost certainly a corrupt MP4
-    for (let i = 0; i < validClipPaths.length; i++) {
-      let inPath = validClipPaths[i]
-      const normPath = path.join(jobDir, `norm_${i}.mp4`)
-
-      // Log incoming clip size and replace missing/empty/corrupt clips with a
-      // 5-second black placeholder so FFmpeg doesn't crash on "speed=N/A, 0KiB".
-      let inSize = 0
-      if (inPath) {
-        try { inSize = fs.statSync(inPath).size } catch { inSize = 0 }
-        console.log(`[Export] Step 1: clip ${i} input size: ${inSize} bytes (${(inSize / 1024).toFixed(1)}KB)`)
-      } else {
-        console.warn(`[Export] Step 1: clip ${i} slot is missing (never written)`)
-      }
-
-      const needsPlaceholder = !inPath || inSize < MIN_CLIP_BYTES
-      if (needsPlaceholder) {
-        const reason = !inPath
-          ? 'missing slot'
-          : inSize === 0
-            ? 'zero bytes on disk'
-            : `only ${(inSize / 1024).toFixed(1)}KB (<50KB threshold)`
-        console.warn(`[Export] Clip ${i} ${reason} — substituting 5-second black placeholder`)
-        const blackPath = path.join(jobDir, `black_${i}.mp4`)
-        const blackArgs = [
-          '-y',
-          '-f', 'lavfi', '-i', 'color=c=black:s=720x1280:r=24',
-          '-t', '5',
-          '-c:v', 'libx264',
-          '-preset', 'fast',
-          '-crf', '23',
-          '-pix_fmt', 'yuv420p',
-          '-movflags', '+faststart',
-          '-an',
-          blackPath
-        ]
-        try {
-          await execFileAsync(ffmpegPath, blackArgs, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 })
-          inPath = blackPath
-          const blackSize = fs.statSync(blackPath).size
-          console.log(`[Export] Black placeholder for clip ${i} written: ${blackSize} bytes → ${blackPath}`)
-        } catch (blackErr) {
-          console.error(`[Export] Failed to build black placeholder for clip ${i}:`, blackErr.stderr?.slice(-400) || blackErr.message)
-          throw new Error(`Clip ${i} is invalid and black placeholder generation failed`)
-        }
-      }
-
-      const vfChain = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1'
-
-      // Error-tolerance input flags for problematic Kling MP4s (corrupt packets,
-      // missing/negative timestamps). These MUST come BEFORE `-i` so FFmpeg
-      // applies them to the demuxer/decoder pass, not the output.
-      const inputTolerance = [
-        '-err_detect', 'ignore_err',
-        '-fflags', '+discardcorrupt+genpts',
-        '-avoid_negative_ts', 'make_zero',
-      ]
-
-      const normArgs = [
-        '-y',
-        ...inputTolerance,
-        '-i', inPath,
-        '-vf', vfChain,
-        '-r', '24',
-        '-fps_mode', 'cfr',
-        '-vsync', 'cfr',
-        '-pix_fmt', 'yuv420p',
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-crf', '23',
-        '-profile:v', 'high',
-        '-level', '4.0',
-        '-video_track_timescale', '24000',
-        '-movflags', '+faststart',
-        '-an',
-        normPath
-      ]
-      console.log(`[Export] Step 1: Normalizing clip ${i} -> norm_${i}.mp4`)
-      console.log(`[Export] Normalize args[${i}]:`, JSON.stringify(normArgs))
-      try {
-        const r = await execFileAsync(ffmpegPath, normArgs, { timeout: 60000, maxBuffer: 20 * 1024 * 1024 })
-        const stderr = r.stderr || ''
-        console.log(`[Export] norm_${i} FULL stderr:`, stderr || '(empty)')
-        const sz = fs.statSync(normPath).size
-        console.log(`[Export] norm_${i}.mp4 size:`, sz, 'bytes')
-        normalizedPaths.push(normPath)
-      } catch (err) {
-        const stderr = err.stderr || ''
-        const stdout = err.stdout || ''
-        // Log FULL stderr — the last error line before "code null" is usually
-        // the root cause (decoder error, timestamp issue, moov atom, etc.).
-        console.error(`[Export] norm_${i} FULL stderr:`, stderr || '(no stderr)')
-        console.error(`[Export] norm_${i} FULL stdout:`, stdout || '(no stdout)')
-        console.error(`[Export] Normalization clip ${i} FAILED. Exit code:`, err.code)
-
-        // Fallback: retry with a 5-second black placeholder so the export can
-        // still complete even when a clip is unrecoverable.
-        console.warn(`[Export] Retrying clip ${i} as 5-second black placeholder after normalize failure`)
-        const blackFallback = path.join(jobDir, `black_fallback_${i}.mp4`)
-        try {
-          await execFileAsync(ffmpegPath, [
-            '-y',
-            '-f', 'lavfi', '-i', 'color=c=black:s=720x1280:r=24',
-            '-t', '5',
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-            '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an',
-            blackFallback
-          ], { timeout: 30000, maxBuffer: 10 * 1024 * 1024 })
-          const sz = fs.statSync(blackFallback).size
-          console.warn(`[Export] Black fallback for clip ${i}: ${sz} bytes`)
-          normalizedPaths.push(blackFallback)
-        } catch (blackErr) {
-          console.error(`[Export] Black fallback for clip ${i} also failed:`, blackErr.stderr?.slice(-400) || blackErr.message)
-          throw new Error(`Normalize clip ${i} failed (code ${err.code}): ${stderr.slice(-400) || err.message}`)
-        }
-      }
-    }
-
-    // --- Build ASS subtitle file (libass + libfribidi handle Hebrew RTL properly) ---
+    // -----------------------------------------------------------
+    // 7. Build ASS subtitle file
+    // -----------------------------------------------------------
     let assPath = null
     const hasSubs = (Array.isArray(wordTimestamps) && wordTimestamps.length) || (Array.isArray(subtitles) && subtitles.length)
     if (hasSubs) {
-      const assContent = buildAssFile(subtitles || [], wordTimestamps || null, EMBEDDED_FONT_FAMILY)
+      const assContent = buildAssFile(subtitles || [], wordTimestamps || null, EMBEDDED_FONT_FAMILY, TARGET_W, TARGET_H, FONT_SIZE)
       assPath = path.join(jobDir, 'subs.ass')
       await writeFile(assPath, assContent, 'utf8')
-      console.log('[Export] ASS written to', assPath, '(font family:', EMBEDDED_FONT_FAMILY, ')')
-      console.log('[Export] ASS content:\n' + assContent)
-    } else {
-      console.log('[Export] No subtitles payload — skipping subtitle burn-in')
+      console.log('[Export] ASS written to', assPath)
     }
 
-    // --- Step 2: concat demuxer + audio mix (video stream-copied — subtitles already burned) ---
+    // -----------------------------------------------------------
+    // 8. FINAL PASS — one ffmpeg invocation does everything.
+    //    Clips in `normalizedPaths` always share codec/res/fps/pix_fmt
+    //    (either via parallel normalize or via ffprobe fast-path), so we
+    //    ALWAYS use the concat demuxer here. If no subtitles are needed
+    //    the video stream is copied without re-encode (fastest path).
+    // -----------------------------------------------------------
+    const outputPath = path.join(jobDir, 'output.mp4')
+    const finalArgs = ['-y']
+
     const listPath = path.join(jobDir, 'list.txt')
     const listContent = normalizedPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n') + '\n'
     await writeFile(listPath, listContent)
-    console.log('[Export] list.txt content:\n' + listContent)
+    finalArgs.push('-f', 'concat', '-safe', '0', '-i', listPath)
 
-    const finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', listPath]
-
-    // Audio inputs (after the concat demuxer at input 0)
+    // Audio inputs after the concat demuxer input (always idx 0)
     let voiceInputIdx = -1, musicInputIdx = -1, nextIdx = 1
     if (voicePath) { finalArgs.push('-i', voicePath); voiceInputIdx = nextIdx++ }
     if (musicPath) { finalArgs.push('-i', musicPath); musicInputIdx = nextIdx }
 
-    // Video chain — apply ASS subtitles filter. libass loads the embedded font directly from
-    // public/fonts/ via fontsdir= — no fontconfig required.
-    let videoChain = null
+    // Build filter_complex (video subtitles + audio mix)
+    const filterParts = []
+    let videoOutLabel = null  // set when we route video through a filter
     if (assPath) {
       const fontsDirArg = fs.existsSync(EMBEDDED_FONT_DIR) ? `:fontsdir='${escapeFilterValue(EMBEDDED_FONT_DIR)}'` : ''
-      videoChain = `[0:v]subtitles='${escapeFilterValue(assPath)}'${fontsDirArg}[outv]`
+      filterParts.push(`[0:v]subtitles='${escapeFilterValue(assPath)}'${fontsDirArg}[outv]`)
+      videoOutLabel = 'outv'
     }
 
-    let audioChain = null
+    let audioOutLabel = null
     if (voicePath && musicPath) {
-      audioChain = `[${voiceInputIdx}:a]volume=1.0,apad=whole_dur=${totalDuration},aresample=44100[va];[${musicInputIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[ma];[va][ma]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[aout]`
+      filterParts.push(`[${voiceInputIdx}:a]volume=1.0,apad=whole_dur=${totalDuration},aresample=44100[va]`)
+      filterParts.push(`[${musicInputIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[ma]`)
+      filterParts.push(`[va][ma]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[aout]`)
+      audioOutLabel = 'aout'
     } else if (voicePath) {
-      audioChain = `[${voiceInputIdx}:a]apad=whole_dur=${totalDuration},aresample=44100[aout]`
+      filterParts.push(`[${voiceInputIdx}:a]apad=whole_dur=${totalDuration},aresample=44100[aout]`)
+      audioOutLabel = 'aout'
     } else if (musicPath) {
-      audioChain = `[${musicInputIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[aout]`
+      filterParts.push(`[${musicInputIdx}:a]volume=0.15,aloop=loop=-1:size=2000000000,aresample=44100[aout]`)
+      audioOutLabel = 'aout'
     }
 
-    const filterParts = []
-    if (videoChain) filterParts.push(videoChain)
-    if (audioChain) filterParts.push(audioChain)
     if (filterParts.length) finalArgs.push('-filter_complex', filterParts.join(';'))
 
-    finalArgs.push('-map', videoChain ? '[outv]' : '0:v:0')
-    if (audioChain) finalArgs.push('-map', '[aout]')
+    // Map video
+    if (videoOutLabel) finalArgs.push('-map', `[${videoOutLabel}]`)
+    else finalArgs.push('-map', '0:v:0')
+
+    // Map audio
+    if (audioOutLabel) finalArgs.push('-map', `[${audioOutLabel}]`)
     else finalArgs.push('-an')
 
-    // If subtitles applied, must re-encode video (libass overlay). Otherwise stream-copy.
-    if (videoChain) {
+    // Stream-copy video when there are no subtitles (biggest single win on the happy path)
+    if (!assPath) {
+      finalArgs.push('-c:v', 'copy')
+    } else {
       finalArgs.push(
         '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-crf', '23',
-        '-r', '24',
+        '-preset', PRESET,
+        '-tune', 'zerolatency',
+        '-crf', CRF,
+        '-r', String(TARGET_FPS),
         '-pix_fmt', 'yuv420p',
       )
-    } else {
-      finalArgs.push('-c:v', 'copy')
+    }
+
+    // Audio codec
+    if (audioOutLabel) {
+      finalArgs.push('-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2')
     }
 
     finalArgs.push(
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-ar', '44100',
-      '-ac', '2',
       '-movflags', '+faststart',
-      '-t', String(totalDuration),           // explicit 20s cap (no -shortest)
-      outputPath
+      '-t', String(totalDuration),
+      outputPath,
     )
 
-    console.log('[Export] Step 2 concat args:', JSON.stringify(finalArgs))
-
+    console.log('[Export] Final pass args:', JSON.stringify(finalArgs))
+    const finalStart = Date.now()
     try {
-      const { stdout, stderr } = await execFileAsync(ffmpegPath, finalArgs, {
-        timeout: 90000,
-        maxBuffer: 20 * 1024 * 1024
-      })
-      console.log('[Export] Concat stdout FULL:\n' + (stdout || '(empty)'))
-      console.log('[Export] Concat stderr FULL:\n' + (stderr || '(empty)'))
-    } catch (execErr) {
-      console.error('[Export] Concat FAILED. Exit code:', execErr.code)
-      console.error('[Export] Concat stderr FULL:\n' + (execErr.stderr || '(no stderr)'))
-      console.error('[Export] Concat stdout FULL:\n' + (execErr.stdout || '(no stdout)'))
-      throw new Error(`Concat failed (code ${execErr.code}): ${execErr.stderr?.slice(-400) || execErr.message}`)
+      const { stderr } = await runFfmpegWithProgress(finalArgs, 'final', { timeout: 150000 })
+      console.log('[Export] Final pass stderr (tail):', (stderr || '').slice(-1200))
+    } catch (err) {
+      console.error('[Export] Final pass FAILED:', err.stderr?.slice(-800) || err.message)
+      throw new Error(`Final ffmpeg pass failed: ${err.stderr?.slice(-400) || err.message}`)
     }
+    console.log(`[Export] Final pass took ${Date.now() - finalStart}ms`)
 
-    // 5. Read output and return as MP4
+    // -----------------------------------------------------------
+    // 9. Return the MP4
+    // -----------------------------------------------------------
     const outputBuf = await readFile(outputPath)
-    console.log(`[Export] Output: ${(outputBuf.length / 1024 / 1024).toFixed(1)}MB`)
+    const totalMs = Date.now() - startedAt
+    console.log(`[Export] DONE — ${(outputBuf.length / 1024 / 1024).toFixed(1)}MB in ${totalMs}ms (normalize-skipped: ${canSkipNormalize}, fastExport: ${!!fastExport})`)
 
-    // 6. Cleanup
     rm(jobDir, { recursive: true, force: true }).catch(() => {})
 
     return new Response(outputBuf, {
@@ -519,9 +581,10 @@ export async function POST(req) {
         'Content-Type': 'video/mp4',
         'Content-Disposition': 'attachment; filename="ugc-video.mp4"',
         'Content-Length': String(outputBuf.length),
-      }
+        'X-Export-Ms': String(totalMs),
+        'X-Normalize-Skipped': String(canSkipNormalize),
+      },
     })
-
   } catch (e) {
     console.error('[Export] Error:', e.message)
     rm(jobDir, { recursive: true, force: true }).catch(() => {})

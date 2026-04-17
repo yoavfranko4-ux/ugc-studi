@@ -902,38 +902,35 @@ export default function Home() {
       const orderedScenes = clipOrder.filter(i => result.videos[i])
       if (orderedScenes.length === 0) throw new Error('אין סרטונים לייצוא')
 
-      // Convert preloaded video blobs to base64 (avoids expired fal.ai URLs)
+      // Prefer sending direct URLs — avoids client-side base64 encoding (which is slow)
+      // and lets the server download clips in parallel. We only encode base64 for clips
+      // whose original URL is missing or not http(s) (e.g. only a blob: URL is available).
       setExportProgress('מכין קליפים... 5%')
-      const videoClipsB64 = []
-      for (let idx = 0; idx < orderedScenes.length; idx++) {
-        const si = orderedScenes[idx]
+      const videoUrls = orderedScenes.map(si => {
+        const u = result.videos?.[si]
+        return (typeof u === 'string' && /^https?:\/\//i.test(u)) ? u : null
+      })
+
+      // Encode base64 ONLY for clips without a usable HTTP URL (fallback path).
+      const videoClipsB64 = await Promise.all(orderedScenes.map(async (si, idx) => {
+        if (videoUrls[idx]) return null  // URL present — server will download
         const blobUrl = videoBlobUrls[si]
-        if (blobUrl?.startsWith('blob:')) {
-          const resp = await fetch(blobUrl)
+        const src = blobUrl?.startsWith('blob:') ? blobUrl : result.videos?.[si]
+        if (!src) throw new Error(`קליפ ${idx + 1} לא זמין — נסה ליצור מחדש`)
+        try {
+          const resp = await fetch(src)
           const buf = await resp.arrayBuffer()
           const bytes = new Uint8Array(buf)
           let binary = ''
           for (let j = 0; j < bytes.length; j += 8192) {
             binary += String.fromCharCode(...bytes.slice(j, j + 8192))
           }
-          videoClipsB64.push(btoa(binary))
-        } else {
-          // Fallback: try fetching from original URL
-          try {
-            const resp = await fetch(result.videos[si])
-            const buf = await resp.arrayBuffer()
-            const bytes = new Uint8Array(buf)
-            let binary = ''
-            for (let j = 0; j < bytes.length; j += 8192) {
-              binary += String.fromCharCode(...bytes.slice(j, j + 8192))
-            }
-            videoClipsB64.push(btoa(binary))
-          } catch {
-            throw new Error(`קליפ ${idx + 1} לא זמין — נסה ליצור מחדש`)
-          }
+          return btoa(binary)
+        } catch {
+          throw new Error(`קליפ ${idx + 1} לא זמין — נסה ליצור מחדש`)
         }
-        setExportProgress(`מכין קליפים... ${5 + Math.round(((idx + 1) / orderedScenes.length) * 10)}%`)
-      }
+      }))
+      setExportProgress('מכין קליפים... 15%')
 
       // Build subtitles array with timestamps
       let timeOffset = 0
@@ -967,6 +964,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          videoUrls,
           videoClipsB64,
           audioBase64: voiceAudioB64,
           audioFormat,
