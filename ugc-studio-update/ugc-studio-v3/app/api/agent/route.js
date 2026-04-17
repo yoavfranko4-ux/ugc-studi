@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { fal } from '@fal-ai/client'
 import { supabase } from '../../../lib/supabase'
-import { cleanHebrewText } from '../../../lib/hebrew-tts.js'
+import { prepareHebrewForTTS, remapWordTimestamps } from '../../../lib/hebrew-tts.js'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { writeFile, readFile, mkdir, rm } from 'fs/promises'
@@ -101,9 +101,12 @@ function joinVoiceoverChunks(chunks) {
 async function generateVoice(text, voiceId) {
   if (!ELEVEN_KEY || !text) return null;
   const voice = voiceId || ELEVEN_VOICE;
-  // Hebrew preprocessing — fix nikud + add natural pause commas before
-  // sending to ElevenLabs so the TTS doesn't mispronounce common words.
-  const cleanedText = cleanHebrewText(text);
+  // Hebrew preprocessing — produce TWO versions of the text:
+  //   ttsText: Latin-transliterated form sent to ElevenLabs (so stubborn
+  //     words like כיפה come out pronounced correctly as "kipa").
+  //   subtitleText: original Hebrew form, used for subtitles and for the
+  //     `word` field of the returned wordTimestamps.
+  const { ttsText, subtitleText } = prepareHebrewForTTS(text);
   try {
     // Use with-timestamps endpoint for word-level alignment data.
     // stability 0.7 / style 0.0 — higher stability gives more consistent
@@ -112,7 +115,7 @@ async function generateVoice(text, voiceId) {
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}/with-timestamps?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: cleanedText, model_id: 'eleven_v3', voice_settings: { stability: 0.7, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true } })
+      body: JSON.stringify({ text: ttsText, model_id: 'eleven_v3', voice_settings: { stability: 0.7, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true } })
     });
     if (!res.ok) { console.error('ElevenLabs failed:', await res.text()); return null; }
     const json = await res.json();
@@ -121,7 +124,9 @@ async function generateVoice(text, voiceId) {
     const durationSec = (audioBuffer.length * 8) / (128 * 1000);
     console.log(`[Voice] Audio size: ${(audioBuffer.length / 1024).toFixed(0)}KB, est duration: ${durationSec.toFixed(1)}s`);
 
-    // Build word-level timestamps from character alignment
+    // Build word-level timestamps from character alignment. The `word`
+    // values built here come from the TTS text (so they may contain Latin
+    // like "kipa"); we remap them back to the Hebrew subtitle form below.
     let wordTimestamps = null;
     if (json.alignment) {
       const { characters, character_start_times_seconds, character_end_times_seconds } = json.alignment;
@@ -144,6 +149,10 @@ async function generateVoice(text, voiceId) {
       if (wordChars.trim()) {
         wordTimestamps.push({ word: wordChars.trim(), start: wordStart, end: character_end_times_seconds[characters.length - 1] });
       }
+      // Remap the Latin TTS tokens back to the original Hebrew subtitle
+      // words (1:1 by index — prepareHebrewForTTS guarantees the same
+      // whitespace-token count between the two forms).
+      wordTimestamps = remapWordTimestamps(wordTimestamps, subtitleText);
       console.log(`[Voice] Word timestamps: ${wordTimestamps.length} words, first:`, wordTimestamps[0], 'last:', wordTimestamps[wordTimestamps.length - 1]);
     }
 

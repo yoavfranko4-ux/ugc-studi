@@ -274,37 +274,78 @@ function replaceLatinTransliterations(text, dict) {
   return out
 }
 
-export function cleanHebrewText(text) {
-  if (!text || typeof text !== 'string') return text
-
-  let out = text
-
-  // Remove artificial line breaks — ElevenLabs reads them as long pauses.
-  out = out.replace(/[\r\n]+/g, ' ')
-
-  // Spell standalone integers in Hebrew words.
-  out = out.replace(/(^|[^\d])(\d+)(?=$|[^\d])/g, (_, pre, num) => `${pre}${spellNumber(num)}`)
-
-  // Layer 1 — Latin transliterations for stubborn words. Applied FIRST.
-  out = replaceLatinTransliterations(out, CUSTOM_PRONUNCIATIONS)
-
-  // Layer 2 — minimal nikud injection for truly-ambiguous words.
-  out = replaceWithPrefixAwareness(out, WORD_REPLACEMENTS)
-
-  // Collapse extra whitespace before pause insertion.
-  out = out.replace(/\s+/g, ' ').trim()
-
-  // Natural commas / periods.
-  out = addNaturalPauses(out)
-
-  // Final whitespace + punctuation spacing normalisation.
-  out = out
+function normalizeSpacing(s) {
+  return s
     .replace(/\s+/g, ' ')
     .replace(/\s*,\s*/g, ', ')
     .replace(/\s*\.\s*/g, '. ')
     .replace(/\s*!\s*/g, '! ')
     .replace(/\s*\?\s*/g, '? ')
     .replace(/\s+$/u, '')
+    .trim()
+}
 
-  return out
+// prepareHebrewForTTS(text) — returns BOTH versions of the text:
+//   - subtitleText: Hebrew form used for subtitles / UI display. No Latin
+//     transliterations. Digits spelled out as Hebrew words. Commas inserted
+//     at natural pause points.
+//   - ttsText: the same text with Latin transliterations applied on top
+//     (e.g. "הכיפה" → "ha-kipa") plus minimal nikud disambiguations.
+//     This is what gets sent to ElevenLabs.
+//
+// WORD-COUNT GUARANTEE: subtitleText and ttsText split on whitespace to
+// the SAME number of tokens, in 1:1 correspondence. Every replacement
+// (Latin or nikud) is a single-word-in / single-token-out rewrite, so
+// timestamps coming back from ElevenLabs for ttsText words can be remapped
+// index-by-index onto subtitleText words. See remapWordTimestamps() below.
+export function prepareHebrewForTTS(text) {
+  if (!text || typeof text !== 'string') return { ttsText: text || '', subtitleText: text || '' }
+
+  // Base normalisation — shared by both outputs.
+  let base = text
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/(^|[^\d])(\d+)(?=$|[^\d])/g, (_, pre, num) => `${pre}${spellNumber(num)}`)
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  // Subtitle form — add natural pauses (commas), no nikud, no Latin.
+  // This is the text users will SEE in the rendered video.
+  let subtitleText = addNaturalPauses(base)
+  subtitleText = normalizeSpacing(subtitleText)
+
+  // TTS form — built on top of subtitleText so whitespace token indexes
+  // line up exactly. Nikud first (1:1 word replacement), then Latin
+  // transliterations (also 1:1). Neither layer introduces new whitespace.
+  let ttsText = replaceWithPrefixAwareness(subtitleText, WORD_REPLACEMENTS)
+  ttsText = replaceLatinTransliterations(ttsText, CUSTOM_PRONUNCIATIONS)
+  ttsText = normalizeSpacing(ttsText)
+
+  return { ttsText, subtitleText }
+}
+
+// Map ElevenLabs word timestamps (whose `word` values are from ttsText,
+// i.e. they may contain Latin transliterations like "kipa") back onto the
+// original Hebrew words in subtitleText. The two streams are assumed to be
+// in 1:1 index correspondence (prepareHebrewForTTS guarantees this).
+//
+// If the counts ever diverge (unexpected), we fall back to the TTS word —
+// a Latin-looking subtitle is better than a runtime crash.
+export function remapWordTimestamps(wordTimestamps, subtitleText) {
+  if (!Array.isArray(wordTimestamps) || !subtitleText) return wordTimestamps || []
+  const subWords = subtitleText.split(/\s+/).filter(Boolean)
+  if (subWords.length !== wordTimestamps.length) {
+    // Diagnostic log — helps catch future regressions where a replacement
+    // accidentally introduces/removes whitespace.
+    console.warn('[hebrew-tts] remapWordTimestamps length mismatch: subtitle=%d tts=%d',
+      subWords.length, wordTimestamps.length)
+    return wordTimestamps
+  }
+  return wordTimestamps.map((t, i) => ({ ...t, word: subWords[i] }))
+}
+
+// Back-compat: cleanHebrewText now returns the TTS form (the text that
+// goes to ElevenLabs) — same behaviour existing callers relied on. Prefer
+// prepareHebrewForTTS() for any new code that also needs the subtitle form.
+export function cleanHebrewText(text) {
+  return prepareHebrewForTTS(text).ttsText
 }

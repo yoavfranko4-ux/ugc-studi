@@ -1,4 +1,4 @@
-import { cleanHebrewText } from '../../../lib/hebrew-tts.js'
+import { prepareHebrewForTTS, remapWordTimestamps } from '../../../lib/hebrew-tts.js'
 
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY
 
@@ -51,9 +51,12 @@ export async function POST(req) {
     const voice = voiceId
     console.log('[/api/voice] using voiceId:', voice)
 
-    // Hebrew preprocessing — inject nikud on known mispronounced words and
-    // sprinkle in natural pause commas before connectors.
-    const cleanedText = cleanHebrewText(text)
+    // Hebrew preprocessing — produce TWO versions:
+    //   ttsText: goes to ElevenLabs (includes Latin transliterations for
+    //     stubborn words like כיפה → kipa so pronunciation comes out right).
+    //   subtitleText: the original Hebrew form (no Latin) used for subtitles
+    //     and word-level timestamps returned to the client.
+    const { ttsText, subtitleText } = prepareHebrewForTTS(text)
 
     const res = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voice}/with-timestamps?output_format=mp3_44100_128`,
@@ -65,7 +68,7 @@ export async function POST(req) {
           'Accept': 'application/json'
         },
         body: JSON.stringify({
-          text: cleanedText,
+          text: ttsText,
           model_id: 'eleven_v3',
           // Higher stability (0.7) + zero style — prioritises consistent
           // pronunciation over expressive swings. Style exaggeration was
@@ -84,14 +87,20 @@ export async function POST(req) {
     const json = await res.json()
     const base64 = json.audio_base64 || ''
     const alignment = json.normalized_alignment || json.alignment || null
-    const wordTimestamps = buildWordTimestamps(alignment)
+    // Build word timestamps from the ElevenLabs char alignment (whose word
+    // text is the TTS/Latin form), then remap the `word` field back onto
+    // the Hebrew subtitle text by 1:1 index correspondence.
+    const ttsWordTimestamps = buildWordTimestamps(alignment)
+    const wordTimestamps = remapWordTimestamps(ttsWordTimestamps, subtitleText)
     const duration = durationFromAlignment(alignment)
 
     return Response.json({
       base64,
       wordTimestamps,
       duration,
-      text: cleanedText
+      // Return the Hebrew subtitle form so the client stores/displays
+      // "חיפשתי כיפה" instead of "חיפשתי kipa".
+      text: subtitleText
     })
   } catch (e) {
     console.error('[/api/voice] exception:', e?.message)
