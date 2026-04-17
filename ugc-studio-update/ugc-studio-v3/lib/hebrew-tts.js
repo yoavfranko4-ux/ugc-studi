@@ -19,22 +19,25 @@
 // just drop it into CUSTOM_PRONUNCIATIONS.
 
 const CUSTOM_PRONUNCIATIONS = {
-  // ── Words where ElevenLabs V3 Hebrew ignores the dagesh / softens the ──
-  // ── stop consonant, so plain nikud ("כִּיפָּה") still reads as "kifa".  ──
-  // Strategy: double the stop consonant with a shva on the first copy and
-  // dagesh+vowel on the second. This forces a geminated "kip-pa" reading.
-  'כיפה': 'כִּיפְּפָה',       // kippa (yarmulke)
-  'הכיפה': 'הַכִּיפְּפָה',
-  'כיפות': 'כִּיפְּפוֹת',
-  'הכיפות': 'הַכִּיפְּפוֹת',
-  'סוכה': 'סֻכָּה-כָּה',      // sukkah
-  'הסוכה': 'הַסֻּכָּה-כָּה',
-  'חופה': 'חֻפָּה-פָּה',      // chuppah
-  'החופה': 'הַחֻפָּה-פָּה',
-  'אמא': 'אִמָּא-מָא',         // imma
-  'האמא': 'הָאִמָּא-מָא',
-  'כלה': 'כַּלָּה-לָּה',       // kalla
-  'הכלה': 'הַכַּלָּה-לָּה',
+  // ── Words where ElevenLabs V3 Hebrew needs explicit nikud + dagesh to   ──
+  // ── pronounce the hard stop consonant correctly.                         ──
+  // Strategy: SIMPLE nikud with a single dagesh dot inside the stop
+  // consonant (כִּ / פָּ / בּ / תּ). We do NOT double the letter — doubling
+  // caused ElevenLabs to audibly geminate (e.g. "kip-pa" instead of "kipa").
+  // A single letter with dagesh + vowel is the correct form and what
+  // the TTS is trained on.
+  'כיפה': 'כִּיפָּה',          // kipa (yarmulke)
+  'הכיפה': 'הַכִּיפָּה',
+  'כיפות': 'כִּיפּוֹת',
+  'הכיפות': 'הַכִּיפּוֹת',
+  'סוכה': 'סֻכָּה',             // sukka
+  'הסוכה': 'הַסֻּכָּה',
+  'חופה': 'חֻפָּה',             // chupa
+  'החופה': 'הַחֻפָּה',
+  'אמא': 'אִמָּא',              // ima
+  'האמא': 'הָאִמָּא',
+  'כלה': 'כַּלָּה',              // kala
+  'הכלה': 'הַכַּלָּה',
 
   // ── Words where ElevenLabs inserts a spurious vowel after vav ──
   // "מושלם" was being read as "mesholam". The fix is to drop the vav
@@ -47,12 +50,12 @@ const CUSTOM_PRONUNCIATIONS = {
   'מושלמים': 'מֻשְׁלָמִים',
   'מושלמות': 'מֻשְׁלָמוֹת',
 
-  // Other dagesh-forte words where plain nikud tends to lose the doubling.
-  'סיפור': 'סִפּוּר-פּוּר',
-  'דיבור': 'דִּבּוּר-בּוּר',
-  'שבת': 'שַׁבָּת-בָּת',
-  'סבתא': 'סָבְתָא-תָא',
-  'סבא': 'סָבָּא-בָּא',
+  // Other common words where simple nikud + dagesh is enough.
+  'סיפור': 'סִפּוּר',
+  'דיבור': 'דִּבּוּר',
+  'שבת': 'שַׁבָּת',
+  'סבתא': 'סָבְתָא',
+  'סבא': 'סָבָא',
 };
 
 const WORD_REPLACEMENTS = {
