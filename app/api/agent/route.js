@@ -76,9 +76,12 @@ export async function POST(req) {
   console.log('Agent started:', { productName: rawProductName, applicationArea, hasAvatar: !!finalAvatarUrl, isDataUrl: avatarUrl?.startsWith('data:'), hasProduct: !!productImageUrl })
 
   // ── Gender instruction for the Hebrew script ──
+  const grammarNote = `GRAMMAR NOTE (CRITICAL): 'מביכה' is an ACTIVE PARTICIPLE meaning 'embarrassing' (describes something that causes embarrassment) — it does NOT mean 'was embarrassed'. NEVER write 'הייתי מביכה' (that would mean 'I was an embarrassing thing'). Correct passive forms: 'הייתי מובכת' (female, 'I was embarrassed') / 'הייתי מובך' (male, 'I was embarrassed').`
   const genderInstruction = isMale
-    ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר.`
-    : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה.`
+    ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר.\n${grammarNote}`
+    : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת' (לא 'הייתי מביכה'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה.\n${grammarNote}`
+
+  const transitionRule = `TRANSITION RULE (CRITICAL): Scene 1 MUST end with unresolved emotion (frustration, disappointment, longing) — no product mentioned, no resolution. Scene 2 MUST start with a discovery phrase (one of: "עד שגיליתי", "ואז גיליתי", "חברה הכירה", "פעם אחת ניסיתי", "מצאתי את", "גיליתי את") BEFORE mentioning the product. Never jump directly from pain to product description.`
 
   // ── Gender validator: detect mismatches in a generated script ──
   const MALE_ONLY_PATTERNS = [
@@ -86,7 +89,11 @@ export async function POST(req) {
   ]
   const FEMALE_ONLY_PATTERNS = [
     /\bמובכת\b/, /\bבטוחה\b/, /\bחייבת\b/, /\bמחפשת\b/, /\bמוכנה\b/, /\bמשתמשת\b/, /\bהייתי מובכת\b/,
-    /\bמביכה\b/, /\bמרוצה אני\b/, /\bהתאכזבתי.*?אני.*?מחפשת\b/
+    /\bמרוצה אני\b/, /\bהתאכזבתי.*?אני.*?מחפשת\b/
+  ]
+  // Patterns that are grammatically WRONG for a female speaker (active participle misuse)
+  const FEMALE_WRONG_PATTERNS = [
+    /\bהייתי מביכה\b/
   ]
   const hasFeminineMarkers = (text) => {
     if (!text) return false
@@ -96,12 +103,33 @@ export async function POST(req) {
     if (!text) return false
     return MALE_ONLY_PATTERNS.some(re => re.test(text))
   }
+  const hasFemaleWrongForms = (text) => {
+    if (!text) return false
+    return FEMALE_WRONG_PATTERNS.some(re => re.test(text))
+  }
   const scriptGenderMismatch = (storyObj) => {
     if (!storyObj?.hebrew_voice) return false
     const fullText = storyObj.hebrew_voice + ' ' + (storyObj.scenes || []).map(s => s.voiceover || '').join(' ')
     if (isMale && hasFeminineMarkers(fullText)) return true
     if (!isMale && hasMasculineMarkers(fullText)) return true
+    if (hasFemaleWrongForms(fullText)) return true
     return false
+  }
+
+  // ── Discovery-transition validator ──
+  // Scene 2 must start with a discovery phrase; Scene 1 must not name the product category.
+  const DISCOVERY_PHRASES = [
+    'עד שגיליתי', 'ואז גיליתי', 'חברה הכירה', 'פעם אחת ניסיתי', 'מצאתי את', 'גיליתי את'
+  ]
+  const productCategoryWord = (product || '').split(/\s+/).filter(Boolean)[0] || ''
+  const scriptHasDiscoveryTransition = (storyObj) => {
+    if (!storyObj?.scenes || storyObj.scenes.length < 2) return true
+    const scene1 = (storyObj.scenes[0]?.voiceover || '').trim()
+    const scene2 = (storyObj.scenes[1]?.voiceover || '').trim()
+    const scene2StartsOk = DISCOVERY_PHRASES.some(p => scene2.startsWith(p))
+    if (!scene2StartsOk) return false
+    if (productCategoryWord && scene1.includes(productCategoryWord)) return false
+    return true
   }
 
   // ── STEP 1: Claude writes the full story ──
@@ -116,6 +144,8 @@ Create a CONNECTED 4-scene TikTok story for: ${pName} - ${product}. What custome
 The 4 scenes must feel like ONE continuous TikTok story.
 
 ${genderInstruction}
+
+${transitionRule}
 
 ANATOMY RULE (CRITICAL): Every nb_prompt MUST START with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body". Avoid describing hands holding multiple items — ONE item at a time max.
 
@@ -174,6 +204,8 @@ The 4 scenes must feel like ONE continuous story with the SAME person in the SAM
 
 ${genderInstruction}
 
+${transitionRule}
+
 ANATOMY RULE (CRITICAL): Every nb_prompt MUST START with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body". For scenes where hands hold the product, say explicitly: "person holding product with ONE hand only, other hand visible and relaxed at side". Never describe multiple items held simultaneously.
 
 HOOK RULE (CRITICAL): voiceover_scene1 MUST name the EXACT specific problem of THIS product — never use 'הבעיה הזאת' alone without naming what the problem is. Examples: for teeth whitening say 'שיניים צהובות שמביכות אותי בכל תמונה', for face cream say 'כתמים ואקנה שמופיעים כל בוקר', for dress say 'לא מוצאת שמלה שמחמיאה לדמות שלי'. Be specific to the product.
@@ -229,10 +261,10 @@ Return ONLY JSON:
   ],
   "hebrew_voice": "concatenation of the 4 scene voiceover chunks exactly, no extra words"
 }`
-      // Try up to 2 times — if gender mismatch detected, regenerate with louder instruction
+      // Try up to 3 times — regenerate if gender mismatch OR discovery transition missing
       let attempts = 0
       let currentPrompt = promptContent
-      while (attempts < 2) {
+      while (attempts < 3) {
         const message = await anthropic.messages.create({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 2000,
@@ -241,13 +273,19 @@ Return ONLY JSON:
         const rawText = message.content[0].text.trim().replace(/```json|```/g, '')
         console.log('Claude response:', rawText.slice(0, 500))
         const parsed = JSON.parse(rawText.slice(rawText.indexOf('{'), rawText.lastIndexOf('}') + 1))
-        if (!scriptGenderMismatch(parsed)) {
+        const genderBad = scriptGenderMismatch(parsed)
+        const transitionBad = !scriptHasDiscoveryTransition(parsed)
+        if (!genderBad && !transitionBad) {
           story = parsed
           break
         }
-        console.warn(`Gender mismatch detected on attempt ${attempts + 1}, regenerating...`)
+        if (genderBad) console.warn(`Gender mismatch detected on attempt ${attempts + 1}, regenerating...`)
+        if (transitionBad) console.warn(`Discovery transition missing on attempt ${attempts + 1}, regenerating...`)
         attempts++
-        currentPrompt = `${promptContent}\n\nPREVIOUS ATTEMPT HAD WRONG GENDER. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${isMale ? 'male/זכר' : 'female/נקבה'}). Do NOT mix genders. Verify every single word.`
+        const corrections = []
+        if (genderBad) corrections.push(`PREVIOUS ATTEMPT HAD WRONG GENDER. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${isMale ? 'male/זכר' : 'female/נקבה'}). Do NOT mix genders. Verify every single word. ${grammarNote}`)
+        if (transitionBad) corrections.push(`PREVIOUS ATTEMPT FAILED THE TRANSITION RULE. Scene 1 voiceover MUST NOT mention the product category word "${productCategoryWord}" or the product name, and MUST end with unresolved emotion. Scene 2 voiceover MUST START with one of exactly: "עד שגיליתי", "ואז גיליתי", "חברה הכירה", "פעם אחת ניסיתי", "מצאתי את", "גיליתי את" — BEFORE any product mention. Rewrite scenes 1 and 2 accordingly.`)
+        currentPrompt = `${promptContent}\n\n${corrections.join('\n\n')}`
         story = parsed // keep in case next attempt fails
       }
     } catch (e) {
@@ -370,8 +408,63 @@ Return ONLY JSON:
   }
 
   // ── STEP 2: Nano Banana — תמונת אווטאר + מוצר עם פרומפט נכון ──
+  // generateNBFrame: single-frame generator with retry-on-network-failure and per-attempt timeout.
+  // Retries 5 times on "fetch failed" / network errors with backoff [3s, 6s, 10s, 15s, 20s].
+  // Each attempt has a 90-second AbortController timeout. Returns a placeholder on total failure.
+  async function generateNBFrame(i, nbPrompt, imageUrls, placeholder) {
+    const RETRY_DELAYS_MS = [3000, 6000, 10000, 15000, 20000]
+    const MAX_ATTEMPTS = RETRY_DELAYS_MS.length
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const ac = new AbortController()
+      const timer = setTimeout(() => ac.abort(), 90000)
+      try {
+        const nbRes = await fetch('https://fal.run/fal-ai/nano-banana-2/edit', {
+          method: 'POST',
+          headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: nbPrompt,
+            image_urls: imageUrls,
+            aspect_ratio: '9:16',
+            num_images: 1
+          }),
+          signal: ac.signal
+        })
+        clearTimeout(timer)
+        if (nbRes.ok) {
+          const d = await nbRes.json()
+          const url = d.images?.[0]?.url || d.images?.[0]
+          if (url) {
+            console.log('NB frame', i+1, 'OK:', url.slice(0,50))
+            return url
+          }
+          console.error('NB frame', i+1, 'empty response, attempt', attempt + 1)
+        } else {
+          const err = await nbRes.text()
+          console.error('NB frame', i+1, 'failed:', nbRes.status, err.slice(0,100), 'attempt', attempt + 1)
+          // Non-network failure (e.g. 4xx): stop retrying
+          if (nbRes.status >= 400 && nbRes.status < 500) break
+        }
+      } catch (e) {
+        clearTimeout(timer)
+        const msg = e?.message || ''
+        const isNetwork = msg.includes('fetch failed') || e?.name === 'AbortError' || e?.code === 'ECONNRESET' || e?.code === 'ETIMEDOUT' || e?.cause
+        console.error('NB frame', i+1, 'exception attempt', attempt + 1, ':', msg)
+        if (!isNetwork) break
+      }
+      if (attempt < MAX_ATTEMPTS - 1) {
+        const wait = RETRY_DELAYS_MS[attempt]
+        console.log('NB frame', i+1, 'retrying in', wait, 'ms')
+        await new Promise(r => setTimeout(r, wait))
+      }
+    }
+    console.error('NB frame', i+1, 'all retries exhausted, using placeholder')
+    return placeholder
+  }
+
   const frames = []
   for (let i = 0; i < 4; i++) {
+    // 500ms spacing between sequential frames to avoid hammering the API
+    if (i > 0) await new Promise(r => setTimeout(r, 500))
     try {
       // For business scene 2 (hero shot) — user's reference image is the MAIN image.
       // We want NanoBanana to stay faithful to the reference, not invent a new AI-looking shot.
@@ -399,28 +492,11 @@ Return ONLY JSON:
         nbPrompt = `${anatomyPrefix} Using the person from Image 1 as the subject with identical face hair and appearance. ${story.scenes[i].nb_prompt}. Keep facial features and identity exactly the same as Image 1. ${anatomyRule}. ${negativeConcepts}`
       }
 
-      const nbRes = await fetch('https://fal.run/fal-ai/nano-banana-2/edit', {
-        method: 'POST',
-        headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: nbPrompt,
-          image_urls: imageUrls,
-          aspect_ratio: '9:16',
-          num_images: 1
-        })
-      })
-      if (nbRes.ok) {
-        const d = await nbRes.json()
-        const url = d.images?.[0]?.url || d.images?.[0]
-        frames.push(url || (i === 0 ? avatarUrl : frames[i-1]))
-        console.log('NB frame', i+1, 'OK:', url?.slice(0,50))
-      } else {
-        const err = await nbRes.text()
-        console.error('NB frame', i+1, 'failed:', nbRes.status, err.slice(0,100))
-        frames.push(i === 0 ? avatarUrl : (frames[i-1] || avatarUrl))
-      }
+      const placeholder = i === 0 ? (finalAvatarUrl || avatarUrl) : (frames[i-1] || finalAvatarUrl || avatarUrl)
+      const url = await generateNBFrame(i, nbPrompt, imageUrls, placeholder)
+      frames.push(url || placeholder)
     } catch(e) {
-      console.error('NB frame', i+1, 'exception:', e.message)
+      console.error('NB frame', i+1, 'outer exception:', e.message)
       frames.push(i === 0 ? avatarUrl : (frames[i-1] || avatarUrl))
     }
   }
