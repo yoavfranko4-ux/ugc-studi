@@ -902,35 +902,57 @@ export default function Home() {
       const orderedScenes = clipOrder.filter(i => result.videos[i])
       if (orderedScenes.length === 0) throw new Error('אין סרטונים לייצוא')
 
-      // Prefer sending direct URLs — avoids client-side base64 encoding (which is slow)
-      // and lets the server download clips in parallel. We only encode base64 for clips
-      // whose original URL is missing or not http(s) (e.g. only a blob: URL is available).
+      // Log the job result structure so we can see what we're working with
+      console.log('[Studio Export] result.videos:', result?.videos)
+      console.log('[Studio Export] clipOrder:', clipOrder)
+      console.log('[Studio Export] orderedScenes:', orderedScenes)
+      console.log('[Studio Export] videoBlobUrls:', videoBlobUrls)
+      console.log('[Studio Export] result.story?.scenes:', result?.story?.scenes?.map((s, i) => ({ i, video_url: s?.video_url })))
+
+      // Always encode base64 from the preloaded blob URL (already in browser memory — fast & reliable).
+      // HTTP URLs from Kling/fal.ai expire, so we only use them as a LAST RESORT.
+      // videoUrls are still sent so the server has a secondary fallback.
       setExportProgress('מכין קליפים... 5%')
       const videoUrls = orderedScenes.map(si => {
         const u = result.videos?.[si]
         return (typeof u === 'string' && /^https?:\/\//i.test(u)) ? u : null
       })
 
-      // Encode base64 ONLY for clips without a usable HTTP URL (fallback path).
-      const videoClipsB64 = await Promise.all(orderedScenes.map(async (si, idx) => {
-        if (videoUrls[idx]) return null  // URL present — server will download
+      const videoClipsB64 = []
+      for (let idx = 0; idx < orderedScenes.length; idx++) {
+        const si = orderedScenes[idx]
         const blobUrl = videoBlobUrls[si]
-        const src = blobUrl?.startsWith('blob:') ? blobUrl : result.videos?.[si]
-        if (!src) throw new Error(`קליפ ${idx + 1} לא זמין — נסה ליצור מחדש`)
+        const httpUrl = videoUrls[idx]
+        const src = blobUrl?.startsWith('blob:') ? blobUrl : httpUrl
+        console.log(`[Studio Export] clip ${idx} (scene ${si}) — blobUrl:`, blobUrl, 'httpUrl:', httpUrl, 'chosen src:', src)
+        if (!src) {
+          console.error(`[Studio Export] clip ${idx} (scene ${si}) has NO source — neither blob nor http URL`)
+          throw new Error(`קליפ ${idx + 1} לא זמין — נסה ליצור מחדש`)
+        }
         try {
           const resp = await fetch(src)
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
           const buf = await resp.arrayBuffer()
+          console.log(`[Studio Export] clip ${idx} blob size: ${buf.byteLength} bytes (${(buf.byteLength / 1024 / 1024).toFixed(2)}MB)`)
+          if (buf.byteLength < 10 * 1024) {
+            console.error(`[Studio Export] clip ${idx} is only ${buf.byteLength} bytes — likely corrupt`)
+            throw new Error(`קליפ ${idx + 1} פגום (${buf.byteLength} בייטים). צור סרטון חדש.`)
+          }
           const bytes = new Uint8Array(buf)
           let binary = ''
           for (let j = 0; j < bytes.length; j += 8192) {
             binary += String.fromCharCode(...bytes.slice(j, j + 8192))
           }
-          return btoa(binary)
-        } catch {
-          throw new Error(`קליפ ${idx + 1} לא זמין — נסה ליצור מחדש`)
+          const b64 = btoa(binary)
+          console.log(`[Studio Export] clip ${idx} base64 length: ${b64.length} chars`)
+          videoClipsB64.push(b64)
+        } catch (e) {
+          console.error(`[Studio Export] clip ${idx} fetch/encode failed:`, e.message)
+          throw new Error(`קליפ ${idx + 1} לא זמין (${e.message}) — נסה ליצור מחדש`)
         }
-      }))
-      setExportProgress('מכין קליפים... 15%')
+        setExportProgress(`מכין קליפים... ${5 + Math.round(((idx + 1) / orderedScenes.length) * 10)}%`)
+      }
+      console.log(`[Studio Export] SUMMARY — ${videoClipsB64.length} clips encoded, total base64 chars: ${videoClipsB64.reduce((a, b) => a + (b?.length || 0), 0)}`)
 
       // Build subtitles array with timestamps
       let timeOffset = 0

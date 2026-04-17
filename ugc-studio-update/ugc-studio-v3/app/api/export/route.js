@@ -246,6 +246,23 @@ export async function POST(req) {
       return Response.json({ error: 'No video clips provided' }, { status: 400 })
     }
 
+    // === Incoming payload logging ===
+    console.log('[Export] === Incoming payload ===')
+    console.log('[Export] videoClipsB64 count:', Array.isArray(videoClipsB64) ? videoClipsB64.length : 'NOT ARRAY')
+    if (Array.isArray(videoClipsB64)) {
+      videoClipsB64.forEach((b64, i) => {
+        const len = b64?.length ?? 0
+        console.log(`[Export]   videoClipsB64[${i}] base64 length: ${len} chars${len === 0 ? ' (EMPTY)' : ''}`)
+      })
+    }
+    console.log('[Export] videoUrls count:', Array.isArray(videoUrls) ? videoUrls.length : 'NOT ARRAY')
+    if (Array.isArray(videoUrls)) {
+      videoUrls.forEach((u, i) => console.log(`[Export]   videoUrls[${i}]:`, u || '(null)'))
+    }
+    console.log('[Export] audioBase64:', audioBase64 ? `${audioBase64.length} chars (${audioFormat})` : '(none)')
+    console.log('[Export] subtitles:', Array.isArray(subtitles) ? subtitles.length : '(none)')
+    console.log('[Export] wordTimestamps:', Array.isArray(wordTimestamps) ? wordTimestamps.length : '(none)')
+
     // Target encode params
     const TARGET_W   = fastExport ? 540 : 720
     const TARGET_H   = fastExport ? 960 : 1280
@@ -273,36 +290,39 @@ export async function POST(req) {
       const b64 = Array.isArray(videoClipsB64) ? videoClipsB64[i] : null
       const clipPath = path.join(jobDir, `clip${i}.mp4`)
 
-      // Try URL first
+      // PRIMARY: base64 (client always sends this from the in-memory blob — reliable, no CDN expiry).
+      if (b64 && b64.length > 0) {
+        const buf = Buffer.from(b64, 'base64')
+        if (buf.length > 0) {
+          await writeFile(clipPath, buf)
+          const diskSize = fs.statSync(clipPath).size
+          clipPaths[i] = clipPath
+          clipSources[i] = { type: 'bytes', key: hashBytesForCache(buf) }
+          console.log(`[Export] Clip ${i} from base64: base64_chars=${b64.length}, decoded_bytes=${buf.length}, disk_size=${diskSize}`)
+          return
+        }
+        console.warn(`[Export] Clip ${i} base64 decoded to 0 bytes — trying URL fallback`)
+      }
+
+      // FALLBACK: HTTP URL (fal.ai/Kling — often expired by now)
       if (url && typeof url === 'string') {
         try {
           const resp = await fetch(url)
           if (resp.ok) {
             const buf = Buffer.from(await resp.arrayBuffer())
             await writeFile(clipPath, buf)
+            const diskSize = fs.statSync(clipPath).size
             clipPaths[i] = clipPath
             clipSources[i] = { type: 'url', key: createHash('sha256').update(url).digest('hex').slice(0, 32) }
-            console.log(`[Export] Clip ${i} from URL: ${(buf.length / 1024 / 1024).toFixed(1)}MB`)
+            console.log(`[Export] Clip ${i} from URL (fallback): ${(buf.length / 1024 / 1024).toFixed(2)}MB, disk_size=${diskSize}`)
             return
           }
-          console.warn(`[Export] Clip ${i} URL HTTP ${resp.status} — falling back to base64`)
+          console.warn(`[Export] Clip ${i} URL HTTP ${resp.status} — no valid source`)
         } catch (e) {
-          console.warn(`[Export] Clip ${i} URL fetch failed (${e.message}) — falling back to base64`)
+          console.warn(`[Export] Clip ${i} URL fetch failed (${e.message}) — no valid source`)
         }
       }
-
-      // Fall back to base64
-      if (b64) {
-        const buf = Buffer.from(b64, 'base64')
-        if (buf.length > 0) {
-          await writeFile(clipPath, buf)
-          clipPaths[i] = clipPath
-          clipSources[i] = { type: 'bytes', key: hashBytesForCache(buf) }
-          console.log(`[Export] Clip ${i} from base64: ${(buf.length / 1024 / 1024).toFixed(2)}MB`)
-          return
-        }
-      }
-      console.warn(`[Export] Clip ${i} has no valid source — will use black placeholder`)
+      console.warn(`[Export] Clip ${i} has NO valid source (b64=${b64?.length || 0} chars, url=${url || 'null'})`)
     }))
 
     if (!clipPaths.some(Boolean)) throw new Error('No clips materialized successfully')
@@ -324,16 +344,30 @@ export async function POST(req) {
       return p
     }
 
-    // Replace any missing/tiny clips with black placeholders (parallel)
+    // Validate raw clip sizes. Track how many ended up as black placeholders —
+    // if ALL 4 clips are invalid, abort with a clear error instead of silently
+    // producing a black video.
+    let placeholderCount = 0
     const validPaths = await Promise.all(clipPaths.map(async (p, i) => {
       let size = 0
       if (p) { try { size = fs.statSync(p).size } catch {} }
+      console.log(`[Export] Raw clip ${i} on disk: ${size} bytes (${(size / 1024).toFixed(1)}KB)`)
       if (!p || size < MIN_CLIP_BYTES) {
-        console.warn(`[Export] Clip ${i} ${!p ? 'missing' : `only ${size}B`} — substituting black placeholder`)
+        placeholderCount++
+        console.warn(`[Export] Clip ${i} ${!p ? 'missing' : `only ${size}B (< ${MIN_CLIP_BYTES}B)`} — substituting black placeholder`)
         return await makeBlackPlaceholder(i, 'slot')
       }
       return p
     }))
+
+    // HARD ABORT if every clip fell back to black. This was the symptom of the
+    // "black screen export" bug — silent fallbacks produced all-black video.
+    if (placeholderCount === expectedCount) {
+      throw new Error(`הייצוא נכשל: כל הקליפים פגומים או לא זמינים (${placeholderCount}/${expectedCount}). צור סרטון חדש.`)
+    }
+    if (placeholderCount > 0) {
+      console.warn(`[Export] ⚠️ ${placeholderCount}/${expectedCount} clips are black placeholders — export will proceed but some scenes will be blank`)
+    }
 
     const totalDuration = validPaths.length * 5
 
@@ -348,26 +382,30 @@ export async function POST(req) {
     console.log('[Export] canSkipNormalize:', canSkipNormalize)
 
     // -----------------------------------------------------------
-    // 4. If normalize is needed, do it in PARALLEL (one ffmpeg per
-    //    clip) with a disk cache keyed by (source-hash, target-dims).
+    // 4. If normalize is needed, do it in PARALLEL (one ffmpeg per clip).
+    //    Normalize cache is DISABLED while debugging the black-screen bug —
+    //    it could serve a stale broken output from a previous run.
     // -----------------------------------------------------------
+    const DISABLE_NORMALIZE_CACHE = true
     let normalizedPaths = validPaths
     if (!canSkipNormalize) {
       const paramTag = `${TARGET_W}x${TARGET_H}_${TARGET_FPS}`
       normalizedPaths = await Promise.all(validPaths.map(async (inPath, i) => {
         const src = clipSources[i]
-        const cacheFile = src?.key
+        const cacheFile = (!DISABLE_NORMALIZE_CACHE && src?.key)
           ? path.join(NORMALIZE_CACHE_DIR, `${src.key}_${paramTag}.mp4`)
           : null
 
         if (cacheFile && fs.existsSync(cacheFile)) {
           const stats = fs.statSync(cacheFile)
-          if (stats.size > MIN_CLIP_BYTES) {
-            console.log(`[Export] norm[${i}] cache HIT — reusing ${cacheFile} (${stats.size} bytes)`)
-            // bump mtime so LRU purge keeps hot entries around
+          // Before trusting the cache, ffprobe the cache entry — reject if broken.
+          const cacheProbe = await probeClip(cacheFile)
+          if (stats.size > MIN_CLIP_BYTES && cacheProbe && cacheProbe.width === TARGET_W && cacheProbe.height === TARGET_H) {
+            console.log(`[Export] norm[${i}] cache HIT — reusing ${cacheFile} (${stats.size} bytes, probe OK)`)
             try { fs.utimesSync(cacheFile, new Date(), new Date()) } catch {}
             return cacheFile
           }
+          console.warn(`[Export] norm[${i}] cache entry invalid — re-encoding (${stats.size}B, probe=${JSON.stringify(cacheProbe)})`)
         }
 
         const normPath = path.join(jobDir, `norm_${i}.mp4`)
@@ -392,20 +430,36 @@ export async function POST(req) {
           normPath,
         ]
         console.log(`[Export] norm[${i}] encoding → ${normPath}`)
+        console.log(`[Export] norm[${i}] args:`, JSON.stringify(normArgs))
         try {
-          await execFileAsync(ffmpegPath, normArgs, { timeout: 60000, maxBuffer: 20 * 1024 * 1024 })
+          const r = await execFileAsync(ffmpegPath, normArgs, { timeout: 60000, maxBuffer: 20 * 1024 * 1024 })
+          const stderrTail = (r.stderr || '').split('\n').slice(-6).join('\n')
+          console.log(`[Export] norm[${i}] stderr tail:\n${stderrTail}`)
         } catch (err) {
-          console.error(`[Export] norm[${i}] FAILED (code ${err.code}):`, (err.stderr || '').slice(-400))
+          console.error(`[Export] norm[${i}] FAILED (code ${err.code}):`, (err.stderr || '').slice(-800))
           console.warn(`[Export] norm[${i}] → retrying with black placeholder`)
           return await makeBlackPlaceholder(i, 'normfail')
         }
 
-        // Populate cache (best-effort copy — don't fail if we can't)
+        const sz = fs.statSync(normPath).size
+        console.log(`[Export] norm[${i}] output size: ${sz} bytes (${(sz / 1024).toFixed(1)}KB)`)
+
         if (cacheFile) {
           try { await copyFile(normPath, cacheFile) } catch (e) { console.warn('[Export] cache write failed:', e.message) }
         }
         return normPath
       }))
+    }
+
+    // === Post-normalize validation — probe every clip that will go into the concat
+    const postProbes = await Promise.all(normalizedPaths.map(probeClip))
+    postProbes.forEach((p, i) => {
+      const size = fs.existsSync(normalizedPaths[i]) ? fs.statSync(normalizedPaths[i]).size : 0
+      console.log(`[Export] post-normalize[${i}]: ${size}B, probe=${p ? `${p.codec} ${p.width}x${p.height}@${p.fps.toFixed(2)}` : 'PROBE FAILED'}`)
+    })
+    const badNormalized = postProbes.map((p, i) => (!p || p.width <= 0 || p.height <= 0) ? i : -1).filter(i => i >= 0)
+    if (badNormalized.length === normalizedPaths.length) {
+      throw new Error(`הייצוא נכשל: כל הקליפים פגומים אחרי נרמול (${badNormalized.length}). צור סרטון חדש.`)
     }
 
     // -----------------------------------------------------------
@@ -555,7 +609,9 @@ export async function POST(req) {
       outputPath,
     )
 
-    console.log('[Export] Final pass args:', JSON.stringify(finalArgs))
+    console.log('[Export] ===== Final ffmpeg command =====')
+    console.log(`[Export] "${ffmpegPath}" ${finalArgs.map(a => a.includes(' ') || a.includes(';') ? `'${a}'` : a).join(' ')}`)
+    console.log('[Export] Final pass args (JSON):', JSON.stringify(finalArgs))
     const finalStart = Date.now()
     try {
       const { stderr } = await runFfmpegWithProgress(finalArgs, 'final', { timeout: 150000 })
@@ -567,11 +623,22 @@ export async function POST(req) {
     console.log(`[Export] Final pass took ${Date.now() - finalStart}ms`)
 
     // -----------------------------------------------------------
-    // 9. Return the MP4
+    // 9. Probe final output — sanity check we actually have video frames.
+    //    If the output has no video stream or zero duration, we have
+    //    produced a black/broken MP4 and should fail loudly.
+    // -----------------------------------------------------------
+    const outProbe = await probeClip(outputPath)
+    console.log('[Export] OUTPUT probe:', outProbe ? `${outProbe.codec} ${outProbe.width}x${outProbe.height}@${outProbe.fps.toFixed(2)} ${outProbe.pix_fmt}` : 'PROBE FAILED')
+    if (!outProbe || outProbe.width <= 0 || outProbe.height <= 0) {
+      throw new Error('הייצוא נכשל: הפלט אינו מכיל וידאו תקין. צור סרטון חדש.')
+    }
+
+    // -----------------------------------------------------------
+    // 10. Return the MP4
     // -----------------------------------------------------------
     const outputBuf = await readFile(outputPath)
     const totalMs = Date.now() - startedAt
-    console.log(`[Export] DONE — ${(outputBuf.length / 1024 / 1024).toFixed(1)}MB in ${totalMs}ms (normalize-skipped: ${canSkipNormalize}, fastExport: ${!!fastExport})`)
+    console.log(`[Export] DONE — ${(outputBuf.length / 1024 / 1024).toFixed(1)}MB in ${totalMs}ms (normalize-skipped: ${canSkipNormalize}, fastExport: ${!!fastExport}, placeholders: ${placeholderCount})`)
 
     rm(jobDir, { recursive: true, force: true }).catch(() => {})
 
