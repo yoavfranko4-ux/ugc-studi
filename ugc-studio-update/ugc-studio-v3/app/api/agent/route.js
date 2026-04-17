@@ -180,6 +180,35 @@ const MID_SENTENCE_STARTERS = new Set([
   'אותי', 'אותך', 'אותו', 'אותה', 'אותנו', 'אותם',
   'הזה', 'הזו', 'האלה', 'ההוא', 'ההיא'
 ]);
+// Detect a weak, ad-speak scene-1 opener: a bare action verb (ניסיתי / חיפשתי /
+// רציתי) as the FIRST word with no emotional or situational framing. Also flags
+// the specific generic phrase we used to fall back to when no category matched.
+// We allow those verbs anywhere else — the restriction is only "first word".
+const BAD_SCENE1_FIRST_WORDS = new Set(['ניסיתי', 'חיפשתי', 'רציתי']);
+function sceneOneIsWeakOpener(sceneOneText) {
+  if (!sceneOneText) return false;
+  const trimmed = sceneOneText.trim().replace(/^["'״'(\[]+/, '');
+  const firstWord = trimmed.split(/\s+/)[0] || '';
+  if (BAD_SCENE1_FIRST_WORDS.has(firstWord)) return true;
+  // The generic legacy hook phrase — reject outright if Claude echoed it.
+  if (/ניסיתי המון דברים/.test(trimmed)) return true;
+  return false;
+}
+
+// Detect borrowed/transliterated English words that sound robotic in Hebrew TTS
+// and that the Claude prompt explicitly forbids. Any match forces a regen.
+const FOREIGN_BORROWED_WORDS = [
+  /\bסטיילית\b/u, /\bסטיילי\b/u,
+  /\bטרנדי\b/u, /\bטרנדית\b/u,
+  /\bקולית\b/u, /\bקולי\b/u,
+  /\bסאפר\b/u,
+  /\bאאוטפיט\b/u,
+];
+function scriptHasForeignWords(fullText) {
+  if (!fullText) return false;
+  return FOREIGN_BORROWED_WORDS.some(re => re.test(fullText));
+}
+
 function scenesHaveBrokenSentences(scenes) {
   if (!Array.isArray(scenes)) return false;
   const chunks = scenes.map(s => (s?.subtitle || s?.voiceover || '').trim()).filter(Boolean);
@@ -263,6 +292,37 @@ CRITICAL RULES:
 - Scene 1 must sound like a real person talking to a friend, not like an ad
 - Be EMOTIONAL and AUTHENTIC — use everyday spoken Hebrew
 - Think: "what frustration does the TARGET CUSTOMER feel every day?" and START there
+
+1a. HOOK MUST HINT AT THE SPECIFIC CATEGORY (critical):
+ההוק חייב לרמוז באופן ברור על קטגוריית הבעיה — לא רק "ניסיתי הכל". הצופה חייב להבין מהמילה הראשונה על איזה תחום אנחנו מדברים (שיער, עור, בגדים, שיניים, כיסוי ראש וכו').
+- BAD (too generic): "ניסיתי המון דברים ושום דבר לא עבד" — viewer has NO idea what problem is being solved.
+- GOOD (category is clear from the first sentence):
+  * Kipah/head covering: "כל כיפה שקניתי הייתה לא נוחה או לא התאימה לראש שלי"
+  * Teeth whitening: "כל פעם שחייכתי בתמונות הרגשתי לא בנוח עם השיניים שלי"
+  * Skincare: "העור שלי היה יבש ומודלק וכלום לא עזר לי"
+  * Fashion: "כל פעם שהייתי צריכה שמלה לאירוע זה היה יקר מדי"
+- The hook must name the BODY PART, GARMENT, or DOMAIN that's affected — without naming the product/brand itself. The viewer should read it and instantly know "this is about X".
+
+1b. EMOTIONAL, NON-ACTION-VERB OPENING (critical):
+Scene 1 voiceover should open with an emotional state, a recurring situation, or a concrete scene — NOT with a bare action verb.
+- BAD openings (never start a scene with these as the first word, without emotional context): "ניסיתי", "חיפשתי", "רציתי" standing alone. These feel disconnected and ad-like.
+- GOOD openings (lead with feeling / recurring situation):
+  * "כל פעם ש..." (every time that...)
+  * "הייתי מרגישה ש..." (I used to feel that...)
+  * "הרגשתי ש..." (I felt that...)
+  * "תמיד היה לי ש..." (I always had that...)
+  * "כל ... היה ..." (every X was Y)
+- The opening must feel like a real person sharing a relatable story, not an ad intro.
+
+1c. AUTHENTIC HEBREW — AVOID BORROWED FOREIGN WORDS (critical):
+השתמש במילים עבריות אותנטיות. הימנע מלועזית מתורגמת ישירות (סטיילית, טרנדי, קולית). השתמש ב'עם סטייל', 'אלגנטית', 'מעוצבת' במקום.
+- AVOID: "סטיילית", "טרנדי", "קולית", "סאפר", "אאוטפיט" — these sound robotic in TTS and feel like ad-speak.
+- USE instead (native Hebrew alternatives):
+  * Instead of "סטיילית" → "עם סטייל", "אלגנטית", "מעוצבת"
+  * Instead of "טרנדי" → "עכשווי", "באופנה"
+  * Instead of "קולית" → "מגניבה"
+  * Instead of "אאוטפיט" → "לוק", "בגדים"
+- This rule applies to ALL 4 scenes, not just the hook.
 
 2. HEBREW STYLE — MANDATORY:
 - Write conversational Hebrew, like a real person talking to a friend — NOT formal, NOT salesy
@@ -392,6 +452,24 @@ Return ONLY valid JSON (no markdown):
   if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
     console.warn('[generateScript] Broken sentences across scenes, regenerating...');
     const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES (e.g. scene N ended with "השיניים" and scene N+1 started with "שלי"). REWRITE so each voiceover_sceneN is a SELF-CONTAINED grammatically complete Hebrew sentence ending with . ? or ! — and no scene starts with a word like שלי / שלו / אותי / הזה that depends on the previous scene.`;
+    const retry = parseResponse(await callClaude(extraInstruction));
+    if (retry) parsed = retry;
+  }
+  // Validate scene-1 opener quality — if Claude dropped the pre-set hook and
+  // fell back to a bare "ניסיתי ..." style opener, force a regen with an
+  // explicit rule about emotional framing.
+  if (parsed && sceneOneIsWeakOpener(parsed.voiceover_scene1)) {
+    console.warn('[generateScript] Weak scene-1 opener, regenerating...', parsed.voiceover_scene1?.slice(0, 40));
+    const extraInstruction = `\n\nPREVIOUS ATTEMPT OPENED SCENE 1 WITH A BARE ACTION VERB (e.g. "ניסיתי ..."/"חיפשתי ..." as the first word). REWRITE voiceover_scene1 to open with an EMOTIONAL STATE or RECURRING SITUATION, using "כל פעם ש..." / "הייתי מרגישה ש..." / "הרגשתי ש..." / "תמיד היה לי ש...". The first word must NOT be ניסיתי/חיפשתי/רציתי. Keep the exact pre-set hook "${hook}" as the voiceover_scene1 text.`;
+    const retry = parseResponse(await callClaude(extraInstruction));
+    if (retry) parsed = retry;
+  }
+  // Validate authentic Hebrew — if Claude used borrowed/transliterated words
+  // (סטיילית / טרנדי / קולית / סאפר / אאוטפיט), regen with the explicit
+  // substitution rule.
+  if (parsed && scriptHasForeignWords(parsed.voiceover)) {
+    console.warn('[generateScript] Foreign borrowed words detected, regenerating...');
+    const extraInstruction = `\n\nPREVIOUS ATTEMPT USED LOUSY TRANSLITERATED ENGLISH WORDS (סטיילית / טרנדי / קולית / סאפר / אאוטפיט). REWRITE using authentic Hebrew: "סטיילית" → "עם סטייל" / "אלגנטית" / "מעוצבת"; "טרנדי" → "עכשווי" / "באופנה"; "קולית" → "מגניבה"; "אאוטפיט" → "לוק" / "בגדים". These banned words must appear ZERO times in any voiceover scene.`;
     const retry = parseResponse(await callClaude(extraInstruction));
     if (retry) parsed = retry;
   }
@@ -744,10 +822,15 @@ function toMasculine(text) {
 
 function getHook(productName, productDesc, voiceGender = 'female') {
   const desc = ((productDesc || '') + ' ' + (productName || '')).toLowerCase();
-  let raw = 'ניסיתי המון דברים כדי לפתור את זה ושום דבר פשוט לא עבד לי';
+  // Default fallback — emotional + specific shape. Still generic when no
+  // category matches, but opens with feeling rather than a bare action verb.
+  let raw = 'הרגשתי שאני מנסה כל פתרון אפשרי וכלום פשוט לא התאים לי באמת';
 
+  // Head covering / kipah / yarmulke (explicit category — hook hints the domain)
+  if (/כיפה|כיפות|יארמולקה|כיסוי ראש|מטפחת|kipah|yarmulke|head cover/.test(desc))
+    raw = 'כל כיפה שקניתי הייתה לא נוחה או לא התאימה לראש שלי';
   // Fashion / clothing
-  if (/שמלה|בגד|חולצה|מכנס|נעל|תיק|אופנה|dress|shirt|clothes|fashion|pants|shoes|bag/.test(desc))
+  else if (/שמלה|בגד|חולצה|מכנס|נעל|תיק|אופנה|dress|shirt|clothes|fashion|pants|shoes|bag/.test(desc))
     raw = 'כל פעם שחיפשתי משהו לאירוע זה היה יקר מדי או לא התאים לי';
   // Dental / teeth
   else if (/שינ|דנטל|לבן|משחת|teeth|dental|whiten/.test(desc))

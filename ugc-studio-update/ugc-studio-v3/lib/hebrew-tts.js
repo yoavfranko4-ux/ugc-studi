@@ -133,10 +133,33 @@ const WORD_REPLACEMENTS = {
   'גבר': 'גֶּבֶר',
   'אנשים': 'אֲנָשִׁים',
 
+  // ── Head coverings (Jewish religious wear) ──
+  // Kipah/yarmulke contexts — ElevenLabs mispronounces the unvocalized forms.
+  'כיפה': 'כִּיפָּה',
+  'הכיפה': 'הַכִּיפָּה',
+  'כיפות': 'כִּיפּוֹת',
+  'הכיפות': 'הַכִּיפּוֹת',
+  'כיסוי': 'כִּיסּוּי',
+  'ראש': 'רֹאשׁ',
+  'הראש': 'הָרֹאשׁ',
+
   // ── Common adjectives / feelings ──
-  'יפה': 'יָפֶה',
+  // "יפה" defaults to the FEMININE form (יָפָה) — in UGC copy the subject is
+  // almost always a feminine noun (כיפה, שמלה, תמונה, תוצאה, חתיכה). The
+  // masculine form (יָפֶה) gets handled by the explicit phrase entries for
+  // masculine contexts below ('יפה מאוד', 'נראה יפה' stay masculine verbs).
+  'יפה': 'יָפָה',
+  'יפת': 'יְפַת',
   'יפים': 'יָפִים',
   'יפות': 'יָפוֹת',
+  'נוחה': 'נוֹחָה',
+  'נוח': 'נוֹחַ',
+  'נוחים': 'נוֹחִים',
+  'נוחות': 'נוֹחוֹת',
+  'מתאימה': 'מַתְאִימָה',
+  'מתאים': 'מַתְאִים',
+  'מתאימים': 'מַתְאִימִים',
+  'מתאימות': 'מַתְאִימוֹת',
   'רע': 'רַע',
   'רעה': 'רָעָה',
   'נהדר': 'נֶהְדָּר',
