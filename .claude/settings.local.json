@@ -11,7 +11,9 @@
       "Bash(gh api:*)",
       "Bash(node -e \"const fs=require\\('fs'\\);const f='ugc-studio-update/ugc-studio-v3/app/studio/page.js';const s=fs.readFileSync\\(f,'utf8'\\);console.log\\('len:',s.length\\);console.log\\('openRerecordPanel:',s.includes\\('openRerecordPanel'\\)\\);console.log\\('rerecordVoiceover:',s.includes\\('rerecordVoiceover'\\)\\);console.log\\('ערוך וצלם:',s.includes\\('ערוך וצלם'\\)\\);console.log\\('hasRerecorded:',s.includes\\('hasRerecorded'\\)\\);console.log\\('voice route uses cleanHebrewText:',fs.readFileSync\\('ugc-studio-update/ugc-studio-v3/app/api/voice/route.js','utf8'\\).includes\\('cleanHebrewText'\\)\\);console.log\\('agent route uses cleanHebrewText:',fs.readFileSync\\('ugc-studio-update/ugc-studio-v3/app/api/agent/route.js','utf8'\\).includes\\('cleanHebrewText'\\)\\);\")",
       "Bash(node --check ugc-studio-update/ugc-studio-v3/app/api/export/route.js)",
-      "Bash(node --check app/api/agent/route.js)"
+      "Bash(node --check app/api/agent/route.js)",
+      "Bash(node --check lib/hebrew-tts.js)",
+      "Bash(node --input-type=module -e ':*)"
     ]
   }
 }

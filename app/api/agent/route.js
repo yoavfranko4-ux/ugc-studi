@@ -93,8 +93,26 @@ export async function POST(req) {
   ]
   // Patterns that are grammatically WRONG for a female speaker (active participle misuse)
   const FEMALE_WRONG_PATTERNS = [
-    /\bהייתי מביכה\b/
+    /הייתי מביכה/,
+    /הייתי מבייש/,
+    /מביכה לחייך/,
+    /מביכה לי/
   ]
+  // Auto-correction map: wrong form → correct form. Applied BEFORE validator runs
+  // so obvious grammar slips get repaired without a round-trip to Claude.
+  const FEMALE_AUTO_CORRECTIONS = [
+    [/הייתי מביכה/g, 'הייתי מובכת'],
+    [/הייתי מבולבל\b/g, 'הייתי מבולבלת'],
+    [/הייתי נבוך\b/g, 'הייתי נבוכה'],
+    [/מביכה לחייך/g, 'מובכת לחייך'],
+    [/מביכה לי/g, 'מובכת לי']
+  ]
+  const applyFemaleAutoCorrections = (text) => {
+    if (!text) return text
+    let out = text
+    for (const [re, rep] of FEMALE_AUTO_CORRECTIONS) out = out.replace(re, rep)
+    return out
+  }
   const hasFeminineMarkers = (text) => {
     if (!text) return false
     return FEMALE_ONLY_PATTERNS.some(re => re.test(text))
@@ -107,13 +125,28 @@ export async function POST(req) {
     if (!text) return false
     return FEMALE_WRONG_PATTERNS.some(re => re.test(text))
   }
+  // Normalize storyObj in place: repair known-wrong female forms before checking.
+  const autoFixFemaleWrongForms = (storyObj) => {
+    if (!storyObj) return
+    if (typeof storyObj.hebrew_voice === 'string') {
+      storyObj.hebrew_voice = applyFemaleAutoCorrections(storyObj.hebrew_voice)
+    }
+    if (Array.isArray(storyObj.scenes)) {
+      for (const sc of storyObj.scenes) {
+        if (typeof sc.voiceover === 'string') sc.voiceover = applyFemaleAutoCorrections(sc.voiceover)
+      }
+    }
+  }
   const scriptGenderMismatch = (storyObj) => {
     if (!storyObj?.hebrew_voice) return false
     const fullText = storyObj.hebrew_voice + ' ' + (storyObj.scenes || []).map(s => s.voiceover || '').join(' ')
-    if (isMale && hasFeminineMarkers(fullText)) return true
-    if (!isMale && hasMasculineMarkers(fullText)) return true
-    if (hasFemaleWrongForms(fullText)) return true
-    return false
+    // Always check wrong female forms (active-participle misuse), even for male speakers
+    const wrongForms = hasFemaleWrongForms(fullText)
+    const maleMismatch = isMale && hasFeminineMarkers(fullText)
+    const femaleMismatch = !isMale && hasMasculineMarkers(fullText)
+    const mismatch = wrongForms || maleMismatch || femaleMismatch
+    console.log(`[Gender Check] voice: ${voiceGender} | wrongForms: ${wrongForms} | maleMismatch: ${maleMismatch} | femaleMismatch: ${femaleMismatch} | mismatch: ${mismatch}`)
+    return mismatch
   }
 
   // ── Discovery-transition validator ──
@@ -185,6 +218,12 @@ SCRIPT FLOW RULES (CRITICAL — the monologue MUST follow this arc):
 - Scene 4 (CTA): direct recommendation, "אתם חייבים לנסות".
 - The flow MUST feel like: Problem → Failed attempts → Discovery → Love it → CTA. Natural storytelling, not a jump-cut.
 
+PUNCTUATION RULES (CRITICAL):
+1. Every scene voiceover MUST end with a period (.) or exclamation mark (!).
+2. Within a scene, add commas after natural pause points: after transition phrases like "עד שגיליתי,", "ואז גיליתי,", "פעם אחת,"; before connectors "אבל", "כי", "אז", "ולכן"; between independent clauses.
+3. Each scene = 1–2 COMPLETE sentences with proper punctuation, NOT fragments.
+4. כל סצנה חייבת להסתיים בנקודה (.) או סימן קריאה (!). הוסף פסיקים (,) בנקודות עצירה טבעיות - אחרי 'עד שגיליתי', לפני 'אבל', 'כי', 'אז'. כל סצנה = 1-2 משפטים שלמים עם ניקוד נכון.
+
 VOICEOVER WORD COUNT (CRITICAL): Scene 1: ~8 words, Scene 2: ~8 words, Scene 3: ~16 words, Scene 4: ~8 words = total ~40 words = 20 seconds.
 
 Return ONLY JSON:
@@ -249,6 +288,12 @@ SCRIPT FLOW RULES (CRITICAL — the monologue MUST follow this arc):
 - Scene 4 (CTA): direct recommendation, "אתם חייבים לנסות".
 - The flow MUST feel like: Problem → Failed attempts → Discovery → Love it → CTA. Natural storytelling, not a jump-cut.
 
+PUNCTUATION RULES (CRITICAL):
+1. Every scene voiceover MUST end with a period (.) or exclamation mark (!).
+2. Within a scene, add commas after natural pause points: after transition phrases like "עד שגיליתי,", "ואז גיליתי,", "פעם אחת,"; before connectors "אבל", "כי", "אז", "ולכן"; between independent clauses.
+3. Each scene = 1–2 COMPLETE sentences with proper punctuation, NOT fragments.
+4. כל סצנה חייבת להסתיים בנקודה (.) או סימן קריאה (!). הוסף פסיקים (,) בנקודות עצירה טבעיות - אחרי 'עד שגיליתי', לפני 'אבל', 'כי', 'אז'. כל סצנה = 1-2 משפטים שלמים עם ניקוד נכון.
+
 VOICEOVER WORD COUNT (CRITICAL): Scene 1: ~8 words, Scene 2: ~8 words, Scene 3: ~16 words, Scene 4: ~8 words = total ~40 words = 20 seconds. voiceover MUST fill the full duration — write enough words to fill each scene completely, do not leave silence.
 
 Return ONLY JSON:
@@ -273,6 +318,8 @@ Return ONLY JSON:
         const rawText = message.content[0].text.trim().replace(/```json|```/g, '')
         console.log('Claude response:', rawText.slice(0, 500))
         const parsed = JSON.parse(rawText.slice(rawText.indexOf('{'), rawText.lastIndexOf('}') + 1))
+        // Apply auto-corrections for the most common feminine misconjugation before we validate.
+        autoFixFemaleWrongForms(parsed)
         const genderBad = scriptGenderMismatch(parsed)
         const transitionBad = !scriptHasDiscoveryTransition(parsed)
         if (!genderBad && !transitionBad) {
@@ -283,11 +330,13 @@ Return ONLY JSON:
         if (transitionBad) console.warn(`Discovery transition missing on attempt ${attempts + 1}, regenerating...`)
         attempts++
         const corrections = []
-        if (genderBad) corrections.push(`PREVIOUS ATTEMPT HAD WRONG GENDER. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${isMale ? 'male/זכר' : 'female/נקבה'}). Do NOT mix genders. Verify every single word. ${grammarNote}`)
+        if (genderBad) corrections.push(`PREVIOUS ATTEMPT HAD WRONG GENDER OR WRONG GRAMMAR. The previous script used 'הייתי מביכה' (or a similar active-participle form) which is WRONG. 'מביכה' is an active participle meaning 'embarrassing others' or 'causes embarrassment' — it is NOT 'was embarrassed'. For 'I was embarrassed (female)' use 'הייתי מובכת'. For male use 'הייתי מובך'. Rewrite the ENTIRE script with correct ${isMale ? 'masculine' : 'feminine'} past-tense forms. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${isMale ? 'male/זכר' : 'female/נקבה'}). Do NOT mix genders. Verify every single word. ${grammarNote}`)
         if (transitionBad) corrections.push(`PREVIOUS ATTEMPT FAILED THE TRANSITION RULE. Scene 1 voiceover MUST NOT mention the product category word "${productCategoryWord}" or the product name, and MUST end with unresolved emotion. Scene 2 voiceover MUST START with one of exactly: "עד שגיליתי", "ואז גיליתי", "חברה הכירה", "פעם אחת ניסיתי", "מצאתי את", "גיליתי את" — BEFORE any product mention. Rewrite scenes 1 and 2 accordingly.`)
         currentPrompt = `${promptContent}\n\n${corrections.join('\n\n')}`
         story = parsed // keep in case next attempt fails
       }
+      // Final safety net: even if we exhausted retries, apply auto-corrections to the last attempt.
+      if (story) autoFixFemaleWrongForms(story)
     } catch (e) {
       console.error('Claude SDK error:', e.message)
       /* use fallback */
@@ -408,13 +457,29 @@ Return ONLY JSON:
   }
 
   // ── STEP 2: Nano Banana — תמונת אווטאר + מוצר עם פרומפט נכון ──
-  // generateNBFrame: single-frame generator with retry-on-network-failure and per-attempt timeout.
-  // Retries 5 times on "fetch failed" / network errors with backoff [3s, 6s, 10s, 15s, 20s].
-  // Each attempt has a 90-second AbortController timeout. Returns a placeholder on total failure.
-  async function generateNBFrame(i, nbPrompt, imageUrls, placeholder) {
-    const RETRY_DELAYS_MS = [3000, 6000, 10000, 15000, 20000]
-    const MAX_ATTEMPTS = RETRY_DELAYS_MS.length
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  // generateNBFrame: primary generator with 8 retries on network errors,
+  // limited retries (≤2) on 4xx, and a flux/schnell text-to-image fallback
+  // after 4 failed primary attempts. Per-attempt 90s AbortController timeout.
+  // Returns { url, source } where source ∈ 'primary' | 'fallback' | 'placeholder'.
+  const jobId = Math.random().toString(36).slice(2, 8)
+  const NETWORK_RETRY_DELAYS_MS = [2000, 4000, 8000, 12000, 16000, 20000, 25000, 30000] // 8 attempts
+  const MAX_NETWORK_ATTEMPTS = NETWORK_RETRY_DELAYS_MS.length
+  const MAX_4XX_ATTEMPTS = 2
+
+  const isNetworkError = (e) => {
+    const msg = e?.message || ''
+    return msg.includes('fetch failed')
+      || e?.name === 'AbortError'
+      || e?.code === 'ECONNRESET'
+      || e?.code === 'ETIMEDOUT'
+      || !!e?.cause
+  }
+
+  async function callNBPrimary(i, nbPrompt, imageUrls) {
+    let networkAttempts = 0
+    let clientAttempts = 0
+    while (networkAttempts < MAX_NETWORK_ATTEMPTS && clientAttempts < MAX_4XX_ATTEMPTS) {
+      const attemptLabel = `${networkAttempts + 1}/${MAX_NETWORK_ATTEMPTS}`
       const ac = new AbortController()
       const timer = setTimeout(() => ac.abort(), 90000)
       try {
@@ -433,31 +498,87 @@ Return ONLY JSON:
         if (nbRes.ok) {
           const d = await nbRes.json()
           const url = d.images?.[0]?.url || d.images?.[0]
-          if (url) {
-            console.log('NB frame', i+1, 'OK:', url.slice(0,50))
-            return url
-          }
-          console.error('NB frame', i+1, 'empty response, attempt', attempt + 1)
+          if (url) return url
+          console.error(`[NB scene ${i+1}] attempt ${attemptLabel}: empty response`)
+          networkAttempts++
         } else {
           const err = await nbRes.text()
-          console.error('NB frame', i+1, 'failed:', nbRes.status, err.slice(0,100), 'attempt', attempt + 1)
-          // Non-network failure (e.g. 4xx): stop retrying
-          if (nbRes.status >= 400 && nbRes.status < 500) break
+          if (nbRes.status >= 400 && nbRes.status < 500) {
+            clientAttempts++
+            console.error(`[NB scene ${i+1}] attempt ${networkAttempts + 1}/${MAX_NETWORK_ATTEMPTS}: client error ${nbRes.status} (${clientAttempts}/${MAX_4XX_ATTEMPTS}) — ${err.slice(0,100)}`)
+          } else {
+            networkAttempts++
+            console.error(`[NB scene ${i+1}] attempt ${attemptLabel}: server error ${nbRes.status} — ${err.slice(0,100)}`)
+          }
         }
       } catch (e) {
         clearTimeout(timer)
-        const msg = e?.message || ''
-        const isNetwork = msg.includes('fetch failed') || e?.name === 'AbortError' || e?.code === 'ECONNRESET' || e?.code === 'ETIMEDOUT' || e?.cause
-        console.error('NB frame', i+1, 'exception attempt', attempt + 1, ':', msg)
-        if (!isNetwork) break
+        if (isNetworkError(e)) {
+          console.error(`[NB scene ${i+1}] attempt ${attemptLabel}: network error (${e.message || e.name}), retrying...`)
+          networkAttempts++
+        } else {
+          console.error(`[NB scene ${i+1}] attempt ${attemptLabel}: non-retryable exception — ${e?.message}`)
+          break
+        }
       }
-      if (attempt < MAX_ATTEMPTS - 1) {
-        const wait = RETRY_DELAYS_MS[attempt]
-        console.log('NB frame', i+1, 'retrying in', wait, 'ms')
+      const totalAttempts = networkAttempts + clientAttempts
+      if (totalAttempts < MAX_NETWORK_ATTEMPTS && networkAttempts > 0) {
+        const wait = NETWORK_RETRY_DELAYS_MS[Math.min(networkAttempts - 1, MAX_NETWORK_ATTEMPTS - 1)]
+        console.log(`[NB scene ${i+1}] attempt ${networkAttempts}/${MAX_NETWORK_ATTEMPTS}: retrying in ${Math.round(wait/1000)}s...`)
         await new Promise(r => setTimeout(r, wait))
       }
     }
-    console.error('NB frame', i+1, 'all retries exhausted, using placeholder')
+    return null
+  }
+
+  async function callFluxFallback(i, textPrompt) {
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), 90000)
+    try {
+      console.log(`[NB scene ${i+1}] falling back to fal-ai/flux/schnell text-to-image`)
+      const res = await fetch('https://fal.run/fal-ai/flux/schnell', {
+        method: 'POST',
+        headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: textPrompt,
+          image_size: 'portrait_16_9',
+          num_images: 1,
+          num_inference_steps: 4
+        }),
+        signal: ac.signal
+      })
+      clearTimeout(timer)
+      if (res.ok) {
+        const d = await res.json()
+        const url = d.images?.[0]?.url || d.images?.[0]
+        if (url) return url
+      } else {
+        const err = await res.text()
+        console.error(`[NB scene ${i+1}] flux fallback failed: ${res.status} — ${err.slice(0,100)}`)
+      }
+    } catch (e) {
+      clearTimeout(timer)
+      console.error(`[NB scene ${i+1}] flux fallback exception: ${e?.message}`)
+    }
+    return null
+  }
+
+  const frameSources = [] // 'primary' | 'fallback' | 'placeholder'
+  async function generateNBFrame(i, nbPrompt, imageUrls, placeholder) {
+    const primaryUrl = await callNBPrimary(i, nbPrompt, imageUrls)
+    if (primaryUrl) {
+      console.log(`[Job ${jobId}] [NB scene ${i+1}] OK from PRIMARY (nano-banana-2)`)
+      frameSources[i] = 'primary'
+      return primaryUrl
+    }
+    const fluxUrl = await callFluxFallback(i, nbPrompt)
+    if (fluxUrl) {
+      console.log(`[Job ${jobId}] [NB scene ${i+1}] OK from FALLBACK (flux/schnell)`)
+      frameSources[i] = 'fallback'
+      return fluxUrl
+    }
+    console.error(`[Job ${jobId}] [NB scene ${i+1}] all sources exhausted, using placeholder`)
+    frameSources[i] = 'placeholder'
     return placeholder
   }
 
@@ -502,6 +623,10 @@ Return ONLY JSON:
   }
 
     console.log('Frames done:', frames.map((f,i) => `${i+1}:${f?'OK':'FAIL'}`))
+  const nPrimary = frameSources.filter(s => s === 'primary').length
+  const nFallback = frameSources.filter(s => s === 'fallback').length
+  const nPlaceholder = frameSources.filter(s => s === 'placeholder').length
+  console.log(`[Job ${jobId}] Completed: ${nPrimary}/4 frames from NB primary, ${nFallback}/4 from flux fallback, ${nPlaceholder}/4 placeholder`)
 
   // ── STEP 3: Generate Kling videos SEQUENTIALLY ──
   const videos = []
