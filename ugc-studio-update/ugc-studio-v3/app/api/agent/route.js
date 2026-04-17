@@ -106,12 +106,13 @@ async function generateVoice(text, voiceId) {
   const cleanedText = cleanHebrewText(text);
   try {
     // Use with-timestamps endpoint for word-level alignment data.
-    // stability 0.5 / similarity 0.75 favours a smoother, more continuous
-    // delivery vs the jittery scene-boundary pauses we saw with higher values.
+    // stability 0.7 / style 0.0 — higher stability gives more consistent
+    // Hebrew consonant pronunciation; style 0 removes the expressive drift
+    // that was softening hard פ/כ/ב consonants (e.g. "כִּיפָּה" read as "kifa").
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}/with-timestamps?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: cleanedText, model_id: 'eleven_v3', voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.3, use_speaker_boost: true } })
+      body: JSON.stringify({ text: cleanedText, model_id: 'eleven_v3', voice_settings: { stability: 0.7, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true } })
     });
     if (!res.ok) { console.error('ElevenLabs failed:', await res.text()); return null; }
     const json = await res.json();
@@ -313,6 +314,12 @@ Scene 1 voiceover should open with an emotional state, a recurring situation, or
   * "תמיד היה לי ש..." (I always had that...)
   * "כל ... היה ..." (every X was Y)
 - The opening must feel like a real person sharing a relatable story, not an ad intro.
+
+1b2. TTS-FRIENDLY WORD CHOICE (critical for voiceover quality):
+The output will be read by ElevenLabs V3 Hebrew TTS. Prefer everyday high-frequency Hebrew words over literary / archaic synonyms — the TTS pronounces common words correctly and trips on rare ones. Favour SHORT sentences (7–12 words) with a comma or period giving the TTS a clear pause point every 5–8 words. Long unbroken sentences cause the TTS to drop nikud and guess vowels.
+- Prefer: "זה פשוט ולא עובד", "ניסיתי הכל וזה לא עזר לי".
+- Avoid uncommon literary synonyms when a simple word will do.
+- Each voiceover_sceneN should contain at least ONE internal comma to give the TTS a breath point, unless the scene is a single short clause under 8 words.
 
 1c. AUTHENTIC HEBREW — AVOID BORROWED FOREIGN WORDS (critical):
 השתמש במילים עבריות אותנטיות. הימנע מלועזית מתורגמת ישירות (סטיילית, טרנדי, קולית). השתמש ב'עם סטייל', 'אלגנטית', 'מעוצבת' במקום.

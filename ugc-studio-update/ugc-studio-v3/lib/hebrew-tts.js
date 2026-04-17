@@ -1,6 +1,59 @@
 // Preprocess Hebrew text before sending to ElevenLabs.
 // ElevenLabs often mispronounces unvocalized Hebrew and digits.
 // We inject nikud into known problem words and spell out digits in Hebrew.
+//
+// There are TWO replacement layers applied in order:
+//   1. CUSTOM_PRONUNCIATIONS — applied FIRST, used for words where simple
+//      nikud is not enough (ElevenLabs ignores the dagesh or vav-kubutz
+//      confusion). We use phonetic hacks: doubled consonant letters for
+//      דגש חזק, shva+dagesh chains, or syllable-hyphens (־/-) to force the
+//      TTS to break the word into clear syllables.
+//   2. WORD_REPLACEMENTS — straight nikud injection for the long tail of
+//      regular words.
+//
+// CUSTOM_PRONUNCIATIONS overrides WORD_REPLACEMENTS for the same word.
+// Both layers are prefix-aware: "המושלם", "ומושלם", "שמושלם" all match the
+// entry for "מושלם" and keep the prefix attached.
+//
+// To add your own hard-override for a word ElevenLabs keeps mispronouncing,
+// just drop it into CUSTOM_PRONUNCIATIONS.
+
+const CUSTOM_PRONUNCIATIONS = {
+  // ── Words where ElevenLabs V3 Hebrew ignores the dagesh / softens the ──
+  // ── stop consonant, so plain nikud ("כִּיפָּה") still reads as "kifa".  ──
+  // Strategy: double the stop consonant with a shva on the first copy and
+  // dagesh+vowel on the second. This forces a geminated "kip-pa" reading.
+  'כיפה': 'כִּיפְּפָה',       // kippa (yarmulke)
+  'הכיפה': 'הַכִּיפְּפָה',
+  'כיפות': 'כִּיפְּפוֹת',
+  'הכיפות': 'הַכִּיפְּפוֹת',
+  'סוכה': 'סֻכָּה-כָּה',      // sukkah
+  'הסוכה': 'הַסֻּכָּה-כָּה',
+  'חופה': 'חֻפָּה-פָּה',      // chuppah
+  'החופה': 'הַחֻפָּה-פָּה',
+  'אמא': 'אִמָּא-מָא',         // imma
+  'האמא': 'הָאִמָּא-מָא',
+  'כלה': 'כַּלָּה-לָּה',       // kalla
+  'הכלה': 'הַכַּלָּה-לָּה',
+
+  // ── Words where ElevenLabs inserts a spurious vowel after vav ──
+  // "מושלם" was being read as "mesholam". The fix is to drop the vav
+  // entirely and use kubutz (מֻ) — and also register the ה-prefixed form
+  // so "המושלם" gets handled without relying on the prefix-aware matcher.
+  'מושלם': 'מֻשְׁלָם',
+  'המושלם': 'הַמֻּשְׁלָם',
+  'מושלמת': 'מֻשְׁלֶמֶת',
+  'המושלמת': 'הַמֻּשְׁלֶמֶת',
+  'מושלמים': 'מֻשְׁלָמִים',
+  'מושלמות': 'מֻשְׁלָמוֹת',
+
+  // Other dagesh-forte words where plain nikud tends to lose the doubling.
+  'סיפור': 'סִפּוּר-פּוּר',
+  'דיבור': 'דִּבּוּר-בּוּר',
+  'שבת': 'שַׁבָּת-בָּת',
+  'סבתא': 'סָבְתָא-תָא',
+  'סבא': 'סָבָּא-בָּא',
+};
 
 const WORD_REPLACEMENTS = {
   // Common words ElevenLabs trips on — add nikud for correct pronunciation
@@ -292,6 +345,297 @@ const WORD_REPLACEMENTS = {
   'המחיר': 'הַמְּחִיר',
   'איכות': 'אֵיכוּת',
   'האיכות': 'הָאֵיכוּת',
+
+  // ── Religious / Jewish-life vocabulary ──
+  'תפילה': 'תְּפִילָּה',
+  'התפילה': 'הַתְּפִילָּה',
+  'תפילות': 'תְּפִילּוֹת',
+  'ברכה': 'בְּרָכָה',
+  'הברכה': 'הַבְּרָכָה',
+  'ברכות': 'בְּרָכוֹת',
+  'תורה': 'תּוֹרָה',
+  'התורה': 'הַתּוֹרָה',
+  'מצווה': 'מִצְוָוה',
+  'המצווה': 'הַמִּצְוָוה',
+  'מצוות': 'מִצְווֹת',
+  'כיפור': 'כִּיפּוּר',
+  'שבתות': 'שַׁבָּתוֹת',
+  'חב״ד': 'חָבַּ״ד',
+  'חבד': 'חָבַּ״ד',
+  'כיסוי ראש': 'כִּיסּוּי רֹאשׁ',
+  'מטפחת': 'מִטְפַּחַת',
+  'המטפחת': 'הַמִּטְפַּחַת',
+  'טלית': 'טַלִּית',
+  'תפילין': 'תְּפִילִּין',
+  'מזוזה': 'מְזוּזָה',
+  'חתונה': 'חֲתוּנָה',
+  'החתונה': 'הַחֲתוּנָה',
+  'ברית': 'בְּרִית',
+  'הברית': 'הַבְּרִית',
+  'חג': 'חַג',
+  'החג': 'הֶחָג',
+  'חגים': 'חַגִּים',
+  'ראש השנה': 'רֹאשׁ הַשָּׁנָה',
+  'פסח': 'פֶּסַח',
+  'חנוכה': 'חֲנוּכָּה',
+  'פורים': 'פּוּרִים',
+  'שבועות': 'שָׁבוּעוֹת',
+  'סוכות': 'סֻכּוֹת',
+  'רב': 'רַב',
+  'הרב': 'הָרַב',
+  'רבי': 'רַבִּי',
+  'קדוש': 'קָדוֹשׁ',
+  'קדושה': 'קְדוּשָׁה',
+
+  // ── Beauty / cosmetics / fashion ──
+  'איפור': 'אִיפּוּר',
+  'האיפור': 'הָאִיפּוּר',
+  'אודם': 'אֹדֶם',
+  'מסקרה': 'מַסְקָרָה',
+  'לק': 'לָק',
+  'לק ציפורניים': 'לָק צִיפָּרְנַיִים',
+  'ציפורניים': 'צִיפָּרְנַיִים',
+  'הציפורניים': 'הַצִּיפָּרְנַיִים',
+  'בושם': 'בּוֹשֶׂם',
+  'הבושם': 'הַבּוֹשֶׂם',
+  'בשמים': 'בְּשָׂמִים',
+  'תכשיט': 'תַּכְשִׁיט',
+  'התכשיט': 'הַתַּכְשִׁיט',
+  'תכשיטים': 'תַּכְשִׁיטִים',
+  'טבעת': 'טַבַּעַת',
+  'הטבעת': 'הַטַּבַּעַת',
+  'עגיל': 'עָגִיל',
+  'עגילים': 'עֲגִילִים',
+  'שרשרת': 'שַׁרְשֶׁרֶת',
+  'השרשרת': 'הַשַּׁרְשֶׁרֶת',
+  'צמיד': 'צָמִיד',
+  'הצמיד': 'הַצָּמִיד',
+  'שעון': 'שָׁעוֹן',
+  'השעון': 'הַשָּׁעוֹן',
+  'שמלה': 'שִׂמְלָה',
+  'השמלה': 'הַשִּׂמְלָה',
+  'שמלות': 'שְׂמָלוֹת',
+  'חולצה': 'חֻלְצָה',
+  'החולצה': 'הַחֻלְצָה',
+  'מכנסיים': 'מִכְנָסַיִים',
+  'נעליים': 'נַעֲלַיִים',
+  'הנעליים': 'הַנַּעֲלַיִים',
+  'תיק': 'תִּיק',
+  'התיק': 'הַתִּיק',
+  'כובע': 'כּוֹבַע',
+  'הכובע': 'הַכּוֹבַע',
+  'מעיל': 'מְעִיל',
+  'המעיל': 'הַמְּעִיל',
+  'חצאית': 'חֲצָאִית',
+  'החצאית': 'הַחֲצָאִית',
+  'גרביים': 'גַּרְבַּיִים',
+  'חגורה': 'חֲגוֹרָה',
+  'לוק': 'לוּק',
+  'הלוק': 'הַלּוּק',
+  'סטייל': 'סְטַיְיל',
+
+  // ── Food / cooking ──
+  'לחם': 'לֶחֶם',
+  'הלחם': 'הַלֶּחֶם',
+  'חלב': 'חָלָב',
+  'החלב': 'הֶחָלָב',
+  'מים': 'מַיִם',
+  'המים': 'הַמַּיִם',
+  'קפה': 'קָפֶה',
+  'הקפה': 'הַקָּפֶה',
+  'תה': 'תֵּה',
+  'פיצה': 'פִּיצָּה',
+  'הפיצה': 'הַפִּיצָּה',
+  'סלט': 'סָלָט',
+  'הסלט': 'הַסָּלָט',
+  'עוגה': 'עוּגָה',
+  'העוגה': 'הָעוּגָה',
+  'שוקולד': 'שׁוֹקוֹלָד',
+  'השוקולד': 'הַשּׁוֹקוֹלָד',
+  'בשר': 'בָּשָׂר',
+  'הבשר': 'הַבָּשָׂר',
+  'דג': 'דָּג',
+  'דגים': 'דָּגִים',
+  'ביצה': 'בֵּיצָה',
+  'ביצים': 'בֵּיצִים',
+  'גבינה': 'גְּבִינָה',
+  'הגבינה': 'הַגְּבִינָה',
+  'יוגורט': 'יוֹגוּרְט',
+  'אורז': 'אֹרֶז',
+  'תפוח': 'תַּפּוּחַ',
+  'תפוחים': 'תַּפּוּחִים',
+  'בננה': 'בָּנָנָה',
+  'תות': 'תּוּת',
+  'ירקות': 'יְרָקוֹת',
+  'פירות': 'פֵּירוֹת',
+  'ארוחה': 'אֲרוּחָה',
+  'הארוחה': 'הָאֲרוּחָה',
+  'ארוחת': 'אֲרוּחַת',
+  'צהריים': 'צָהֳרַיִים',
+  'מטבח': 'מִטְבָּח',
+  'המטבח': 'הַמִּטְבָּח',
+
+  // ── Body parts ──
+  'יד': 'יָד',
+  'ידיים': 'יָדַיִים',
+  'הידיים': 'הַיָּדַיִים',
+  'רגל': 'רֶגֶל',
+  'רגליים': 'רַגְלַיִים',
+  'הרגליים': 'הָרַגְלַיִים',
+  'עין': 'עַיִן',
+  'עיניים': 'עֵינַיִים',
+  'העיניים': 'הָעֵינַיִים',
+  'האף': 'הָאַף',
+  'פה': 'פֶּה',
+  'הפה': 'הַפֶּה',
+  'אוזן': 'אֹזֶן',
+  'אוזניים': 'אוֹזְנַיִים',
+  'שפתיים': 'שְׂפָתַיִים',
+  'השפתיים': 'הַשְּׂפָתַיִים',
+  'שן': 'שֵׁן',
+  'לב': 'לֵב',
+  'הלב': 'הַלֵּב',
+  'גב': 'גַּב',
+  'הגב': 'הַגַּב',
+  'בטן': 'בֶּטֶן',
+  'הבטן': 'הַבֶּטֶן',
+  'צוואר': 'צַוָּואר',
+  'כתף': 'כָּתֵף',
+  'כתפיים': 'כְּתֵפַיִים',
+
+  // ── Expanded common adjectives ──
+  'נחמד': 'נֶחְמָד',
+  'נחמדה': 'נֶחְמָדָה',
+  'נוראי': 'נוֹרָאִי',
+  'נורא': 'נוֹרָא',
+  'קשה': 'קָשֶׁה',
+  'קשות': 'קָשׁוֹת',
+  'קל': 'קַל',
+  'קלה': 'קַלָּה',
+  'פשוט': 'פָּשׁוּט',
+  'פשוטה': 'פְּשׁוּטָה',
+  'מסובך': 'מְסֻבָּךְ',
+  'חכם': 'חָכָם',
+  'חכמה': 'חֲכָמָה',
+  'טיפש': 'טִפֵּשׁ',
+  'טיפשה': 'טִפְּשָׁה',
+  'חזק': 'חָזָק',
+  'חזקה': 'חֲזָקָה',
+  'חלש': 'חַלָּשׁ',
+  'חלשה': 'חַלָּשָׁה',
+  'רך': 'רַךְ',
+  'רכה': 'רַכָּה',
+  'קשיח': 'קָשִׁיחַ',
+  'קשיחה': 'קָשִׁיחָה',
+  'יקרה מאוד': 'יְקָרָה מְאוֹד',
+  'מספיק': 'מַסְפִּיק',
+  'מספיקה': 'מַסְפִּיקָה',
+  'זהה': 'זֵהֶה',
+  'שונה': 'שׁוֹנֶה',
+  'שונים': 'שׁוֹנִים',
+  'שונות': 'שׁוֹנוֹת',
+  'דומה': 'דּוֹמֶה',
+  'דומים': 'דּוֹמִים',
+  'מתוק': 'מָתוֹק',
+  'מתוקה': 'מְתוּקָה',
+  'מר': 'מַר',
+  'חמוץ': 'חָמוּץ',
+  'חמוצה': 'חֲמוּצָה',
+  'מלוח': 'מָלוּחַ',
+  'טרי': 'טָרִי',
+  'טריה': 'טְרִיָּה',
+  'רטוב': 'רָטוֹב',
+  'יבש': 'יָבֵשׁ',
+  'יבשה': 'יְבֵשָׁה',
+  'חם': 'חַם',
+  'חמה': 'חַמָּה',
+  'קר': 'קַר',
+  'קרה': 'קָרָה',
+  'מעניין': 'מְעַנְיֵין',
+  'מעניינת': 'מְעַנְיֶינֶת',
+  'משעמם': 'מְשַׁעֲמֵם',
+  'משעממת': 'מְשַׁעֲמֶמֶת',
+  'מרגש': 'מְרַגֵּשׁ',
+  'מרגשת': 'מְרַגֶּשֶׁת',
+  'פופולרי': 'פּוֹפּוּלָרִי',
+  'פופולרית': 'פּוֹפּוּלָרִית',
+
+  // ── Additional common verbs (past tense, both genders) ──
+  'נהניתי': 'נֶהֱנֵיתִי',
+  'נהנינו': 'נֶהֱנֵינוּ',
+  'הבנתי': 'הֵבַנְתִּי',
+  'זכרתי': 'זָכַרְתִּי',
+  'שכחתי': 'שָׁכַחְתִּי',
+  'חשבתי': 'חָשַׁבְתִּי',
+  'שמעתי': 'שָׁמַעְתִּי',
+  'ראיתי': 'רָאִיתִי',
+  'לקחתי': 'לָקַחְתִּי',
+  'נתתי': 'נָתַתִּי',
+  'סיפרתי': 'סִפַּרְתִּי',
+  'שאלתי': 'שָׁאַלְתִּי',
+  'עניתי': 'עָנִיתִי',
+  'צחקתי': 'צָחַקְתִּי',
+  'בכיתי': 'בָּכִיתִי',
+  'ישנתי': 'יָשַׁנְתִּי',
+  'התעוררתי': 'הִתְעוֹרַרְתִּי',
+  'יצאתי': 'יָצָאתִי',
+  'חזרתי': 'חָזַרְתִּי',
+  'באתי': 'בָּאתִי',
+  'אכלתי': 'אָכַלְתִּי',
+  'שתיתי': 'שָׁתִיתִי',
+
+  // ── Common household / product words ──
+  'ספה': 'סַפָּה',
+  'הספה': 'הַסַּפָּה',
+  'שטיח': 'שָׁטִיחַ',
+  'מגבת': 'מַגֶּבֶת',
+  'סדין': 'סָדִין',
+  'כרית': 'כָּרִית',
+  'שמיכה': 'שְׂמִיכָה',
+  'מזרון': 'מִזְרוֹן',
+  'מקרר': 'מְקָרֵר',
+  'המקרר': 'הַמְּקָרֵר',
+  'תנור': 'תַּנּוּר',
+  'כיור': 'כִּיּוֹר',
+  'מקלחת': 'מִקְלַחַת',
+  'סבון': 'סַבּוֹן',
+  'שמפו': 'שַׁמְפּוֹ',
+  'מברשת': 'מִבְרֶשֶׁת',
+
+  // ── Tech / app words ──
+  'אפליקציה': 'אַפְּלִיקַצְיָה',
+  'האפליקציה': 'הָאַפְּלִיקַצְיָה',
+  'אינטרנט': 'אִינְטֶרְנֶט',
+  'וואטסאפ': 'וָואטְסאַפּ',
+  'אינסטגרם': 'אִינְסְטָגְרָם',
+  'טיקטוק': 'טִיקְטוֹק',
+  'יוטיוב': 'יוּטְיוּב',
+  'סמארטפון': 'סְמַארְטְפוֹן',
+  'טלפון': 'טֶלֶפוֹן',
+  'הטלפון': 'הַטֶּלֶפוֹן',
+  'מחשב': 'מַחְשֵׁב',
+  'המחשב': 'הַמַּחְשֵׁב',
+
+  // ── More daily-life verbs (present tense both genders) ──
+  'נוסע': 'נוֹסֵעַ',
+  'נוסעת': 'נוֹסַעַת',
+  'אוכל': 'אוֹכֵל',
+  'אוכלת': 'אוֹכֶלֶת',
+  'שותה': 'שׁוֹתֶה',
+  'קורא': 'קוֹרֵא',
+  'קוראת': 'קוֹרֵאת',
+  'כותב': 'כּוֹתֵב',
+  'כותבת': 'כּוֹתֶבֶת',
+  'עונה': 'עוֹנֶה',
+  'שואל': 'שׁוֹאֵל',
+  'שואלת': 'שׁוֹאֶלֶת',
+  'צוחק': 'צוֹחֵק',
+  'צוחקת': 'צוֹחֶקֶת',
+  'בוכה': 'בּוֹכֶה',
+  'יושב': 'יוֹשֵׁב',
+  'יושבת': 'יוֹשֶׁבֶת',
+  'עומד': 'עוֹמֵד',
+  'עומדת': 'עוֹמֶדֶת',
 }
 
 const DIGIT_WORDS_F = {
@@ -389,6 +733,66 @@ export function addNaturalPauses(text) {
   return out
 }
 
+// phoneticize(word) — lightweight rule-based phonetic nudger for Hebrew words
+// that aren't in any dictionary. Applied only when there's no dictionary hit.
+//
+// Rules (conservative — only add hints that are safe to apply blindly):
+//   1. בכפת at the START of a word gets an implicit dagesh (hard stop), so
+//      add an explicit dagesh on that letter when it appears without nikud.
+//   2. The vowel combos "וּ" and "וֹ" are preserved as-is when present; if the
+//      raw word has a medial vav with no nikud, leave it (risky to guess).
+//   3. If the word is > 6 chars and contains no nikud at all, insert a soft
+//      hyphen every 3-4 chars to encourage ElevenLabs to break into syllables.
+//
+// This is intentionally narrow — aggressive phoneticization does more harm
+// than good. Dictionary entries always take precedence.
+export function phoneticize(word) {
+  if (!word || typeof word !== 'string') return word
+  // Skip if the word already carries nikud (any combining mark in U+0591..U+05C7)
+  if (/[\u0591-\u05C7]/.test(word)) return word
+  const firstChar = word.charAt(0)
+  let out = word
+  // Add dagesh (U+05BC) after initial בכפת when no nikud follows
+  if (/^[בכפת]/.test(firstChar) && word.length > 1) {
+    out = firstChar + '\u05BC' + word.slice(1)
+  }
+  // For long un-vocalized words, insert a syllable hyphen around the midpoint
+  // so ElevenLabs treats them as two chunks instead of guessing one vowel.
+  if (out.length > 7 && !/[\u0591-\u05C7\-\u05BE]/.test(word)) {
+    const mid = Math.ceil(out.length / 2)
+    out = out.slice(0, mid) + '-' + out.slice(mid)
+  }
+  return out
+}
+
+// Build a single regex that matches a dictionary key preceded by any single
+// Hebrew single-letter prefix (ה/ו/ש/ל/ב/מ/כ) so that "המושלם", "ושמלה",
+// "לחתונה" all trigger the replacement while preserving the prefix.
+function replaceWithPrefixAwareness(text, dict) {
+  const keys = Object.keys(dict).sort((a, b) => b.length - a.length)
+  let out = text
+  for (const key of keys) {
+    const rep = dict[key]
+    // Boundary: start of string OR whitespace/punct. Followed by optional
+    // one-letter Hebrew prefix (only when the key itself doesn't start with
+    // the same prefix — otherwise we'd double up). Then the key. Then a
+    // trailing boundary.
+    // Allow up to TWO Hebrew single-letter prefixes (e.g. "וה" in "והמושלם",
+    // "שב" in "שבמחיר"). We don't attempt to add nikud to the prefix itself —
+    // TTS pronounces the prefix from context; we just want the stem vocalised.
+    // Because keys are sorted LONGEST-first, a key that starts with a
+    // "prefix letter" (e.g. "המושלם") is matched without a leading prefix
+    // BEFORE the shorter "מושלם" key — so prefix greed is safe.
+    const prefixPart = '(?:[הושלבמכ]{1,2})?'
+    const re = new RegExp(
+      `(^|[\\s.,!?:;"'\\-])(${prefixPart})${key}(?=$|[\\s.,!?:;"'\\-])`,
+      'g'
+    )
+    out = out.replace(re, (_, pre, pfx) => `${pre}${pfx || ''}${rep}`)
+  }
+  return out
+}
+
 export function cleanHebrewText(text) {
   if (!text || typeof text !== 'string') return text
 
@@ -400,15 +804,14 @@ export function cleanHebrewText(text) {
   // Replace standalone integers with Hebrew words (only when surrounded by non-digit chars)
   out = out.replace(/(^|[^\d])(\d+)(?=$|[^\d])/g, (_, pre, num) => `${pre}${spellNumber(num)}`)
 
-  // Word-level replacements — match whole tokens only, ignore leading prefixes ו/ה/ב/ל/כ/מ/ש
-  // Sort longer keys first so we don't clip matches
-  const keys = Object.keys(WORD_REPLACEMENTS).sort((a, b) => b.length - a.length)
-  for (const key of keys) {
-    const rep = WORD_REPLACEMENTS[key]
-    // Match the word preceded by start/space/punct, optionally allow it as-is
-    const re = new RegExp(`(^|[\\s.,!?:;"'\\-])${key}(?=$|[\\s.,!?:;"'\\-])`, 'g')
-    out = out.replace(re, (_, pre) => `${pre}${rep}`)
-  }
+  // Layer 1 — custom phonetic hard-overrides. Applied FIRST so dagesh-hack
+  // spellings for words ElevenLabs keeps mispronouncing (כיפה, מושלם…) win
+  // over the long-tail nikud dictionary.
+  out = replaceWithPrefixAwareness(out, CUSTOM_PRONUNCIATIONS)
+
+  // Layer 2 — plain nikud replacements for the long-tail. Prefix-aware so
+  // "המחיר", "ולחם", "שסיפור" all match their base forms.
+  out = replaceWithPrefixAwareness(out, WORD_REPLACEMENTS)
 
   // Collapse extra whitespace before pause insertion
   out = out.replace(/\s+/g, ' ').trim()

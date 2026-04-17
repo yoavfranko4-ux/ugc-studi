@@ -67,7 +67,10 @@ export async function POST(req) {
         body: JSON.stringify({
           text: cleanedText,
           model_id: 'eleven_v3',
-          voice_settings: { stability: 0.55, similarity_boost: 0.75, style: 0.55, use_speaker_boost: true }
+          // Higher stability (0.7) + zero style — prioritises consistent
+          // pronunciation over expressive swings. Style exaggeration was
+          // distorting Hebrew consonants (soft פ read as "f" etc.).
+          voice_settings: { stability: 0.7, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true }
         })
       }
     )
