@@ -175,28 +175,98 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 }
 
 // Probe a clip with ffprobe. Returns null if probe fails or ffprobe unavailable.
+// Now also returns duration (seconds) so we can reject clips with duration=0
+// before throwing them at the libx264 encoder.
 async function probeClip(filePath) {
   if (!ffprobePath || !filePath) return null
   try {
     const { stdout } = await execFileAsync(ffprobePath, [
       '-v', 'error',
       '-select_streams', 'v:0',
-      '-show_entries', 'stream=codec_name,width,height,r_frame_rate,pix_fmt',
+      '-show_entries', 'stream=codec_name,width,height,r_frame_rate,pix_fmt,duration:format=duration,format_name',
       '-of', 'json',
       filePath,
     ], { timeout: 8000, maxBuffer: 1024 * 1024 })
-    const info = JSON.parse(stdout).streams?.[0]
+    const parsed = JSON.parse(stdout)
+    const info = parsed.streams?.[0]
+    const fmt = parsed.format || {}
     if (!info) return null
     const [num, den] = String(info.r_frame_rate || '0/1').split('/').map(Number)
+    const duration = Number(info.duration || fmt.duration || 0)
     return {
       codec: info.codec_name,
       width: info.width,
       height: info.height,
       fps: den > 0 ? num / den : 0,
       pix_fmt: info.pix_fmt,
+      duration: Number.isFinite(duration) ? duration : 0,
+      container: fmt.format_name || null,
     }
   } catch (e) {
     console.warn('[Export] probeClip failed for', filePath, ':', e.message)
+    return null
+  }
+}
+
+// Read the first 32 bytes of a file and identify the container.
+// Returns { hex, magic } where magic is 'mp4'|'webm'|'html'|'unknown'.
+function inspectFileMagic(filePath) {
+  try {
+    const fd = fs.openSync(filePath, 'r')
+    const buf = Buffer.alloc(32)
+    const read = fs.readSync(fd, buf, 0, 32, 0)
+    fs.closeSync(fd)
+    const slice = buf.slice(0, read)
+    const hex = slice.toString('hex')
+    const ascii = slice.toString('latin1').toLowerCase()
+    // MP4: bytes 4..7 == "ftyp"
+    if (read >= 8 && slice.slice(4, 8).toString('latin1') === 'ftyp') {
+      return { hex, magic: 'mp4', ftyp: slice.slice(8, 12).toString('latin1').trim() }
+    }
+    // WebM/Matroska EBML: 1A 45 DF A3
+    if (read >= 4 && slice[0] === 0x1A && slice[1] === 0x45 && slice[2] === 0xDF && slice[3] === 0xA3) {
+      return { hex, magic: 'webm' }
+    }
+    // Common error cases: HTML error page, JSON error body
+    if (ascii.includes('<!doctype') || ascii.includes('<html') || ascii.startsWith('<')) {
+      return { hex, magic: 'html' }
+    }
+    if (ascii.startsWith('{') || ascii.startsWith('[')) {
+      return { hex, magic: 'json' }
+    }
+    return { hex, magic: 'unknown' }
+  } catch (e) {
+    return { hex: '', magic: 'error', error: e.message }
+  }
+}
+
+// Resolve an NB frame reference (http URL OR data: URI) to a local PNG/JPG file.
+// Returns the path, or null on failure.
+async function materializeNbFrame(ref, outPath) {
+  if (!ref || typeof ref !== 'string') return null
+  try {
+    if (ref.startsWith('data:')) {
+      const comma = ref.indexOf(',')
+      if (comma < 0) return null
+      const meta = ref.slice(5, comma)
+      const isBase64 = /;base64/i.test(meta)
+      const payload = ref.slice(comma + 1)
+      const buf = isBase64 ? Buffer.from(payload, 'base64') : Buffer.from(decodeURIComponent(payload), 'latin1')
+      if (buf.length < 100) return null
+      await writeFile(outPath, buf)
+      return outPath
+    }
+    if (/^https?:\/\//i.test(ref)) {
+      const resp = await fetch(ref)
+      if (!resp.ok) return null
+      const buf = Buffer.from(await resp.arrayBuffer())
+      if (buf.length < 100) return null
+      await writeFile(outPath, buf)
+      return outPath
+    }
+    return null
+  } catch (e) {
+    console.warn('[Export] materializeNbFrame failed:', e.message)
     return null
   }
 }
@@ -230,6 +300,7 @@ export async function POST(req) {
     const {
       videoClipsB64,
       videoUrls,
+      nbFrameUrls,   // NEW: per-scene NB frame URLs / data: URIs — used as visual fallback
       audioBase64,
       audioFormat,
       subtitles,
@@ -237,7 +308,7 @@ export async function POST(req) {
       bgMusic,
       bgMusicUrl,
       subtitleStyle,
-      fastExport,   // NEW: boolean → 540x960 output for speed
+      fastExport,
     } = body
 
     const hasB64Clips = Array.isArray(videoClipsB64) && videoClipsB64.some(Boolean)
@@ -258,6 +329,13 @@ export async function POST(req) {
     console.log('[Export] videoUrls count:', Array.isArray(videoUrls) ? videoUrls.length : 'NOT ARRAY')
     if (Array.isArray(videoUrls)) {
       videoUrls.forEach((u, i) => console.log(`[Export]   videoUrls[${i}]:`, u || '(null)'))
+    }
+    console.log('[Export] nbFrameUrls count:', Array.isArray(nbFrameUrls) ? nbFrameUrls.length : 'NOT ARRAY')
+    if (Array.isArray(nbFrameUrls)) {
+      nbFrameUrls.forEach((u, i) => {
+        const kind = !u ? '(null)' : u.startsWith('data:') ? `data: URI (${u.length} chars)` : u.slice(0, 80)
+        console.log(`[Export]   nbFrameUrls[${i}]:`, kind)
+      })
     }
     console.log('[Export] audioBase64:', audioBase64 ? `${audioBase64.length} chars (${audioFormat})` : '(none)')
     console.log('[Export] subtitles:', Array.isArray(subtitles) ? subtitles.length : '(none)')
@@ -296,9 +374,10 @@ export async function POST(req) {
         if (buf.length > 0) {
           await writeFile(clipPath, buf)
           const diskSize = fs.statSync(clipPath).size
+          const magic = inspectFileMagic(clipPath)
           clipPaths[i] = clipPath
           clipSources[i] = { type: 'bytes', key: hashBytesForCache(buf) }
-          console.log(`[Export] Clip ${i} from base64: base64_chars=${b64.length}, decoded_bytes=${buf.length}, disk_size=${diskSize}`)
+          console.log(`[Export] Clip ${i} from base64: base64_chars=${b64.length}, decoded_bytes=${buf.length}, disk_size=${diskSize}, magic=${magic.magic}${magic.ftyp ? ` (ftyp=${magic.ftyp})` : ''}, first32=${magic.hex}`)
           return
         }
         console.warn(`[Export] Clip ${i} base64 decoded to 0 bytes — trying URL fallback`)
@@ -308,16 +387,26 @@ export async function POST(req) {
       if (url && typeof url === 'string') {
         try {
           const resp = await fetch(url)
+          const ct = resp.headers?.get?.('content-type') || '(no content-type)'
           if (resp.ok) {
             const buf = Buffer.from(await resp.arrayBuffer())
             await writeFile(clipPath, buf)
             const diskSize = fs.statSync(clipPath).size
+            const magic = inspectFileMagic(clipPath)
+            console.log(`[Export] Clip ${i} URL download: content-type=${ct}, bytes=${buf.length}, magic=${magic.magic}${magic.ftyp ? ` (ftyp=${magic.ftyp})` : ''}, first32=${magic.hex}`)
+            // Content verification — a valid video must be mp4/webm and ≥ 50KB
+            const ctOk = /^video\//i.test(ct) || /^application\/octet-stream/i.test(ct)
+            const magicOk = magic.magic === 'mp4' || magic.magic === 'webm'
+            if (!magicOk || diskSize < 50 * 1024) {
+              console.warn(`[Export] Clip ${i} failed download verification: size=${diskSize}, content-type=${ct}, magic=${magic.magic} — will fall back to NB frame`)
+              return
+            }
+            if (!ctOk) console.warn(`[Export] Clip ${i} content-type suspicious (${ct}) but magic bytes are ${magic.magic} — accepting`)
             clipPaths[i] = clipPath
             clipSources[i] = { type: 'url', key: createHash('sha256').update(url).digest('hex').slice(0, 32) }
-            console.log(`[Export] Clip ${i} from URL (fallback): ${(buf.length / 1024 / 1024).toFixed(2)}MB, disk_size=${diskSize}`)
             return
           }
-          console.warn(`[Export] Clip ${i} URL HTTP ${resp.status} — no valid source`)
+          console.warn(`[Export] Clip ${i} URL HTTP ${resp.status} content-type=${ct} — no valid source`)
         } catch (e) {
           console.warn(`[Export] Clip ${i} URL fetch failed (${e.message}) — no valid source`)
         }
@@ -328,9 +417,53 @@ export async function POST(req) {
     if (!clipPaths.some(Boolean)) throw new Error('No clips materialized successfully')
 
     // -----------------------------------------------------------
-    // 2. Black placeholder generator (shared between paths)
+    // 2. Fallback clip generators:
+    //    - makeStaticFrameVideo(i): produce a 5s static video from the NB frame
+    //      for scene i. Preferred fallback — user sees the product image,
+    //      not a black screen.
+    //    - makeBlackPlaceholder(i): last-resort pure-black clip used only when
+    //      even the NB frame cannot be materialized.
     // -----------------------------------------------------------
     const MIN_CLIP_BYTES = 50 * 1024
+
+    async function makeStaticFrameVideo(i, tag = 'nb') {
+      const frameRef = Array.isArray(nbFrameUrls) ? nbFrameUrls[i] : null
+      if (!frameRef) return null
+      const ext = frameRef.startsWith('data:image/jpeg') || frameRef.toLowerCase().includes('.jpg') ? 'jpg' : 'png'
+      const framePath = path.join(jobDir, `frame_${tag}_${i}.${ext}`)
+      const resolved = await materializeNbFrame(frameRef, framePath)
+      if (!resolved) {
+        console.warn(`[Export] makeStaticFrameVideo[${i}] — could not materialize NB frame`)
+        return null
+      }
+      const frameSize = fs.statSync(resolved).size
+      console.log(`[Export] makeStaticFrameVideo[${i}] frame file: ${frameSize} bytes`)
+      const outPath = path.join(jobDir, `static_${tag}_${i}.mp4`)
+      const args = [
+        '-y',
+        '-loop', '1',
+        '-framerate', String(TARGET_FPS),
+        '-i', resolved,
+        '-t', '5',
+        '-c:v', 'libx264',
+        '-preset', PRESET,
+        '-pix_fmt', 'yuv420p',
+        '-vf', `scale=${TARGET_W}:${TARGET_H}:force_original_aspect_ratio=increase,crop=${TARGET_W}:${TARGET_H},setsar=1`,
+        '-movflags', '+faststart',
+        '-an',
+        outPath,
+      ]
+      try {
+        await execFileAsync(ffmpegPath, args, { timeout: 25000, maxBuffer: 10 * 1024 * 1024 })
+        const sz = fs.statSync(outPath).size
+        console.log(`[Export] makeStaticFrameVideo[${i}] → ${outPath} (${sz} bytes)`)
+        return outPath
+      } catch (err) {
+        console.error(`[Export] makeStaticFrameVideo[${i}] FAILED:`, (err.stderr || err.message || '').slice(-500))
+        return null
+      }
+    }
+
     async function makeBlackPlaceholder(i, tag = 'ph') {
       const p = path.join(jobDir, `black_${tag}_${i}.mp4`)
       await execFileAsync(ffmpegPath, [
@@ -344,40 +477,83 @@ export async function POST(req) {
       return p
     }
 
-    // Validate raw clip sizes. Track how many ended up as black placeholders —
-    // if ALL 4 clips are invalid, abort with a clear error instead of silently
-    // producing a black video.
-    let placeholderCount = 0
+    // Prefer NB frame static video; fall back to pure black only if NB frame
+    // is also unavailable. Returns { path, kind: 'nb' | 'black' }.
+    async function makeFallbackClip(i, tag = 'fb') {
+      const nb = await makeStaticFrameVideo(i, tag)
+      if (nb) return { path: nb, kind: 'nb' }
+      console.warn(`[Export] Clip ${i} NB frame unavailable — using pure-black fallback (last resort)`)
+      return { path: await makeBlackPlaceholder(i, tag), kind: 'black' }
+    }
+
+    // -----------------------------------------------------------
+    // 3. Validate raw clips: size check → ffprobe (duration > 0, has video
+    //    stream, recognized codec). Any clip that fails is replaced with the
+    //    NB frame static video (preferred) or pure-black (last resort).
+    //    We also decide normalize-vs-skip here so we don't run libx264 on
+    //    a source ffprobe already marked as broken.
+    // -----------------------------------------------------------
+    let nbFallbackCount = 0
+    let blackFallbackCount = 0
+    const fallbackKinds = new Array(expectedCount).fill(null) // null | 'nb' | 'black'
+    const preProbes = new Array(expectedCount).fill(null)
+
     const validPaths = await Promise.all(clipPaths.map(async (p, i) => {
       let size = 0
       if (p) { try { size = fs.statSync(p).size } catch {} }
       console.log(`[Export] Raw clip ${i} on disk: ${size} bytes (${(size / 1024).toFixed(1)}KB)`)
+
+      // Stage 1: size check
       if (!p || size < MIN_CLIP_BYTES) {
-        placeholderCount++
-        console.warn(`[Export] Clip ${i} ${!p ? 'missing' : `only ${size}B (< ${MIN_CLIP_BYTES}B)`} — substituting black placeholder`)
-        return await makeBlackPlaceholder(i, 'slot')
+        console.warn(`[Export] Clip ${i} ${!p ? 'missing' : `only ${size}B (< ${MIN_CLIP_BYTES}B)`} — using NB-frame fallback`)
+        const fb = await makeFallbackClip(i, 'size')
+        fallbackKinds[i] = fb.kind
+        if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
+        return fb.path
+      }
+
+      // Stage 2: ffprobe — duration, codec, dims
+      const probe = await probeClip(p)
+      preProbes[i] = probe
+      if (!probe) {
+        console.warn(`[Export] Clip ${i} ffprobe FAILED — source is corrupt. Using NB-frame fallback.`)
+        const fb = await makeFallbackClip(i, 'probefail')
+        fallbackKinds[i] = fb.kind
+        if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
+        return fb.path
+      }
+      console.log(`[Export] Clip ${i} ffprobe: duration=${probe.duration?.toFixed?.(2) ?? '?'}s, codec=${probe.codec}, pix_fmt=${probe.pix_fmt}, dimensions=${probe.width}x${probe.height}, fps=${probe.fps.toFixed(2)}, container=${probe.container}`)
+
+      const codecOk = /^(h264|hevc|vp8|vp9|av1|mpeg4)$/i.test(probe.codec || '')
+      const dimsOk  = probe.width > 0 && probe.height > 0
+      const durOk   = !probe.duration || probe.duration > 0.1  // if duration is unknown we'll still try
+      if (!codecOk || !dimsOk || !durOk) {
+        console.warn(`[Export] Clip ${i} ffprobe shows broken stream (codec=${probe.codec}, ${probe.width}x${probe.height}, dur=${probe.duration}) — using NB-frame fallback`)
+        const fb = await makeFallbackClip(i, 'probebad')
+        fallbackKinds[i] = fb.kind
+        if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
+        return fb.path
       }
       return p
     }))
 
-    // HARD ABORT if every clip fell back to black. This was the symptom of the
-    // "black screen export" bug — silent fallbacks produced all-black video.
-    if (placeholderCount === expectedCount) {
-      throw new Error(`הייצוא נכשל: כל הקליפים פגומים או לא זמינים (${placeholderCount}/${expectedCount}). צור סרטון חדש.`)
+    const totalFallbacks = nbFallbackCount + blackFallbackCount
+    if (blackFallbackCount === expectedCount) {
+      // Only abort if NOTHING rendered — not even the NB frames worked.
+      throw new Error(`הייצוא נכשל: כל הקליפים והפריימים חסרים (${blackFallbackCount}/${expectedCount}). צור סרטון חדש.`)
     }
-    if (placeholderCount > 0) {
-      console.warn(`[Export] ⚠️ ${placeholderCount}/${expectedCount} clips are black placeholders — export will proceed but some scenes will be blank`)
+    if (totalFallbacks > 0) {
+      console.warn(`[Export] ⚠️ Fallbacks: ${nbFallbackCount} NB-frame static + ${blackFallbackCount} pure-black (of ${expectedCount} clips)`)
     }
 
     const totalDuration = validPaths.length * 5
 
     // -----------------------------------------------------------
-    // 3. Probe clips in parallel. If they already match target params,
-    //    we can skip per-clip normalize and fold scale/fps into the
-    //    single filter_complex concat pass below.
+    // 4. Final probe on the validPaths (may be original clips OR fallback
+    //    videos). If everything matches target params we can skip normalize.
     // -----------------------------------------------------------
     const probes = await Promise.all(validPaths.map(probeClip))
-    probes.forEach((p, i) => console.log(`[Export] probe[${i}]:`, p ? `${p.codec} ${p.width}x${p.height}@${p.fps.toFixed(2)} ${p.pix_fmt}` : '(unavailable)'))
+    probes.forEach((p, i) => console.log(`[Export] probe[${i}] (after fallback):`, p ? `${p.codec} ${p.width}x${p.height}@${p.fps.toFixed(2)} ${p.pix_fmt}` : '(unavailable)'))
     const canSkipNormalize = clipsAllMatch(probes, TARGET_W, TARGET_H, TARGET_FPS)
     console.log('[Export] canSkipNormalize:', canSkipNormalize)
 
@@ -409,6 +585,11 @@ export async function POST(req) {
         }
 
         const normPath = path.join(jobDir, `norm_${i}.mp4`)
+        // Simpler, more tolerant normalize command. `-err_detect ignore_err` +
+        // `-fflags +discardcorrupt+genpts` lets ffmpeg skip corrupt frames
+        // instead of aborting with "code null" mid-stream. No -tune/-fps_mode/
+        // -video_track_timescale — those provoke failures on odd containers
+        // from Kling while providing marginal benefit.
         const vfChain = `scale=${TARGET_W}:${TARGET_H}:force_original_aspect_ratio=increase,crop=${TARGET_W}:${TARGET_H},setsar=1`
         const normArgs = [
           '-y',
@@ -418,13 +599,10 @@ export async function POST(req) {
           '-i', inPath,
           '-vf', vfChain,
           '-r', String(TARGET_FPS),
-          '-fps_mode', 'cfr',
           '-pix_fmt', 'yuv420p',
           '-c:v', 'libx264',
           '-preset', PRESET,
-          '-tune', 'zerolatency',
           '-crf', CRF,
-          '-video_track_timescale', String(TARGET_FPS * 1000),
           '-movflags', '+faststart',
           '-an',
           normPath,
@@ -433,16 +611,42 @@ export async function POST(req) {
         console.log(`[Export] norm[${i}] args:`, JSON.stringify(normArgs))
         try {
           const r = await execFileAsync(ffmpegPath, normArgs, { timeout: 60000, maxBuffer: 20 * 1024 * 1024 })
-          const stderrTail = (r.stderr || '').split('\n').slice(-6).join('\n')
+          const stderrTail = (r.stderr || '').split('\n').slice(-8).join('\n')
           console.log(`[Export] norm[${i}] stderr tail:\n${stderrTail}`)
         } catch (err) {
-          console.error(`[Export] norm[${i}] FAILED (code ${err.code}):`, (err.stderr || '').slice(-800))
-          console.warn(`[Export] norm[${i}] → retrying with black placeholder`)
-          return await makeBlackPlaceholder(i, 'normfail')
+          // `err.stderr` holds the full ffmpeg stderr — the root cause is
+          // usually in the last ~500 chars (ffmpeg's `frame=... time=...`
+          // progress lines are at the *start* of the tail, the error is at
+          // the very end).
+          const stderrStr = err.stderr || ''
+          const tail = stderrStr.slice(-800)
+          console.error(`[Export] norm[${i}] FAILED (code ${err.code}). stderr tail:\n${tail}`)
+          // Extract the most likely error line (last non-progress line).
+          const errLine = stderrStr
+            .split('\n')
+            .filter(l => l.trim() && !/^frame=|^size=|^bitrate=/.test(l))
+            .slice(-1)[0] || '(no error line)'
+          console.error(`[Export] norm[${i}] best-guess error line: ${errLine}`)
+          console.warn(`[Export] norm[${i}] → falling back to NB-frame static video`)
+          const fb = await makeFallbackClip(i, 'normfail')
+          if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
+          fallbackKinds[i] = fb.kind
+          return fb.path
         }
 
         const sz = fs.statSync(normPath).size
         console.log(`[Export] norm[${i}] output size: ${sz} bytes (${(sz / 1024).toFixed(1)}KB)`)
+
+        // Extra safety — if the encode "succeeded" but ffprobe can't read it,
+        // don't feed it into concat. Use NB-frame fallback.
+        const probe = await probeClip(normPath)
+        if (!probe || probe.width <= 0 || probe.height <= 0) {
+          console.warn(`[Export] norm[${i}] output looks broken (probe=${JSON.stringify(probe)}) — falling back to NB-frame static video`)
+          const fb = await makeFallbackClip(i, 'normbroken')
+          if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
+          fallbackKinds[i] = fb.kind
+          return fb.path
+        }
 
         if (cacheFile) {
           try { await copyFile(normPath, cacheFile) } catch (e) { console.warn('[Export] cache write failed:', e.message) }
@@ -638,7 +842,7 @@ export async function POST(req) {
     // -----------------------------------------------------------
     const outputBuf = await readFile(outputPath)
     const totalMs = Date.now() - startedAt
-    console.log(`[Export] DONE — ${(outputBuf.length / 1024 / 1024).toFixed(1)}MB in ${totalMs}ms (normalize-skipped: ${canSkipNormalize}, fastExport: ${!!fastExport}, placeholders: ${placeholderCount})`)
+    console.log(`[Export] DONE — ${(outputBuf.length / 1024 / 1024).toFixed(1)}MB in ${totalMs}ms (normalize-skipped: ${canSkipNormalize}, fastExport: ${!!fastExport}, nbFallbacks: ${nbFallbackCount}, blackFallbacks: ${blackFallbackCount}, fallbackKinds: ${JSON.stringify(fallbackKinds)})`)
 
     rm(jobDir, { recursive: true, force: true }).catch(() => {})
 

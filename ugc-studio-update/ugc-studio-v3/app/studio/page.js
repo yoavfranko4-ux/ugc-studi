@@ -981,6 +981,12 @@ export default function Home() {
         }
       }
 
+      // NB frame URLs / data URIs per scene — server uses these as the visual
+      // fallback when a Kling clip is corrupt, so users see the product image
+      // instead of a black screen.
+      const nbFrameUrls = orderedScenes.map(si => result.frames?.[si] || null)
+      console.log('[Studio Export] nbFrameUrls:', nbFrameUrls.map((u, i) => ({ i, present: !!u, kind: !u ? 'null' : u.startsWith?.('data:') ? 'data-uri' : 'http' })))
+
       const bgMusicTrack = MUSIC_TRACKS.find(t => t.id === bgMusic)
       const resp = await fetch('/api/export', {
         method: 'POST',
@@ -988,6 +994,7 @@ export default function Home() {
         body: JSON.stringify({
           videoUrls,
           videoClipsB64,
+          nbFrameUrls,
           audioBase64: voiceAudioB64,
           audioFormat,
           subtitles,
