@@ -600,6 +600,7 @@ export async function POST(req) {
           '-i', inPath,
           '-vf', vfChain,
           '-r', String(TARGET_FPS),
+          '-t', '5',
           '-pix_fmt', 'yuv420p',
           '-c:v', 'libx264',
           '-preset', PRESET,
