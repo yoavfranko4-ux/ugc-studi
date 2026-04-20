@@ -78,6 +78,28 @@ try {
 
 const execFileAsync = promisify(execFile)
 
+// === Cleanup orphan temp folders from previous crashed jobs (on module load) ===
+try {
+  const now = Date.now()
+  const tmpDir = '/tmp'
+  if (fs.existsSync(tmpDir)) {
+    for (const f of fs.readdirSync(tmpDir)) {
+      if (!f.startsWith('export-')) continue
+      const p = path.join(tmpDir, f)
+      try {
+        const st = fs.statSync(p)
+        if (now - st.mtimeMs > 3600 * 1000) {
+          fs.rmSync(p, { recursive: true, force: true })
+          console.log('[Export] Cleaned orphan temp folder:', p)
+        }
+      } catch {}
+    }
+  }
+} catch (e) { console.warn('[Export] Orphan cleanup failed:', e.message) }
+
+// === Module-level export lock — prevent concurrent exports from OOMing Railway ===
+let exportInProgress = false
+
 // Run an ffmpeg command and stream -progress pipe:1 output for server-side monitoring.
 function runFfmpegWithProgress(args, label, { timeout = 120000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -186,7 +208,7 @@ async function probeClip(filePath) {
       '-show_entries', 'stream=codec_name,width,height,r_frame_rate,pix_fmt,duration:format=duration,format_name',
       '-of', 'json',
       filePath,
-    ], { timeout: 8000, maxBuffer: 1024 * 1024 })
+    ], { timeout: 30000, maxBuffer: 1024 * 1024 })
     const parsed = JSON.parse(stdout)
     const info = parsed.streams?.[0]
     const fmt = parsed.format || {}
@@ -203,8 +225,45 @@ async function probeClip(filePath) {
       container: fmt.format_name || null,
     }
   } catch (e) {
+    const stderr = e.stderr ? String(e.stderr).slice(-500) : ''
     console.warn('[Export] probeClip failed for', filePath, ':', e.message)
+    if (stderr) console.warn('[Export] probeClip stderr:', stderr)
+    // Attach stderr to the error path for caller introspection
     return null
+  }
+}
+
+// Probe that returns the stderr on failure so callers can log the real reason.
+async function probeClipVerbose(filePath) {
+  if (!ffprobePath || !filePath) return { probe: null, stderr: '(ffprobe unavailable)' }
+  try {
+    const { stdout } = await execFileAsync(ffprobePath, [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=codec_name,width,height,r_frame_rate,pix_fmt,duration:format=duration,format_name',
+      '-of', 'json',
+      filePath,
+    ], { timeout: 30000, maxBuffer: 1024 * 1024 })
+    const parsed = JSON.parse(stdout)
+    const info = parsed.streams?.[0]
+    const fmt = parsed.format || {}
+    if (!info) return { probe: null, stderr: '(no video stream)' }
+    const [num, den] = String(info.r_frame_rate || '0/1').split('/').map(Number)
+    const duration = Number(info.duration || fmt.duration || 0)
+    return {
+      probe: {
+        codec: info.codec_name,
+        width: info.width,
+        height: info.height,
+        fps: den > 0 ? num / den : 0,
+        pix_fmt: info.pix_fmt,
+        duration: Number.isFinite(duration) ? duration : 0,
+        container: fmt.format_name || null,
+      },
+      stderr: '',
+    }
+  } catch (e) {
+    return { probe: null, stderr: (e.stderr ? String(e.stderr) : e.message || 'unknown') }
   }
 }
 
@@ -294,6 +353,16 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(req) {
   console.log('[Memory:export]', JSON.stringify(process.memoryUsage()))
+
+  // Reject concurrent exports — two at once overwhelms Railway memory.
+  if (exportInProgress) {
+    return Response.json(
+      { error: 'ייצוא אחר רץ כעת, נסה בעוד דקה' },
+      { status: 429 },
+    )
+  }
+  exportInProgress = true
+
   const jobDir = path.join('/tmp', `export-${randomUUID()}`)
   const startedAt = Date.now()
 
@@ -380,6 +449,8 @@ export async function POST(req) {
           clipPaths[i] = clipPath
           clipSources[i] = { type: 'bytes', key: hashBytesForCache(buf) }
           console.log(`[Export] Clip ${i} from base64: base64_chars=${b64.length}, decoded_bytes=${buf.length}, disk_size=${diskSize}, magic=${magic.magic}${magic.ftyp ? ` (ftyp=${magic.ftyp})` : ''}, first32=${magic.hex}`)
+          // Free the base64 string — it's now on disk, no need to hold 10-13MB per clip in RAM.
+          if (Array.isArray(videoClipsB64)) videoClipsB64[i] = null
           return
         }
         console.warn(`[Export] Clip ${i} base64 decoded to 0 bytes — trying URL fallback`)
@@ -418,6 +489,9 @@ export async function POST(req) {
 
     if (!clipPaths.some(Boolean)) throw new Error('No clips materialized successfully')
 
+    // All large base64 strings have been written to disk and nulled — ask V8 to GC now.
+    try { global.gc?.() } catch {}
+
     // -----------------------------------------------------------
     // 2. Fallback clip generators:
     //    - makeStaticFrameVideo(i): produce a 5s static video from the NB frame
@@ -443,6 +517,7 @@ export async function POST(req) {
       const outPath = path.join(jobDir, `static_${tag}_${i}.mp4`)
       const args = [
         '-y',
+        '-threads', '1',
         '-loop', '1',
         '-framerate', String(TARGET_FPS),
         '-i', resolved,
@@ -451,6 +526,7 @@ export async function POST(req) {
         '-preset', PRESET,
         '-pix_fmt', 'yuv420p',
         '-vf', `scale=${TARGET_W}:${TARGET_H}:force_original_aspect_ratio=increase,crop=${TARGET_W}:${TARGET_H},setsar=1`,
+        '-max_muxing_queue_size', '1024',
         '-movflags', '+faststart',
         '-an',
         outPath,
@@ -459,9 +535,12 @@ export async function POST(req) {
         await execFileAsync(ffmpegPath, args, { timeout: 25000, maxBuffer: 10 * 1024 * 1024 })
         const sz = fs.statSync(outPath).size
         console.log(`[Export] makeStaticFrameVideo[${i}] → ${outPath} (${sz} bytes)`)
+        // Delete the intermediate still-frame file — we only need the mp4 now.
+        try { fs.unlinkSync(resolved) } catch {}
         return outPath
       } catch (err) {
         console.error(`[Export] makeStaticFrameVideo[${i}] FAILED:`, (err.stderr || err.message || '').slice(-500))
+        try { fs.unlinkSync(resolved) } catch {}
         return null
       }
     }
@@ -470,10 +549,13 @@ export async function POST(req) {
       const p = path.join(jobDir, `black_${tag}_${i}.mp4`)
       await execFileAsync(ffmpegPath, [
         '-y',
+        '-threads', '1',
         '-f', 'lavfi', '-i', `color=c=black:s=${TARGET_W}x${TARGET_H}:r=${TARGET_FPS}`,
         '-t', '5',
         '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF,
-        '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an',
+        '-pix_fmt', 'yuv420p',
+        '-max_muxing_queue_size', '1024',
+        '-movflags', '+faststart', '-an',
         p,
       ], { timeout: 20000, maxBuffer: 10 * 1024 * 1024 })
       return p
@@ -500,44 +582,77 @@ export async function POST(req) {
     const fallbackKinds = new Array(expectedCount).fill(null) // null | 'nb' | 'black'
     const preProbes = new Array(expectedCount).fill(null)
 
-    const validPaths = await Promise.all(clipPaths.map(async (p, i) => {
+    // Sequential validation (was Promise.all) — reduces peak memory from
+    // spawning N ffmpeg fallback processes at once.
+    const validPaths = new Array(clipPaths.length).fill(null)
+    for (let i = 0; i < clipPaths.length; i++) {
+      const p = clipPaths[i]
       let size = 0
       if (p) { try { size = fs.statSync(p).size } catch {} }
       console.log(`[Export] Raw clip ${i} on disk: ${size} bytes (${(size / 1024).toFixed(1)}KB)`)
 
-      // Stage 1: size check
-      if (!p || size < MIN_CLIP_BYTES) {
-        console.warn(`[Export] Clip ${i} ${!p ? 'missing' : `only ${size}B (< ${MIN_CLIP_BYTES}B)`} — using NB-frame fallback`)
+      // Stage 1: hard size/missing check — only fall back when BOTH the file
+      // is (effectively) missing AND well below the plausible-video threshold.
+      const HARD_MIN_BYTES = 50 * 1024 // < 50KB = almost certainly not a video
+      if (!p || size < HARD_MIN_BYTES) {
+        console.warn(`[Export] Clip ${i} ${!p ? 'missing' : `only ${size}B (< ${HARD_MIN_BYTES}B)`} — using NB-frame fallback`)
         const fb = await makeFallbackClip(i, 'size')
         fallbackKinds[i] = fb.kind
         if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
-        return fb.path
+        validPaths[i] = fb.path
+        continue
       }
 
-      // Stage 2: ffprobe — duration, codec, dims
-      const probe = await probeClip(p)
+      // Stage 2: magic bytes — if they're valid (ftyp for mp4, EBML for webm),
+      // the file is structurally OK even if ffprobe stumbles on something.
+      const magic = inspectFileMagic(p)
+      const magicValid = magic.magic === 'mp4' || magic.magic === 'webm'
+      console.log(`[Export] Clip ${i} magic=${magic.magic}${magic.ftyp ? ` (ftyp ${magic.ftyp})` : ''}`)
+
+      // Stage 3: ffprobe (now with real stderr + 30s timeout inside probeClipVerbose)
+      const { probe, stderr: probeStderr } = await probeClipVerbose(p)
       preProbes[i] = probe
+
       if (!probe) {
-        console.warn(`[Export] Clip ${i} ffprobe FAILED — source is corrupt. Using NB-frame fallback.`)
+        // Show the actual ffprobe error so we can diagnose these cases.
+        console.error(`[Export] Clip ${i} ffprobe stderr:`, (probeStderr || '').slice(-500))
+        // Don't fail on ffprobe alone if magic bytes are valid and size is reasonable —
+        // ffprobe can fail on timeouts, odd stream metadata, etc, but the file is fine.
+        if (magicValid && size >= 100 * 1024) {
+          console.warn(`[Export] Clip ${i} ffprobe FAILED but magic=${magic.magic} and size=${size}B — letting normalize try directly.`)
+          validPaths[i] = p
+          continue
+        }
+        console.warn(`[Export] Clip ${i} ffprobe FAILED and magic/size insufficient (magic=${magic.magic}, size=${size}) — using NB-frame fallback.`)
         const fb = await makeFallbackClip(i, 'probefail')
         fallbackKinds[i] = fb.kind
         if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
-        return fb.path
+        validPaths[i] = fb.path
+        continue
       }
+
       console.log(`[Export] Clip ${i} ffprobe: duration=${probe.duration?.toFixed?.(2) ?? '?'}s, codec=${probe.codec}, pix_fmt=${probe.pix_fmt}, dimensions=${probe.width}x${probe.height}, fps=${probe.fps.toFixed(2)}, container=${probe.container}`)
 
       const codecOk = /^(h264|hevc|vp8|vp9|av1|mpeg4)$/i.test(probe.codec || '')
       const dimsOk  = probe.width > 0 && probe.height > 0
       const durOk   = !probe.duration || probe.duration > 0.1  // if duration is unknown we'll still try
       if (!codecOk || !dimsOk || !durOk) {
+        // Again, if magic bytes say the container is valid, give normalize a shot
+        // before falling back — ffprobe's "broken stream" can be a false positive.
+        if (magicValid && size >= 100 * 1024) {
+          console.warn(`[Export] Clip ${i} ffprobe looked broken (codec=${probe.codec}, ${probe.width}x${probe.height}, dur=${probe.duration}) but magic=${magic.magic} — letting normalize try directly.`)
+          validPaths[i] = p
+          continue
+        }
         console.warn(`[Export] Clip ${i} ffprobe shows broken stream (codec=${probe.codec}, ${probe.width}x${probe.height}, dur=${probe.duration}) — using NB-frame fallback`)
         const fb = await makeFallbackClip(i, 'probebad')
         fallbackKinds[i] = fb.kind
         if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
-        return fb.path
+        validPaths[i] = fb.path
+        continue
       }
-      return p
-    }))
+      validPaths[i] = p
+    }
 
     const totalFallbacks = nbFallbackCount + blackFallbackCount
     if (blackFallbackCount === expectedCount) {
@@ -568,7 +683,11 @@ export async function POST(req) {
     let normalizedPaths = validPaths
     if (!canSkipNormalize) {
       const paramTag = `${TARGET_W}x${TARGET_H}_${TARGET_FPS}`
-      normalizedPaths = await Promise.all(validPaths.map(async (inPath, i) => {
+      // Sequential (was Promise.all) — running N ffmpeg libx264 encodes in
+      // parallel is what OOMs Railway. One at a time uses ~1/N the peak RAM.
+      const outPaths = new Array(validPaths.length).fill(null)
+      for (let i = 0; i < validPaths.length; i++) {
+        const inPath = validPaths[i]
         const src = clipSources[i]
         const cacheFile = (!DISABLE_NORMALIZE_CACHE && src?.key)
           ? path.join(NORMALIZE_CACHE_DIR, `${src.key}_${paramTag}.mp4`)
@@ -576,25 +695,21 @@ export async function POST(req) {
 
         if (cacheFile && fs.existsSync(cacheFile)) {
           const stats = fs.statSync(cacheFile)
-          // Before trusting the cache, ffprobe the cache entry — reject if broken.
           const cacheProbe = await probeClip(cacheFile)
           if (stats.size > MIN_CLIP_BYTES && cacheProbe && cacheProbe.width === TARGET_W && cacheProbe.height === TARGET_H) {
             console.log(`[Export] norm[${i}] cache HIT — reusing ${cacheFile} (${stats.size} bytes, probe OK)`)
             try { fs.utimesSync(cacheFile, new Date(), new Date()) } catch {}
-            return cacheFile
+            outPaths[i] = cacheFile
+            continue
           }
           console.warn(`[Export] norm[${i}] cache entry invalid — re-encoding (${stats.size}B, probe=${JSON.stringify(cacheProbe)})`)
         }
 
         const normPath = path.join(jobDir, `norm_${i}.mp4`)
-        // Simpler, more tolerant normalize command. `-err_detect ignore_err` +
-        // `-fflags +discardcorrupt+genpts` lets ffmpeg skip corrupt frames
-        // instead of aborting with "code null" mid-stream. No -tune/-fps_mode/
-        // -video_track_timescale — those provoke failures on odd containers
-        // from Kling while providing marginal benefit.
         const vfChain = `scale=${TARGET_W}:${TARGET_H}:force_original_aspect_ratio=increase,crop=${TARGET_W}:${TARGET_H},setsar=1`
         const normArgs = [
           '-y',
+          '-threads', '1',
           '-err_detect', 'ignore_err',
           '-fflags', '+discardcorrupt+genpts',
           '-avoid_negative_ts', 'make_zero',
@@ -606,6 +721,7 @@ export async function POST(req) {
           '-c:v', 'libx264',
           '-preset', PRESET,
           '-crf', CRF,
+          '-max_muxing_queue_size', '1024',
           '-movflags', '+faststart',
           '-an',
           normPath,
@@ -617,14 +733,9 @@ export async function POST(req) {
           const stderrTail = (r.stderr || '').split('\n').slice(-8).join('\n')
           console.log(`[Export] norm[${i}] stderr tail:\n${stderrTail}`)
         } catch (err) {
-          // `err.stderr` holds the full ffmpeg stderr — the root cause is
-          // usually in the last ~500 chars (ffmpeg's `frame=... time=...`
-          // progress lines are at the *start* of the tail, the error is at
-          // the very end).
           const stderrStr = err.stderr || ''
           const tail = stderrStr.slice(-800)
           console.error(`[Export] norm[${i}] FAILED (code ${err.code}). stderr tail:\n${tail}`)
-          // Extract the most likely error line (last non-progress line).
           const errLine = stderrStr
             .split('\n')
             .filter(l => l.trim() && !/^frame=|^size=|^bitrate=/.test(l))
@@ -634,28 +745,37 @@ export async function POST(req) {
           const fb = await makeFallbackClip(i, 'normfail')
           if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
           fallbackKinds[i] = fb.kind
-          return fb.path
+          outPaths[i] = fb.path
+          // Delete the source clip now that we've given up on it.
+          if (inPath && inPath !== fb.path) { try { fs.unlinkSync(inPath) } catch {} }
+          continue
         }
 
         const sz = fs.statSync(normPath).size
         console.log(`[Export] norm[${i}] output size: ${sz} bytes (${(sz / 1024).toFixed(1)}KB)`)
 
-        // Extra safety — if the encode "succeeded" but ffprobe can't read it,
-        // don't feed it into concat. Use NB-frame fallback.
         const probe = await probeClip(normPath)
         if (!probe || probe.width <= 0 || probe.height <= 0) {
           console.warn(`[Export] norm[${i}] output looks broken (probe=${JSON.stringify(probe)}) — falling back to NB-frame static video`)
+          try { fs.unlinkSync(normPath) } catch {}
           const fb = await makeFallbackClip(i, 'normbroken')
           if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
           fallbackKinds[i] = fb.kind
-          return fb.path
+          outPaths[i] = fb.path
+          if (inPath && inPath !== fb.path) { try { fs.unlinkSync(inPath) } catch {} }
+          continue
         }
 
         if (cacheFile) {
           try { await copyFile(normPath, cacheFile) } catch (e) { console.warn('[Export] cache write failed:', e.message) }
         }
-        return normPath
-      }))
+        // Delete the raw source clip — normalized output is what we concat.
+        if (inPath && inPath !== normPath) { try { fs.unlinkSync(inPath) } catch {} }
+        outPaths[i] = normPath
+      }
+      normalizedPaths = outPaths
+      // Normalize step done — give V8 a hint before the final pass.
+      try { global.gc?.() } catch {}
     }
 
     // === Post-normalize validation — probe every clip that will go into the concat
@@ -746,7 +866,7 @@ export async function POST(req) {
     //    the video stream is copied without re-encode (fastest path).
     // -----------------------------------------------------------
     const outputPath = path.join(jobDir, 'output.mp4')
-    const finalArgs = ['-y']
+    const finalArgs = ['-y', '-threads', '1']
 
     const listPath = path.join(jobDir, 'list.txt')
     const listContent = normalizedPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n') + '\n'
@@ -811,6 +931,7 @@ export async function POST(req) {
     }
 
     finalArgs.push(
+      '-max_muxing_queue_size', '1024',
       '-movflags', '+faststart',
       '-t', String(totalDuration),
       outputPath,
@@ -841,20 +962,41 @@ export async function POST(req) {
     }
 
     // -----------------------------------------------------------
-    // 10. Return the MP4
+    // 10. Return the MP4 as a stream (don't hold the whole file in RAM)
     // -----------------------------------------------------------
-    const outputBuf = await readFile(outputPath)
+    const outputSize = fs.statSync(outputPath).size
     const totalMs = Date.now() - startedAt
-    console.log(`[Export] DONE — ${(outputBuf.length / 1024 / 1024).toFixed(1)}MB in ${totalMs}ms (normalize-skipped: ${canSkipNormalize}, fastExport: ${!!fastExport}, nbFallbacks: ${nbFallbackCount}, blackFallbacks: ${blackFallbackCount}, fallbackKinds: ${JSON.stringify(fallbackKinds)})`)
+    console.log(`[Export] DONE — ${(outputSize / 1024 / 1024).toFixed(1)}MB in ${totalMs}ms (normalize-skipped: ${canSkipNormalize}, fastExport: ${!!fastExport}, nbFallbacks: ${nbFallbackCount}, blackFallbacks: ${blackFallbackCount}, fallbackKinds: ${JSON.stringify(fallbackKinds)})`)
 
-    rm(jobDir, { recursive: true, force: true }).catch(() => {})
+    // Stream the file — clean up jobDir after the stream finishes.
+    const nodeStream = fs.createReadStream(outputPath)
+    const webStream = new ReadableStream({
+      start(controller) {
+        nodeStream.on('data', (chunk) => controller.enqueue(chunk))
+        nodeStream.on('end', () => {
+          controller.close()
+          rm(jobDir, { recursive: true, force: true }).catch(() => {})
+        })
+        nodeStream.on('error', (err) => {
+          controller.error(err)
+          rm(jobDir, { recursive: true, force: true }).catch(() => {})
+        })
+      },
+      cancel() {
+        try { nodeStream.destroy() } catch {}
+        rm(jobDir, { recursive: true, force: true }).catch(() => {})
+      },
+    })
 
-    return new Response(outputBuf, {
+    // Release the lock — the stream now owns the temp dir cleanup.
+    exportInProgress = false
+
+    return new Response(webStream, {
       status: 200,
       headers: {
         'Content-Type': 'video/mp4',
         'Content-Disposition': 'attachment; filename="ugc-video.mp4"',
-        'Content-Length': String(outputBuf.length),
+        'Content-Length': String(outputSize),
         'X-Export-Ms': String(totalMs),
         'X-Normalize-Skipped': String(canSkipNormalize),
       },
@@ -862,6 +1004,22 @@ export async function POST(req) {
   } catch (e) {
     console.error('[Export] Error:', e.message)
     rm(jobDir, { recursive: true, force: true }).catch(() => {})
-    return Response.json({ error: e.message }, { status: 500 })
+    // Detect SIGKILL / OOM kills so the UI can surface a clearer message.
+    const msg = String(e.message || '')
+    const stderr = String(e.stderr || '')
+    const looksLikeKill =
+      /SIGKILL|signal 9|killed|code null/i.test(msg) ||
+      /SIGKILL|signal 9|killed/i.test(stderr) ||
+      e.code === null ||
+      e.signal === 'SIGKILL'
+    const userMessage = looksLikeKill
+      ? 'השרת נפל, נסה שוב בעוד דקה'
+      : e.message
+    exportInProgress = false
+    return Response.json({ error: userMessage }, { status: looksLikeKill ? 503 : 500 })
+  } finally {
+    // Safety net — if we somehow returned without clearing the lock, clear it now.
+    // (The happy path clears it just before returning so the stream doesn't hold it.)
+    if (exportInProgress) exportInProgress = false
   }
 }
