@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { fal } from '@fal-ai/client'
 import { supabase } from '../../../lib/supabase'
+import { remainingVideos } from '../../../lib/subscription-limits.js'
 import { prepareHebrewForTTS, remapWordTimestamps } from '../../../lib/hebrew-tts.js'
 import { execFile, execSync } from 'child_process'
 import { promisify } from 'util'
@@ -521,6 +522,31 @@ export async function POST(req) {
 
     if (!supabase) {
       return Response.json({ error: 'Supabase not configured' }, { status: 500 });
+    }
+
+    // Soft subscription-quota gate. If the client passes userId and the users
+    // table has subscription_tier populated, enforce remainingVideos. When
+    // data/schema isn't ready we silently pass through — payments aren't wired
+    // yet (see Yotzr migration plan).
+    if (body?.userId) {
+      try {
+        const { data: u } = await supabase
+          .from('users')
+          .select('subscription_tier, videos_used_this_period')
+          .eq('id', body.userId)
+          .maybeSingle();
+        if (u?.subscription_tier) {
+          const left = remainingVideos(u);
+          if (left <= 0) {
+            return Response.json(
+              { error: 'נגמרו לך הסרטונים החודש. שדרג לפרו לעוד 8 סרטונים.' },
+              { status: 403 }
+            );
+          }
+        }
+      } catch (err) {
+        console.warn('[Agent] quota check skipped:', err?.message || err);
+      }
     }
 
     // Create a pending job

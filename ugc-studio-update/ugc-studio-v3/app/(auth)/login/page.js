@@ -47,7 +47,7 @@ export default function LoginPage() {
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <div style={{ width: 48, height: 48, borderRadius: 14, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 900, color: '#fff', marginBottom: 16, boxShadow: GLOW }}>U</div>
           <h1 style={{ fontSize: 28, fontWeight: 900, color: '#f0f0ff', marginBottom: 6 }}>
-            UGC Studio
+            Yotzr
           </h1>
           <p style={{ color: '#52525b', fontSize: 15 }}>
             {isSignUp ? 'צור חשבון חדש' : 'התחבר לחשבון שלך'}

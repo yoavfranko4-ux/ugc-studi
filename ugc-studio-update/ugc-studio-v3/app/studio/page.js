@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
+import { canUseAvatar, canUseVoice } from '../../lib/subscription-limits'
 
 // === Subtitle Styles ===
 const SUBTITLE_STYLES = [
@@ -293,6 +294,9 @@ const AGENT_STEPS = [
 ]
 
 export default function Home() {
+  const [userTier, setUserTier] = useState('pro')   // default: no lock until we learn the tier
+  const [userId, setUserId] = useState(null)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [step, setStep] = useState('form')
   const [mode, setMode] = useState('ugc') // 'ugc' | 'business'
   const [selectedAvatar, setSelectedAvatar] = useState(null)
@@ -397,6 +401,20 @@ export default function Home() {
       if (!supabase) return
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { window.location.replace('/login'); return }
+      setUserId(user.id)
+
+      // Load subscription tier for avatar/voice gating. If the users row or
+      // subscription_tier column isn't there yet, leave userTier as-is.
+      try {
+        const { data: u } = await supabase
+          .from('users')
+          .select('subscription_tier')
+          .eq('id', user.id)
+          .maybeSingle()
+        if (u?.subscription_tier) setUserTier(u.subscription_tier)
+      } catch (err) {
+        console.warn('[Studio] tier lookup skipped:', err?.message || err)
+      }
 
       // Check for editId query param to restore a saved edit
       const params = new URLSearchParams(window.location.search)
@@ -869,7 +887,7 @@ export default function Home() {
       }
       const agentRes = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, falKey, elevenKey, voiceId })
+        body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, falKey, elevenKey, voiceId, userId })
       })
       if (!agentRes.ok) throw new Error('Agent failed')
       const { jobId } = await agentRes.json()
@@ -1354,14 +1372,19 @@ export default function Home() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 12 }}>
           {AVATARS.map(av => {
             const sel = selectedAvatar?.name === av.name && !customAvatar
+            const allowed = canUseAvatar(userTier, av.name)
             return (
-              <div key={av.name} onClick={() => { setSelectedAvatar(av); setCustomAvatar(null) }}
+              <div key={av.name} onClick={() => {
+                  if (!allowed) { setUpgradeOpen(true); return }
+                  setSelectedAvatar(av); setCustomAvatar(null)
+                }}
                 style={{ position: 'relative', border: `2px solid ${sel ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 14, overflow: 'hidden', cursor: 'pointer', aspectRatio: '3/4', boxShadow: sel ? '0 0 24px rgba(168,85,247,0.2)' : 'none', transition: 'all 300ms ease' }}>
-                <img src={av.url} alt={av.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <img src={av.url} alt={av.name} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: allowed ? 'none' : 'grayscale(1) brightness(0.55)' }} />
                 <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', padding: '20px 6px 6px', fontSize: 11, color: 'rgba(255,255,255,0.8)', textAlign: 'center', fontWeight: 500 }}>{av.name}</div>
                 {sel && <div style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
                 </div>}
+                {!allowed && <div style={{ position: 'absolute', top: 6, left: 6, padding: '3px 8px', borderRadius: 6, background: 'rgba(255,0,128,0.9)', color: '#fff', fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>🔒 פרו בלבד</div>}
               </div>
             )
           })}
@@ -1455,10 +1478,14 @@ export default function Home() {
           ].map(v => {
             const selected = voiceId === v.id
             const isPlaying = voicePreviewing === v.id
+            const allowed = canUseVoice(userTier, v.id)
             return (
               <div
                 key={v.id}
-                onClick={() => { setVoiceId(v.id); setVoiceGender(v.gender) }}
+                onClick={() => {
+                  if (!allowed) { setUpgradeOpen(true); return }
+                  setVoiceId(v.id); setVoiceGender(v.gender)
+                }}
                 style={{
                   padding: 18,
                   borderRadius: 14,
@@ -1470,7 +1497,9 @@ export default function Home() {
                   gap: 14,
                   direction: 'rtl',
                   fontFamily: 'Heebo,sans-serif',
-                  transition: 'all 300ms ease'
+                  transition: 'all 300ms ease',
+                  opacity: allowed ? 1 : 0.55,
+                  position: 'relative',
                 }}
               >
                 <div style={{ fontSize: 32 }}>{v.emoji}</div>
@@ -1478,6 +1507,7 @@ export default function Home() {
                   <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f0ff' }}>{v.name}</div>
                   <div style={{ fontSize: 12, color: '#71717a', marginTop: 2 }}>{v.gender === 'female' ? 'קול נשי' : 'קול גברי'}</div>
                 </div>
+                {!allowed && <div style={{ position: 'absolute', top: 6, left: 6, padding: '3px 8px', borderRadius: 6, background: 'rgba(255,0,128,0.9)', color: '#fff', fontSize: 10, fontWeight: 700 }}>🔒 פרו בלבד</div>}
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -2001,6 +2031,37 @@ export default function Home() {
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+
+      {upgradeOpen && (
+        <div
+          onClick={() => setUpgradeOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 440, width: '100%', background: '#111010', border: '1px solid rgba(255,0,128,0.3)', borderRadius: 16, padding: 32, direction: 'rtl', fontFamily: 'Heebo,sans-serif', boxShadow: '0 30px 80px -20px rgba(255,0,128,0.4)' }}
+          >
+            <div style={{ fontSize: 24, fontWeight: 900, color: '#F5F5F4', marginBottom: 12, letterSpacing: '-0.02em' }}>שדרג לפרו</div>
+            <p style={{ color: 'rgba(245,245,244,0.64)', fontSize: 15, lineHeight: 1.55, marginBottom: 24 }}>
+              האווטאר הזה זמין רק במנוי פרו. שדרג ב-₪499/חודש לגישה לכל האווטארים והקולות.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setUpgradeOpen(false)}
+                style={{ padding: '12px 20px', borderRadius: 6, background: 'transparent', border: '1px solid rgba(245,245,244,0.18)', color: '#F5F5F4', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                אולי מאוחר יותר
+              </button>
+              <button
+                onClick={() => { console.log('TODO: implement checkout for pro upgrade'); setUpgradeOpen(false) }}
+                style={{ padding: '12px 22px', borderRadius: 6, background: '#FF0080', border: 'none', color: '#0A0908', fontSize: 14, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                שדרג עכשיו
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

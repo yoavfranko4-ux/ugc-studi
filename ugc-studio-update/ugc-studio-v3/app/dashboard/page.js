@@ -85,8 +85,10 @@ export default function DashboardPage() {
       {/* Sidebar */}
       <aside style={{ width: sidebarOpen ? 240 : 0, minHeight: '100vh', background: 'rgba(255,255,255,0.02)', borderLeft: BORDER, display: 'flex', flexDirection: 'column', transition: 'width 300ms ease', overflow: 'hidden', flexShrink: 0 }}>
         <div style={{ padding: '20px 16px', borderBottom: BORDER, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 10, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900, color: '#fff', flexShrink: 0 }}>U</div>
-          <span style={{ fontSize: 16, fontWeight: 800, color: '#f0f0ff', whiteSpace: 'nowrap' }}>UGC Studio</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <span style={{ fontFamily: 'Heebo, system-ui, sans-serif', fontSize: 20, fontWeight: 900, color: '#f0f0ff', letterSpacing: '-0.03em', whiteSpace: 'nowrap' }}>yotzr</span>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: '#FF0080', boxShadow: '0 0 12px rgba(255,0,128,0.5)', display: 'inline-block' }} />
+          </div>
         </div>
 
         <nav style={{ flex: 1, padding: '12px 8px' }}>
