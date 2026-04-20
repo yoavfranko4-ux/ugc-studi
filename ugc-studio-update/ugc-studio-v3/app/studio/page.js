@@ -357,6 +357,23 @@ export default function Home() {
   const blobUrlCache = useRef(new Map())  // remote-URL → blob: URL cache — survives re-renders
   const [preloadProgress, setPreloadProgress] = useState({ done: 0, total: 0 })
   const [slowLoadWarning, setSlowLoadWarning] = useState(false)
+  // Map of sceneIdx → { reason, attempts } for videos that failed to load.
+  // When a scene is here, the editor swaps the <video> for the NB still frame
+  // so the user can keep working on the other scenes.
+  const [brokenScenes, setBrokenScenes] = useState({})
+  const brokenScenesRef = useRef({})
+  const setSceneBroken = useCallback((i, reason) => {
+    const prev = brokenScenesRef.current[i] || { attempts: 0 }
+    const next = { reason, attempts: prev.attempts + 1, at: Date.now() }
+    brokenScenesRef.current[i] = next
+    setBrokenScenes({ ...brokenScenesRef.current })
+    // Fire-and-forget analytics log so we can track how often this happens.
+    console.warn(`[Studio][analytics] scene_broken idx=${i} reason=${reason} attempts=${next.attempts}`)
+  }, [])
+  const clearSceneBroken = useCallback((i) => {
+    delete brokenScenesRef.current[i]
+    setBrokenScenes({ ...brokenScenesRef.current })
+  }, [])
 
   // Load the embedded Hebrew subtitle font (same file as server-side ASS burn-in) so the canvas
   // preview matches the exported MP4 glyphs pixel-for-pixel.
@@ -486,32 +503,59 @@ export default function Home() {
     // canplaythrough (which waits for the whole file). This is what unblocks
     // the editor UI.
     // -----------------------------------------------------------------------
+    // Pretty-print a <video>'s TimeRanges for logs.
+    const describeRanges = (tr) => {
+      if (!tr || !tr.length) return '(empty)'
+      const parts = []
+      for (let k = 0; k < tr.length; k++) parts.push(`${tr.start(k).toFixed(2)}-${tr.end(k).toFixed(2)}`)
+      return parts.join(',')
+    }
+
     const waitCanPlay = async () => {
       await new Promise(r => setTimeout(r, 50))
       const readyPromises = videoRefs.current.map((el, i) => {
         if (!el) return Promise.resolve()
         try { el.preload = 'auto'; el.load() } catch {}
-        if (el.readyState >= 2) return Promise.resolve()
+        // Only mark canplaythrough (3+) as truly-ready. readyState=2 after
+        // 30s means the file is corrupt — flag the scene as broken so the
+        // render swaps in the NB still frame.
+        if (el.readyState >= 3) return Promise.resolve()
         return new Promise(resolve => {
           const t0 = Date.now()
           const done = (reason) => {
             el.removeEventListener('canplay', onCanPlay)
+            el.removeEventListener('canplaythrough', onCanPlayThrough)
             el.removeEventListener('loadeddata', onCanPlay)
             el.removeEventListener('error', onError)
-            console.log(`[Studio] Video ${i+1} <video> ${reason} after ${Date.now() - t0}ms (readyState=${el.readyState})`)
+            const rs = el.readyState
+            const errCode = el.error?.code ?? null
+            const errMsg  = el.error?.message ?? null
+            const buffered = describeRanges(el.buffered)
+            console.log(`[Studio] Video ${i+1} <video> ${reason} after ${Date.now() - t0}ms (readyState=${rs}, err=${errCode}/${errMsg}, buffered=${buffered})`)
+            // Corrupt stream signature: timed out OR errored OR stuck at
+            // readyState < 3 despite having some data. Mark the scene broken
+            // so the editor can fall back to the NB still frame.
+            if (reason === 'timeout' || reason === 'error' || rs < 3) {
+              setSceneBroken(i, `${reason}/readyState=${rs}/err=${errCode}`)
+            }
             resolve()
           }
-          const onCanPlay = () => done('canplay')
-          const onError   = () => done('error')
+          const onCanPlay       = () => { if (el.readyState >= 3) done('canplay') }
+          const onCanPlayThrough = () => done('canplaythrough')
+          const onError         = () => done('error')
           el.addEventListener('canplay', onCanPlay)
+          el.addEventListener('canplaythrough', onCanPlayThrough)
           el.addEventListener('loadeddata', onCanPlay)
           el.addEventListener('error', onError, { once: true })
-          setTimeout(() => done('timeout'), 30000) // hard safety cap
+          // Short 15s cap — after this we'd rather show the still frame than
+          // keep the user waiting. 30s was the old hard limit from the
+          // background-fetch abort; 15s is a better UX threshold.
+          setTimeout(() => done('timeout'), 15000)
         })
       })
       await Promise.all(readyPromises)
       if (cancelled) return
-      console.log(`[Studio] All <video> elements canplay in ${Date.now() - loadStart}ms — UI unblocked`)
+      console.log(`[Studio] All <video> elements settled in ${Date.now() - loadStart}ms — UI unblocked (broken scenes: ${Object.keys(brokenScenesRef.current).join(',') || 'none'})`)
       setVideosReady(true)
       if (autoExportRef.current) {
         autoExportRef.current = false
@@ -527,6 +571,43 @@ export default function Home() {
     // the bytes are already in memory and don't need to be re-downloaded.
     // Progress counter updates as each video arrives — user sees 1/4, 2/4, …
     // -----------------------------------------------------------------------
+    // Fetch a single clip with up to 3 attempts (transient fal.ai CDN issues
+    // are common — retrying usually succeeds). Each attempt gets a fresh
+    // 15-second AbortController so one slow attempt can't eat the budget.
+    const fetchClipWithRetry = async (remoteUrl, i, maxAttempts = 3) => {
+      let lastErr = null
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const fetchUrl = viaProxy(remoteUrl)
+        const start = Date.now()
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
+        console.log(`[Studio] Video ${i+1} background fetch attempt ${attempt}/${maxAttempts}… url=${fetchUrl.slice(0, 100)}`)
+        try {
+          const resp = await fetch(fetchUrl, { signal: controller.signal })
+          const ttfb = Date.now() - start
+          const cl = resp.headers.get('content-length')
+          const ct = resp.headers.get('content-type')
+          console.log(`[Studio] Video ${i+1} attempt ${attempt} response in ${ttfb}ms, status=${resp.status}, content-type=${ct}, content-length=${cl}`)
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+          const blob = await resp.blob()
+          const totalMs = Date.now() - start
+          console.log(`[Studio] Video ${i+1} attempt ${attempt} blob ready in ${totalMs}ms, size=${blob.size} (download=${totalMs - ttfb}ms)`)
+          if (blob.size < 10 * 1024) throw new Error(`blob too small: ${blob.size} bytes`)
+          return blob
+        } catch (err) {
+          lastErr = err
+          const elapsed = Date.now() - start
+          const reason = err?.name === 'AbortError' ? 'TIMEOUT' : 'ERROR'
+          console.error(`[Studio] Video ${i+1} attempt ${attempt} ${reason} after ${elapsed}ms:`, err?.message || err)
+          // Only pause between attempts — no sleep on the last one.
+          if (attempt < maxAttempts) await new Promise(r => setTimeout(r, 1000))
+        } finally {
+          clearTimeout(timeoutId)
+        }
+      }
+      throw lastErr || new Error('all attempts failed')
+    }
+
     remoteUrls.forEach((remoteUrl, i) => {
       if (!remoteUrl) return
       if (blobUrlCache.current.has(remoteUrl)) {
@@ -534,41 +615,21 @@ export default function Home() {
         if (!cancelled) setPreloadProgress(prev => ({ done: prev.done + 1, total }))
         return
       }
-      const fetchUrl = viaProxy(remoteUrl)
-      const start = Date.now()
-      console.log(`[Studio] Video ${i+1} background fetch starting… url=${fetchUrl.slice(0, 100)}`)
-
-      // 30-second hard timeout — if fal.ai is dragging we abort and let the
-      // UI surface a warning instead of hanging forever.
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000)
-
-      fetch(fetchUrl, { signal: controller.signal })
-        .then(async (resp) => {
-          const ttfb = Date.now() - start
-          const cl = resp.headers.get('content-length')
-          const ct = resp.headers.get('content-type')
-          console.log(`[Studio] Video ${i+1} response received in ${ttfb}ms, status=${resp.status}, content-type=${ct}, content-length=${cl}`)
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-          const blob = await resp.blob()
-          const totalMs = Date.now() - start
-          console.log(`[Studio] Video ${i+1} blob ready in ${totalMs}ms, size=${blob.size} (download=${totalMs - ttfb}ms)`)
+      fetchClipWithRetry(remoteUrl, i)
+        .then(blob => {
+          if (cancelled) return
           const blobUrl = URL.createObjectURL(blob)
           blobUrlCache.current.set(remoteUrl, blobUrl)
-          if (!cancelled) setPreloadProgress(prev => ({ done: prev.done + 1, total }))
+          setPreloadProgress(prev => ({ done: prev.done + 1, total }))
         })
-        .catch((err) => {
-          const elapsed = Date.now() - start
-          if (err?.name === 'AbortError') {
-            console.error(`[Studio] Video ${i+1} TIMEOUT after ${elapsed}ms — fal.ai too slow`)
-            if (!cancelled) setSlowLoadWarning(true)
-          } else {
-            console.error(`[Studio] Video ${i+1} background fetch FAILED after ${elapsed}ms:`, err?.message || err)
-          }
+        .catch(err => {
+          if (cancelled) return
+          console.error(`[Studio] Video ${i+1} ALL ATTEMPTS FAILED — marking scene broken. Last error:`, err?.message || err)
+          setSceneBroken(i, `fetch_failed/${err?.name || 'err'}`)
+          setSlowLoadWarning(true)
           // Still bump the counter so the UI doesn't stay stuck on N-1/N.
-          if (!cancelled) setPreloadProgress(prev => ({ done: prev.done + 1, total }))
+          setPreloadProgress(prev => ({ done: prev.done + 1, total }))
         })
-        .finally(() => clearTimeout(timeoutId))
     })
     if (audioRef.current && audioBlobUrl.current) {
       audioRef.current.src = audioBlobUrl.current
@@ -1653,21 +1714,49 @@ export default function Home() {
             {/* Stack of preloaded <video> elements — one per clip. Opacity swap = seamless back-to-back playback, zero reload */}
             {clipOrder.map((sceneIdx, orderIdx) => {
               const url = videoBlobUrls[sceneIdx]
+              const broken = brokenScenes[sceneIdx]
+              // If the clip failed to load, show the still NB frame for this
+              // scene in place of the <video>. We keep the <video> in the DOM
+              // (so refs/playback logic still work) but layer the frame on top.
+              const frameUrl = result?.frames?.[sceneIdx]
               return (
-                <video
-                  key={`scene-${sceneIdx}`}
-                  ref={el => { if (el) videoRefs.current[orderIdx] = el; else videoRefs.current[orderIdx] = null }}
-                  src={url || undefined}
-                  playsInline
-                  preload="auto"
-                  style={{
-                    position: 'absolute', top: 0, left: 0,
-                    width: '100%', height: '100%', objectFit: 'cover',
-                    opacity: orderIdx === 0 ? 1 : 0,
-                    transition: 'opacity 40ms linear',
-                    display: 'block',
-                  }}
-                />
+                <div key={`scene-${sceneIdx}`} style={{
+                  position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+                  opacity: orderIdx === 0 ? 1 : 0, transition: 'opacity 40ms linear',
+                }}>
+                  <video
+                    ref={el => { if (el) videoRefs.current[orderIdx] = el; else videoRefs.current[orderIdx] = null }}
+                    src={url || undefined}
+                    playsInline
+                    preload="auto"
+                    style={{
+                      position: 'absolute', top: 0, left: 0,
+                      width: '100%', height: '100%', objectFit: 'cover',
+                      display: broken ? 'none' : 'block',
+                    }}
+                  />
+                  {broken && frameUrl && (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={frameUrl}
+                        alt={`Scene ${sceneIdx + 1} still`}
+                        style={{
+                          position: 'absolute', top: 0, left: 0,
+                          width: '100%', height: '100%', objectFit: 'cover',
+                        }}
+                      />
+                      <div style={{
+                        position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)',
+                        background: 'rgba(245, 158, 11, 0.92)', borderRadius: 6, padding: '4px 10px',
+                        fontSize: 11, color: '#000', fontWeight: 700, fontFamily: 'Heebo,sans-serif',
+                        direction: 'rtl', whiteSpace: 'nowrap',
+                      }}>
+                        תמונה סטטית
+                      </div>
+                    </>
+                  )}
+                </div>
               )
             })}
             {/* Legacy single ref — kept pointing to first video for backward compat */}
@@ -1688,10 +1777,31 @@ export default function Home() {
                     <div style={{ width: `${(preloadProgress.done / preloadProgress.total) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #7c3aed, #a855f7)', transition: 'width 200ms ease' }} />
                   </div>
                 )}
-                {slowLoadWarning && (
-                  <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 600, fontFamily: 'Heebo,sans-serif', textAlign: 'center', maxWidth: 200 }}>
-                    טעינת הסרטונים איטית מהרגיל. נסה לרענן
-                  </span>
+                {(slowLoadWarning || Object.keys(brokenScenes).length > 0) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, maxWidth: 240 }}>
+                    <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 600, fontFamily: 'Heebo,sans-serif', textAlign: 'center', direction: 'rtl' }}>
+                      {Object.keys(brokenScenes).length > 0
+                        ? `סצנה ${Number(Object.keys(brokenScenes)[0]) + 1} לא נטענה. זה יכול לקרות לפעמים - לחץ 'נסה שוב' או המשך בעריכה`
+                        : 'טעינת הסרטונים איטית מהרגיל. נסה לרענן'}
+                    </span>
+                    <button
+                      onClick={() => {
+                        console.log('[Studio] retry clicked — clearing broken scenes + reloading page')
+                        brokenScenesRef.current = {}
+                        setBrokenScenes({})
+                        setSlowLoadWarning(false)
+                        window.location.reload()
+                      }}
+                      style={{
+                        padding: '6px 14px', background: 'rgba(245, 158, 11, 0.18)',
+                        border: '1px solid rgba(245, 158, 11, 0.5)', borderRadius: 6,
+                        color: '#f59e0b', fontSize: 11, fontWeight: 700,
+                        fontFamily: 'Heebo,sans-serif', cursor: 'pointer',
+                      }}
+                    >
+                      נסה שוב
+                    </button>
+                  </div>
                 )}
               </div>
             )}

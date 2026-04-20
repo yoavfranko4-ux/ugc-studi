@@ -526,21 +526,52 @@ export async function POST(req) {
 }
 
 // Verify a Kling video URL is valid and non-empty.
-// Returns true if HEAD/GET reports an MP4-like response with content-length ≥ 10KB.
+// Does a Range GET for the first 64KB and checks:
+//   (a) content-length / downloaded size ≥ 100KB (Kling 5s clips are always > 1MB;
+//       anything smaller is a broken output that will display as a black screen
+//       or stall at readyState=2 in the browser)
+//   (b) bytes 4..8 === "ftyp" (MP4 container magic). This catches HTML error
+//       pages and zero-length placeholders that fal.ai occasionally returns.
+// Returns true only when BOTH checks pass.
 async function verifyVideoUrl(url) {
   if (!url || typeof url !== 'string') return false;
   try {
-    let head = await fetch(url, { method: 'HEAD' }).catch(() => null);
-    if (head && head.ok) {
-      const len = Number(head.headers.get('content-length') || 0);
-      if (len >= 10 * 1024) return true;
-      // Some CDNs don't return content-length on HEAD — fall through to range GET
+    // Try HEAD for the content-length fast path.
+    const head = await fetch(url, { method: 'HEAD' }).catch(() => null);
+    const headLen = head?.ok ? Number(head.headers.get('content-length') || 0) : 0;
+    if (head?.ok && headLen > 0 && headLen < 100 * 1024) {
+      console.warn(`[verifyVideoUrl] rejecting — HEAD content-length=${headLen} (< 100KB)`);
+      return false;
     }
-    // Range GET to confirm there are real bytes (avoid downloading the whole thing)
+
+    // Range GET the first 64KB so we can inspect the MP4 magic bytes.
     const resp = await fetch(url, { headers: { Range: 'bytes=0-65535' } }).catch(() => null);
-    if (!resp || (!resp.ok && resp.status !== 206)) return false;
-    const buf = await resp.arrayBuffer();
-    return buf.byteLength >= 10 * 1024;
+    if (!resp || (!resp.ok && resp.status !== 206)) {
+      console.warn(`[verifyVideoUrl] rejecting — HTTP ${resp?.status || 'no response'}`);
+      return false;
+    }
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.length < 32) {
+      console.warn(`[verifyVideoUrl] rejecting — only ${buf.length} bytes in range GET`);
+      return false;
+    }
+    const magic = buf.slice(4, 8).toString('latin1');
+    if (magic !== 'ftyp') {
+      const ascii = buf.slice(0, 32).toString('latin1').replace(/[^\x20-\x7e]/g, '.');
+      console.warn(`[verifyVideoUrl] rejecting — magic bytes are "${magic}", not "ftyp". First 32 bytes: ${ascii}`);
+      return false;
+    }
+    // We only have the first 64KB confirmed; rely on HEAD content-length (or a
+    // final GET if HEAD didn't give us one) to validate total size.
+    if (headLen === 0) {
+      const contentRange = resp.headers.get('content-range') || '';
+      const totalFromRange = Number((contentRange.match(/\/(\d+)$/) || [])[1] || 0);
+      if (totalFromRange > 0 && totalFromRange < 100 * 1024) {
+        console.warn(`[verifyVideoUrl] rejecting — content-range total=${totalFromRange} (< 100KB)`);
+        return false;
+      }
+    }
+    return true;
   } catch (e) {
     console.warn('[verifyVideoUrl] failed:', e.message);
     return false;
