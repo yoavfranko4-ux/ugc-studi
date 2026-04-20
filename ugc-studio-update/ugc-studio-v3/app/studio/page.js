@@ -511,46 +511,78 @@ export default function Home() {
       return parts.join(',')
     }
 
+    // Rich diagnostic snapshot of a <video> element. Used on timeout/error so
+    // we can see exactly why playback stalled: duration, intrinsic dimensions,
+    // networkState, readyState, video.error, and the currently buffered ranges.
+    const describeVideoState = (el) => {
+      if (!el) return '(no element)'
+      const buffered = Array.from({ length: el.buffered?.length || 0 }, (_, k) => (
+        [Number(el.buffered.start(k).toFixed(3)), Number(el.buffered.end(k).toFixed(3))]
+      ))
+      return JSON.stringify({
+        readyState: el.readyState,
+        networkState: el.networkState,          // 0=empty, 1=idle, 2=loading, 3=no-source
+        duration: Number.isFinite(el.duration) ? Number(el.duration.toFixed(3)) : el.duration,
+        videoWidth: el.videoWidth,
+        videoHeight: el.videoHeight,
+        paused: el.paused,
+        currentTime: Number(el.currentTime.toFixed(3)),
+        errorCode: el.error?.code ?? null,
+        errorMessage: el.error?.message ?? null,
+        buffered,
+      })
+    }
+
     const waitCanPlay = async () => {
       await new Promise(r => setTimeout(r, 50))
       const readyPromises = videoRefs.current.map((el, i) => {
         if (!el) return Promise.resolve()
         try { el.preload = 'auto'; el.load() } catch {}
-        // Only mark canplaythrough (3+) as truly-ready. readyState=2 after
-        // 30s means the file is corrupt — flag the scene as broken so the
-        // render swaps in the NB still frame.
+        // Only mark canplaythrough (3+) as truly-ready. readyState < 3 after
+        // the timeout means the file is corrupt or the decoder is stuck —
+        // flag the scene as broken so the render swaps in the NB still frame.
         if (el.readyState >= 3) return Promise.resolve()
         return new Promise(resolve => {
           const t0 = Date.now()
+          // `settled` guards against being called twice. This is the
+          // regression cause of the "readyState=4/err=null" false-positive:
+          // canplay fires first and resolves cleanly, but the 15s setTimeout
+          // still fires later and would otherwise call setSceneBroken even
+          // though playback is perfectly fine.
+          let settled = false
+          let timeoutId = null
           const done = (reason) => {
+            if (settled) return
+            settled = true
+            if (timeoutId != null) clearTimeout(timeoutId)
             el.removeEventListener('canplay', onCanPlay)
             el.removeEventListener('canplaythrough', onCanPlayThrough)
             el.removeEventListener('loadeddata', onCanPlay)
             el.removeEventListener('error', onError)
             const rs = el.readyState
-            const errCode = el.error?.code ?? null
-            const errMsg  = el.error?.message ?? null
-            const buffered = describeRanges(el.buffered)
-            console.log(`[Studio] Video ${i+1} <video> ${reason} after ${Date.now() - t0}ms (readyState=${rs}, err=${errCode}/${errMsg}, buffered=${buffered})`)
+            const state = describeVideoState(el)
+            console.log(`[Studio] Video ${i+1} <video> ${reason} after ${Date.now() - t0}ms state=${state}`)
             // Corrupt stream signature: timed out OR errored OR stuck at
-            // readyState < 3 despite having some data. Mark the scene broken
-            // so the editor can fall back to the NB still frame.
-            if (reason === 'timeout' || reason === 'error' || rs < 3) {
-              setSceneBroken(i, `${reason}/readyState=${rs}/err=${errCode}`)
+            // readyState < 3. Do NOT mark broken on canplay/canplaythrough
+            // regardless of later state changes — `settled` guard handles
+            // the late-timeout race that was flagging healthy videos.
+            const healthy = reason === 'canplay' || reason === 'canplaythrough'
+            if (!healthy && (reason === 'timeout' || reason === 'error' || rs < 3)) {
+              console.warn(`[Studio] Video ${i+1} MARKED BROKEN — reason=${reason}, state=${state}`)
+              setSceneBroken(i, `${reason}/readyState=${rs}/err=${el.error?.code ?? null}`)
             }
             resolve()
           }
-          const onCanPlay       = () => { if (el.readyState >= 3) done('canplay') }
+          const onCanPlay        = () => { if (el.readyState >= 3) done('canplay') }
           const onCanPlayThrough = () => done('canplaythrough')
-          const onError         = () => done('error')
+          const onError          = () => done('error')
           el.addEventListener('canplay', onCanPlay)
           el.addEventListener('canplaythrough', onCanPlayThrough)
           el.addEventListener('loadeddata', onCanPlay)
           el.addEventListener('error', onError, { once: true })
           // Short 15s cap — after this we'd rather show the still frame than
-          // keep the user waiting. 30s was the old hard limit from the
-          // background-fetch abort; 15s is a better UX threshold.
-          setTimeout(() => done('timeout'), 15000)
+          // keep the user waiting.
+          timeoutId = setTimeout(() => done('timeout'), 15000)
         })
       })
       await Promise.all(readyPromises)

@@ -764,7 +764,22 @@ async function runJob(jobId, body) {
         pollInterval: 5000
       });
       const videoUrl = result.data.video?.url || null;
+      const videoMeta = result.data.video || null;
+      // Log the full Kling response shape so we can compare working vs broken
+      // outputs. `video.file_size`, `video.content_type`, `video.duration`
+      // are the fields that matter; `url` is what we hand back.
+      console.log(`[Agent] Scene ${i+1} Kling response:`, JSON.stringify({
+        url: videoUrl ? videoUrl.slice(0, 100) : null,
+        content_type: videoMeta?.content_type,
+        file_size: videoMeta?.file_size,
+        file_name: videoMeta?.file_name,
+        duration: videoMeta?.duration,
+        width: videoMeta?.width,
+        height: videoMeta?.height,
+        seed: result.data?.seed,
+      }));
       const valid = videoUrl ? await verifyVideoUrl(videoUrl) : false;
+      console.log(`[Agent] Scene ${i+1} Kling output valid? ${valid} url=${videoUrl ? videoUrl.slice(0, 100) : '(null)'}`);
       return { videoUrl, valid };
     };
 
