@@ -493,6 +493,7 @@ Return ONLY valid JSON (no markdown):
 }
 
 export async function POST(req) {
+  console.log('[Memory:agent]', JSON.stringify(process.memoryUsage()));
   try {
     const body = await req.json();
 

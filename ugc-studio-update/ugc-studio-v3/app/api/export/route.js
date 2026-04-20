@@ -292,6 +292,7 @@ export const runtime = 'nodejs'
 export const maxDuration = 180
 
 export async function POST(req) {
+  console.log('[Memory:export]', JSON.stringify(process.memoryUsage()))
   const jobDir = path.join('/tmp', `export-${randomUUID()}`)
   const startedAt = Date.now()
 

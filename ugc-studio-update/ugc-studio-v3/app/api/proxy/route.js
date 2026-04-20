@@ -1,4 +1,5 @@
 export async function GET(req) {
+  console.log('[Memory:proxy]', JSON.stringify(process.memoryUsage()));
   const { searchParams } = new URL(req.url);
   const videoUrl = searchParams.get('url');
   

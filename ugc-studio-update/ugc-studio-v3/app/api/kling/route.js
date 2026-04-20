@@ -5,6 +5,7 @@ export const maxDuration = 300; // 5 minutes
 fal.config({ credentials: process.env.FAL_API_KEY });
 
 export async function POST(req) {
+  console.log('[Memory:kling]', JSON.stringify(process.memoryUsage()));
   const { imageUrl, prompt, sceneIndex, duration } = await req.json();
   const klingDuration = duration === '10' ? '10' : '5';
   console.log(`Kling scene ${sceneIndex}: starting, duration=${klingDuration}s`);

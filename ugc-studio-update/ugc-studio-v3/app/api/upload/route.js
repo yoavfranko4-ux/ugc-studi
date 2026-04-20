@@ -1,4 +1,5 @@
 export async function POST(req) {
+  console.log('[Memory:upload]', JSON.stringify(process.memoryUsage()));
   try {
     const formData = await req.formData();
     const file = formData.get('file');

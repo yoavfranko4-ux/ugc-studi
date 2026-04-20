@@ -54,6 +54,7 @@ export async function GET(req) {
 
 // POST — grant subscription to a user
 export async function POST(req) {
+  console.log('[Memory:admin-grant]', JSON.stringify(process.memoryUsage()))
   const supabase = getSupabaseAdmin()
   if (!supabase) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 })
 
