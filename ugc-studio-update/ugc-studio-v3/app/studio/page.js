@@ -356,6 +356,7 @@ export default function Home() {
   const autoExportRef = useRef(false)
   const blobUrlCache = useRef(new Map())  // remote-URL → blob: URL cache — survives re-renders
   const [preloadProgress, setPreloadProgress] = useState({ done: 0, total: 0 })
+  const [slowLoadWarning, setSlowLoadWarning] = useState(false)
 
   // Load the embedded Hebrew subtitle font (same file as server-side ASS burn-in) so the canvas
   // preview matches the exported MP4 glyphs pixel-for-pixel.
@@ -460,78 +461,115 @@ export default function Home() {
     // === DEBUG: bypass Railway /api/proxy to see if it's adding latency. ===
     //  - USE_PROXY = true  → wrap fal.ai URLs with /api/proxy?url=… (Railway relay)
     //  - USE_PROXY = false → fetch fal.ai URLs directly from the browser.
-    // If direct fal.ai URLs load without CORS errors, the proxy is unnecessary
-    // overhead. Flip this flag + compare the [Studio] timings in devtools.
     const USE_PROXY = false
     const viaProxy = (u) => (USE_PROXY && u && !u.startsWith('/api/')) ? `/api/proxy?url=${encodeURIComponent(u)}` : u
     console.log(`[Studio] Starting to load ${total} videos (USE_PROXY=${USE_PROXY})`)
     const loadStart = Date.now()
 
-    const preload = async () => {
-      // === Parallel blob fetch with cache hit short-circuit ===
-      let completed = 0
-      const urls = await Promise.all(remoteUrls.map(async (remoteUrl, i) => {
-        if (!remoteUrl) return null
-        // Cache hit — instant
-        const cached = blobUrlCache.current.get(remoteUrl)
-        if (cached) {
-          console.log(`[Studio] Video ${i+1} cache HIT`)
-          completed++
-          if (!cancelled) setPreloadProgress({ done: completed, total })
-          return cached
-        }
-        const fetchUrl = viaProxy(remoteUrl)
-        const start = Date.now()
-        console.log(`[Studio] Video ${i+1} fetch starting… url=${fetchUrl.slice(0, 100)}`)
-        try {
-          const resp = await fetch(fetchUrl)
-          const ttfb = Date.now() - start
-          const cl = resp.headers.get('content-length')
-          const ct = resp.headers.get('content-type')
-          console.log(`[Studio] Video ${i+1} response received in ${ttfb}ms, status=${resp.status}, content-type=${ct}, content-length=${cl}`)
-          const blob = await resp.blob()
-          const totalMs = Date.now() - start
-          console.log(`[Studio] Video ${i+1} blob ready in ${totalMs}ms, size=${blob.size} (download=${totalMs - ttfb}ms)`)
-          const blobUrl = URL.createObjectURL(blob)
-          blobUrlCache.current.set(remoteUrl, blobUrl)
-          completed++
-          if (!cancelled) setPreloadProgress({ done: completed, total })
-          return blobUrl
-        } catch (err) {
-          console.error(`[Studio] Video ${i+1} FAILED after ${Date.now() - start}ms:`, err?.message || err)
-          completed++
-          if (!cancelled) setPreloadProgress({ done: completed, total })
-          return remoteUrl
-        }
-      }))
-      console.log(`[Studio] All videos loaded in ${Date.now() - loadStart}ms`)
-      if (cancelled) return
-      setVideoBlobUrls(urls)
+    // -----------------------------------------------------------------------
+    // STEP 1 — Hand the REMOTE URL (or cached blob) straight to each <video>
+    // element. The browser streams via HTTP Range — playback can start after
+    // just the moov atom loads (~50-100KB), not after all 10MB download.
+    // This unblocks the UI immediately; the full download continues in step 3.
+    // -----------------------------------------------------------------------
+    const initialUrls = remoteUrls.map(u => {
+      if (!u) return null
+      const cached = blobUrlCache.current.get(u)
+      return cached || viaProxy(u)
+    })
+    setVideoBlobUrls(initialUrls)
 
-      // Wait for React to render the <video> elements, then kick off load() on each + wait for canplaythrough
+    // -----------------------------------------------------------------------
+    // STEP 2 — Wait for `canplay` (readyState ≥ 2 = HAVE_CURRENT_DATA) on each
+    // <video>, NOT canplaythrough. canplay fires as soon as enough of the
+    // video is buffered to start playing — usually seconds faster than
+    // canplaythrough (which waits for the whole file). This is what unblocks
+    // the editor UI.
+    // -----------------------------------------------------------------------
+    const waitCanPlay = async () => {
       await new Promise(r => setTimeout(r, 50))
-      const readyPromises = videoRefs.current.map((el) => {
+      const readyPromises = videoRefs.current.map((el, i) => {
         if (!el) return Promise.resolve()
-        // Explicit load() now — starts buffering immediately after src is set
         try { el.preload = 'auto'; el.load() } catch {}
-        if (el.readyState >= 3) return Promise.resolve()
+        if (el.readyState >= 2) return Promise.resolve()
         return new Promise(resolve => {
-          const onReady = () => { el.removeEventListener('canplaythrough', onReady); resolve() }
-          el.addEventListener('canplaythrough', onReady)
-          el.addEventListener('error', onReady, { once: true })
-          setTimeout(resolve, 6000) // safety
+          const t0 = Date.now()
+          const done = (reason) => {
+            el.removeEventListener('canplay', onCanPlay)
+            el.removeEventListener('loadeddata', onCanPlay)
+            el.removeEventListener('error', onError)
+            console.log(`[Studio] Video ${i+1} <video> ${reason} after ${Date.now() - t0}ms (readyState=${el.readyState})`)
+            resolve()
+          }
+          const onCanPlay = () => done('canplay')
+          const onError   = () => done('error')
+          el.addEventListener('canplay', onCanPlay)
+          el.addEventListener('loadeddata', onCanPlay)
+          el.addEventListener('error', onError, { once: true })
+          setTimeout(() => done('timeout'), 30000) // hard safety cap
         })
       })
       await Promise.all(readyPromises)
       if (cancelled) return
-
+      console.log(`[Studio] All <video> elements canplay in ${Date.now() - loadStart}ms — UI unblocked`)
       setVideosReady(true)
       if (autoExportRef.current) {
         autoExportRef.current = false
         setTimeout(() => { exportMp4() }, 300)
       }
     }
-    preload()
+    waitCanPlay()
+
+    // -----------------------------------------------------------------------
+    // STEP 3 — Background blob cache warmup (for the export path).
+    // The editor can already play from the remote URLs above — these fetches
+    // just pre-populate `blobUrlCache` so that when the user clicks "Export"
+    // the bytes are already in memory and don't need to be re-downloaded.
+    // Progress counter updates as each video arrives — user sees 1/4, 2/4, …
+    // -----------------------------------------------------------------------
+    remoteUrls.forEach((remoteUrl, i) => {
+      if (!remoteUrl) return
+      if (blobUrlCache.current.has(remoteUrl)) {
+        console.log(`[Studio] Video ${i+1} cache HIT`)
+        if (!cancelled) setPreloadProgress(prev => ({ done: prev.done + 1, total }))
+        return
+      }
+      const fetchUrl = viaProxy(remoteUrl)
+      const start = Date.now()
+      console.log(`[Studio] Video ${i+1} background fetch starting… url=${fetchUrl.slice(0, 100)}`)
+
+      // 30-second hard timeout — if fal.ai is dragging we abort and let the
+      // UI surface a warning instead of hanging forever.
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000)
+
+      fetch(fetchUrl, { signal: controller.signal })
+        .then(async (resp) => {
+          const ttfb = Date.now() - start
+          const cl = resp.headers.get('content-length')
+          const ct = resp.headers.get('content-type')
+          console.log(`[Studio] Video ${i+1} response received in ${ttfb}ms, status=${resp.status}, content-type=${ct}, content-length=${cl}`)
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+          const blob = await resp.blob()
+          const totalMs = Date.now() - start
+          console.log(`[Studio] Video ${i+1} blob ready in ${totalMs}ms, size=${blob.size} (download=${totalMs - ttfb}ms)`)
+          const blobUrl = URL.createObjectURL(blob)
+          blobUrlCache.current.set(remoteUrl, blobUrl)
+          if (!cancelled) setPreloadProgress(prev => ({ done: prev.done + 1, total }))
+        })
+        .catch((err) => {
+          const elapsed = Date.now() - start
+          if (err?.name === 'AbortError') {
+            console.error(`[Studio] Video ${i+1} TIMEOUT after ${elapsed}ms — fal.ai too slow`)
+            if (!cancelled) setSlowLoadWarning(true)
+          } else {
+            console.error(`[Studio] Video ${i+1} background fetch FAILED after ${elapsed}ms:`, err?.message || err)
+          }
+          // Still bump the counter so the UI doesn't stay stuck on N-1/N.
+          if (!cancelled) setPreloadProgress(prev => ({ done: prev.done + 1, total }))
+        })
+        .finally(() => clearTimeout(timeoutId))
+    })
     if (audioRef.current && audioBlobUrl.current) {
       audioRef.current.src = audioBlobUrl.current
       audioRef.current.load()
@@ -943,10 +981,14 @@ export default function Home() {
       const videoClipsB64 = []
       for (let idx = 0; idx < orderedScenes.length; idx++) {
         const si = orderedScenes[idx]
-        const blobUrl = videoBlobUrls[si]
+        const remoteUrl = result.videos?.[si]
+        const cachedBlobUrl = remoteUrl ? blobUrlCache.current.get(remoteUrl) : null
+        const stateUrl = videoBlobUrls[si]
         const httpUrl = videoUrls[idx]
-        const src = blobUrl?.startsWith('blob:') ? blobUrl : httpUrl
-        console.log(`[Studio Export] clip ${idx} (scene ${si}) — blobUrl:`, blobUrl, 'httpUrl:', httpUrl, 'chosen src:', src)
+        // Prefer the warmed blob cache (step 3 of preload), then any blob: URL
+        // in state, then HTTP URL as final fallback.
+        const src = cachedBlobUrl || (stateUrl?.startsWith('blob:') ? stateUrl : httpUrl)
+        console.log(`[Studio Export] clip ${idx} (scene ${si}) — cachedBlobUrl:`, cachedBlobUrl, 'stateUrl:', stateUrl, 'httpUrl:', httpUrl, 'chosen src:', src)
         if (!src) {
           console.error(`[Studio Export] clip ${idx} (scene ${si}) has NO source — neither blob nor http URL`)
           throw new Error(`קליפ ${idx + 1} לא זמין — נסה ליצור מחדש`)
@@ -1638,13 +1680,18 @@ export default function Home() {
                 <div style={{ width: 36, height: 36, border: '3px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
                 <span style={{ color: '#a1a1aa', fontSize: 13, fontWeight: 600, fontFamily: 'Heebo,sans-serif' }}>
                   {preloadProgress.total > 0
-                    ? `טוען ${preloadProgress.done}/${preloadProgress.total} סרטונים...`
+                    ? `טוען ${preloadProgress.done}/${preloadProgress.total} סרטונים (זה יכול לקחת כמה שניות)`
                     : 'טוען סרטונים...'}
                 </span>
                 {preloadProgress.total > 0 && (
                   <div style={{ width: 160, height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
                     <div style={{ width: `${(preloadProgress.done / preloadProgress.total) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #7c3aed, #a855f7)', transition: 'width 200ms ease' }} />
                   </div>
+                )}
+                {slowLoadWarning && (
+                  <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 600, fontFamily: 'Heebo,sans-serif', textAlign: 'center', maxWidth: 200 }}>
+                    טעינת הסרטונים איטית מהרגיל. נסה לרענן
+                  </span>
                 )}
               </div>
             )}
