@@ -233,6 +233,41 @@ async function probeClip(filePath) {
   }
 }
 
+// === Simple clip validator ===
+// Railway's ffprobe is unreliable (returns null/stderr on valid MP4s).
+// We trust FFmpeg's exit code + the output file existing on disk instead.
+// A file > 10KB that an ffmpeg encode just produced IS a valid clip.
+function validateClipSimple(filePath) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return false
+    const size = fs.statSync(filePath).size
+    return size > 10 * 1024 // 10KB floor — anything smaller is a truncated write
+  } catch {
+    return false
+  }
+}
+
+// Run ffprobe once at module load on a tiny generated file and log the result
+// so we can diagnose WHY it's broken in the deployment environment. Never used
+// for validation decisions.
+;(async function debugFfprobeOnce() {
+  if (!ffprobePath) {
+    console.log('[Debug] ffprobe test: skipped — no ffprobe binary resolved')
+    return
+  }
+  try {
+    const { stdout, stderr } = await execFileAsync(ffprobePath, ['-version'], { timeout: 5000 })
+    console.log('[Debug] ffprobe -version stdout (first 200):', (stdout || '').slice(0, 200))
+    if (stderr) console.log('[Debug] ffprobe -version stderr (first 200):', stderr.slice(0, 200))
+  } catch (e) {
+    console.log('[Debug] ffprobe -version FAILED:', {
+      message: e.message,
+      code: e.code,
+      stderr: (e.stderr || '').slice(-300),
+    })
+  }
+})()
+
 // Probe that returns the stderr on failure so callers can log the real reason.
 async function probeClipVerbose(filePath) {
   if (!ffprobePath || !filePath) return { probe: null, stderr: '(ffprobe unavailable)' }
@@ -603,54 +638,31 @@ export async function POST(req) {
         continue
       }
 
-      // Stage 2: magic bytes — if they're valid (ftyp for mp4, EBML for webm),
-      // the file is structurally OK even if ffprobe stumbles on something.
+      // Stage 2: magic bytes — distinguishes real video from HTML error pages / JSON.
       const magic = inspectFileMagic(p)
       const magicValid = magic.magic === 'mp4' || magic.magic === 'webm'
       console.log(`[Export] Clip ${i} magic=${magic.magic}${magic.ftyp ? ` (ftyp ${magic.ftyp})` : ''}`)
 
-      // Stage 3: ffprobe (now with real stderr + 30s timeout inside probeClipVerbose)
+      // If magic bytes say this is NOT a video (html/json/unknown/error), fall back.
+      if (!magicValid) {
+        console.warn(`[Export] Clip ${i} magic bytes reject (${magic.magic}) — using NB-frame fallback`)
+        const fb = await makeFallbackClip(i, 'badmagic')
+        fallbackKinds[i] = fb.kind
+        if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
+        validPaths[i] = fb.path
+        continue
+      }
+
+      // Magic bytes + size are enough. ffprobe is unreliable on Railway — do
+      // NOT use its result for accept/reject. Run it for logging only.
       const { probe, stderr: probeStderr } = await probeClipVerbose(p)
       preProbes[i] = probe
-
-      if (!probe) {
-        // Show the actual ffprobe error so we can diagnose these cases.
-        console.error(`[Export] Clip ${i} ffprobe stderr:`, (probeStderr || '').slice(-500))
-        // Don't fail on ffprobe alone if magic bytes are valid and size is reasonable —
-        // ffprobe can fail on timeouts, odd stream metadata, etc, but the file is fine.
-        if (magicValid && size >= 100 * 1024) {
-          console.warn(`[Export] Clip ${i} ffprobe FAILED but magic=${magic.magic} and size=${size}B — letting normalize try directly.`)
-          validPaths[i] = p
-          continue
-        }
-        console.warn(`[Export] Clip ${i} ffprobe FAILED and magic/size insufficient (magic=${magic.magic}, size=${size}) — using NB-frame fallback.`)
-        const fb = await makeFallbackClip(i, 'probefail')
-        fallbackKinds[i] = fb.kind
-        if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
-        validPaths[i] = fb.path
-        continue
+      if (probe) {
+        console.log(`[Export] Clip ${i} ffprobe (diagnostic): duration=${probe.duration?.toFixed?.(2) ?? '?'}s, codec=${probe.codec}, pix_fmt=${probe.pix_fmt}, dimensions=${probe.width}x${probe.height}, fps=${probe.fps.toFixed(2)}, container=${probe.container}`)
+      } else {
+        console.log(`[Export] Clip ${i} ffprobe (diagnostic) FAILED — ignoring. stderr:`, (probeStderr || '').slice(-500))
       }
-
-      console.log(`[Export] Clip ${i} ffprobe: duration=${probe.duration?.toFixed?.(2) ?? '?'}s, codec=${probe.codec}, pix_fmt=${probe.pix_fmt}, dimensions=${probe.width}x${probe.height}, fps=${probe.fps.toFixed(2)}, container=${probe.container}`)
-
-      const codecOk = /^(h264|hevc|vp8|vp9|av1|mpeg4)$/i.test(probe.codec || '')
-      const dimsOk  = probe.width > 0 && probe.height > 0
-      const durOk   = !probe.duration || probe.duration > 0.1  // if duration is unknown we'll still try
-      if (!codecOk || !dimsOk || !durOk) {
-        // Again, if magic bytes say the container is valid, give normalize a shot
-        // before falling back — ffprobe's "broken stream" can be a false positive.
-        if (magicValid && size >= 100 * 1024) {
-          console.warn(`[Export] Clip ${i} ffprobe looked broken (codec=${probe.codec}, ${probe.width}x${probe.height}, dur=${probe.duration}) but magic=${magic.magic} — letting normalize try directly.`)
-          validPaths[i] = p
-          continue
-        }
-        console.warn(`[Export] Clip ${i} ffprobe shows broken stream (codec=${probe.codec}, ${probe.width}x${probe.height}, dur=${probe.duration}) — using NB-frame fallback`)
-        const fb = await makeFallbackClip(i, 'probebad')
-        fallbackKinds[i] = fb.kind
-        if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
-        validPaths[i] = fb.path
-        continue
-      }
+      // Accept the clip — FFmpeg in the normalize step will be the real validator.
       validPaths[i] = p
     }
 
@@ -666,13 +678,16 @@ export async function POST(req) {
     const totalDuration = validPaths.length * 5
 
     // -----------------------------------------------------------
-    // 4. Final probe on the validPaths (may be original clips OR fallback
-    //    videos). If everything matches target params we can skip normalize.
+    // 4. Normalize-skip detection requires ffprobe, which is unreliable here.
+    //    Always normalize — the libx264 cost is bounded and normalize is how
+    //    we guarantee consistent codec/res/fps/pix_fmt for the concat demuxer.
     // -----------------------------------------------------------
-    const probes = await Promise.all(validPaths.map(probeClip))
-    probes.forEach((p, i) => console.log(`[Export] probe[${i}] (after fallback):`, p ? `${p.codec} ${p.width}x${p.height}@${p.fps.toFixed(2)} ${p.pix_fmt}` : '(unavailable)'))
-    const canSkipNormalize = clipsAllMatch(probes, TARGET_W, TARGET_H, TARGET_FPS)
-    console.log('[Export] canSkipNormalize:', canSkipNormalize)
+    validPaths.forEach((p, i) => {
+      const size = validateClipSimple(p) ? fs.statSync(p).size : 0
+      console.log(`[Export] pre-normalize[${i}]: ${size}B (exists=${fs.existsSync(p)})`)
+    })
+    const canSkipNormalize = false
+    console.log('[Export] canSkipNormalize:', canSkipNormalize, '(probe-skipping disabled — ffprobe unreliable)')
 
     // -----------------------------------------------------------
     // 4. If normalize is needed, do it in PARALLEL (one ffmpeg per clip).
@@ -693,16 +708,14 @@ export async function POST(req) {
           ? path.join(NORMALIZE_CACHE_DIR, `${src.key}_${paramTag}.mp4`)
           : null
 
-        if (cacheFile && fs.existsSync(cacheFile)) {
+        if (cacheFile && validateClipSimple(cacheFile)) {
           const stats = fs.statSync(cacheFile)
-          const cacheProbe = await probeClip(cacheFile)
-          if (stats.size > MIN_CLIP_BYTES && cacheProbe && cacheProbe.width === TARGET_W && cacheProbe.height === TARGET_H) {
-            console.log(`[Export] norm[${i}] cache HIT — reusing ${cacheFile} (${stats.size} bytes, probe OK)`)
-            try { fs.utimesSync(cacheFile, new Date(), new Date()) } catch {}
-            outPaths[i] = cacheFile
-            continue
-          }
-          console.warn(`[Export] norm[${i}] cache entry invalid — re-encoding (${stats.size}B, probe=${JSON.stringify(cacheProbe)})`)
+          console.log(`[Export] norm[${i}] cache HIT — reusing ${cacheFile} (${stats.size} bytes)`)
+          try { fs.utimesSync(cacheFile, new Date(), new Date()) } catch {}
+          outPaths[i] = cacheFile
+          continue
+        } else if (cacheFile && fs.existsSync(cacheFile)) {
+          console.warn(`[Export] norm[${i}] cache entry too small — re-encoding`)
         }
 
         const normPath = path.join(jobDir, `norm_${i}.mp4`)
@@ -754,9 +767,10 @@ export async function POST(req) {
         const sz = fs.statSync(normPath).size
         console.log(`[Export] norm[${i}] output size: ${sz} bytes (${(sz / 1024).toFixed(1)}KB)`)
 
-        const probe = await probeClip(normPath)
-        if (!probe || probe.width <= 0 || probe.height <= 0) {
-          console.warn(`[Export] norm[${i}] output looks broken (probe=${JSON.stringify(probe)}) — falling back to NB-frame static video`)
+        // FFmpeg exited 0 — trust that the file is valid. ffprobe is unreliable
+        // on Railway, and using it here was causing valid outputs to be thrown away.
+        if (!validateClipSimple(normPath)) {
+          console.warn(`[Export] norm[${i}] output too small (${sz}B) — falling back to NB-frame static video`)
           try { fs.unlinkSync(normPath) } catch {}
           const fb = await makeFallbackClip(i, 'normbroken')
           if (fb.kind === 'nb') nbFallbackCount++; else blackFallbackCount++
@@ -778,13 +792,17 @@ export async function POST(req) {
       try { global.gc?.() } catch {}
     }
 
-    // === Post-normalize validation — probe every clip that will go into the concat
-    const postProbes = await Promise.all(normalizedPaths.map(probeClip))
-    postProbes.forEach((p, i) => {
-      const size = fs.existsSync(normalizedPaths[i]) ? fs.statSync(normalizedPaths[i]).size : 0
-      console.log(`[Export] post-normalize[${i}]: ${size}B, probe=${p ? `${p.codec} ${p.width}x${p.height}@${p.fps.toFixed(2)}` : 'PROBE FAILED'}`)
+    // === Post-normalize validation — trust file existence + size, not ffprobe.
+    //    ffprobe is unreliable on Railway and was causing valid clips to be
+    //    rejected. FFmpeg just produced these files — if they're on disk and
+    //    above the 10KB floor, they're good.
+    normalizedPaths.forEach((p, i) => {
+      const size = fs.existsSync(p) ? fs.statSync(p).size : 0
+      console.log(`[Export] post-normalize[${i}]: ${size}B (exists=${fs.existsSync(p)})`)
     })
-    const badNormalized = postProbes.map((p, i) => (!p || p.width <= 0 || p.height <= 0) ? i : -1).filter(i => i >= 0)
+    const badNormalized = normalizedPaths
+      .map((p, i) => validateClipSimple(p) ? -1 : i)
+      .filter(i => i >= 0)
     if (badNormalized.length === normalizedPaths.length) {
       throw new Error(`הייצוא נכשל: כל הקליפים פגומים אחרי נרמול (${badNormalized.length}). צור סרטון חדש.`)
     }
@@ -955,9 +973,16 @@ export async function POST(req) {
     //    If the output has no video stream or zero duration, we have
     //    produced a black/broken MP4 and should fail loudly.
     // -----------------------------------------------------------
-    const outProbe = await probeClip(outputPath)
-    console.log('[Export] OUTPUT probe:', outProbe ? `${outProbe.codec} ${outProbe.width}x${outProbe.height}@${outProbe.fps.toFixed(2)} ${outProbe.pix_fmt}` : 'PROBE FAILED')
-    if (!outProbe || outProbe.width <= 0 || outProbe.height <= 0) {
+    // Trust the final-pass FFmpeg exit code + file size. ffprobe is unreliable
+    // on Railway and was rejecting valid outputs. 100KB floor — the final MP4
+    // with 20 seconds of 720x1280 video is always much larger than that.
+    const outputExists = fs.existsSync(outputPath)
+    const finalSize = outputExists ? fs.statSync(outputPath).size : 0
+    console.log(`[Export] OUTPUT on disk: exists=${outputExists}, size=${finalSize}B`)
+    // Log ffprobe for diagnostics only — do not use for validation.
+    const outProbe = await probeClip(outputPath).catch(() => null)
+    console.log('[Export] OUTPUT probe (diagnostic):', outProbe ? `${outProbe.codec} ${outProbe.width}x${outProbe.height}@${outProbe.fps.toFixed(2)} ${outProbe.pix_fmt}` : 'PROBE FAILED (ignored)')
+    if (!outputExists || finalSize < 100 * 1024) {
       throw new Error('הייצוא נכשל: הפלט אינו מכיל וידאו תקין. צור סרטון חדש.')
     }
 
