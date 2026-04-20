@@ -970,6 +970,7 @@ export default function Home() {
   const playAll = useCallback(async () => {
     if (!result?.videos) return
     const videoEls = videoRefs.current.filter(Boolean)
+    console.log(`[Studio] playAll started, video elements: ${videoEls.length}, DOM <video> count: ${typeof document !== 'undefined' ? document.querySelectorAll('video').length : 'N/A'}`)
     if (videoEls.length === 0) return
 
     if (playing) {
@@ -983,10 +984,19 @@ export default function Home() {
 
     setPlaying(true); playingRef.current = true
 
+    // Opacity is on the WRAPPING <div>, not the <video> itself — because
+    // broken scenes layer a still-frame <img> on top and both need to be
+    // hidden together during playback of other scenes. Walk to parentElement
+    // so the cross-fade actually shows the next scene.
+    const getOpacityTarget = (v) => v?.parentElement || v
+
     // Reset all videos to t=0, show only first
     videoEls.forEach((v, i) => {
       try { v.pause(); v.currentTime = 0 } catch {}
-      v.style.opacity = i === 0 ? '1' : '0'
+      const target = getOpacityTarget(v)
+      target.style.opacity = i === 0 ? '1' : '0'
+      target.style.transition = 'opacity 40ms linear'
+      console.log(`[Studio] Scene ${i} mount: tag=${v.tagName}, src=${v.src?.slice(0, 80)}, readyState=${v.readyState}, opacity=${target.style.opacity}`)
     })
 
     // Start voiceover
@@ -1037,6 +1047,7 @@ export default function Home() {
       if (!playingRef.current) return
       if (idx >= videoEls.length) {
         // Done
+        console.log('[Studio] playChain finished after', videoEls.length, 'scenes')
         playingRef.current = false
         setPlaying(false)
         if (audioRef.current) { try { audioRef.current.pause() } catch {} }
@@ -1045,13 +1056,28 @@ export default function Home() {
       }
       currentPlayingIdxRef.current = idx
       const v = videoEls[idx]
-      // Swap visibility (direct DOM — no React re-render)
-      videoEls.forEach((el, i) => { el.style.opacity = i === idx ? '1' : '0' })
+      const prev = idx > 0 ? videoEls[idx - 1] : null
+      // Pause the outgoing video so its audio track can't overlap the next.
+      if (prev) { try { prev.pause() } catch {} }
+      // Swap visibility on the WRAPPING div (opacity is there, not on <video>).
+      videoEls.forEach((el, i) => {
+        const target = getOpacityTarget(el)
+        target.style.opacity = i === idx ? '1' : '0'
+      })
+      console.log(`[Studio] Switching opacity: scene ${idx - 1} -> ${idx}, readyState=${v.readyState}, src=${v.src?.slice(0, 80)}`)
       try { v.currentTime = 0 } catch {}
-      // Immediately play — no await, no delay
+      // Immediately play — catch autoplay rejection so a single scene failure
+      // doesn't leave the chain stuck.
       const playPromise = v.play()
-      if (playPromise?.catch) playPromise.catch(() => {})
+      if (playPromise?.catch) {
+        playPromise.catch(err => {
+          console.warn(`[Studio] Scene ${idx} play() rejected:`, err?.message || err, '— advancing to next scene')
+          // Skip ahead so the whole sequence doesn't stall on one bad clip.
+          setTimeout(() => playChain(idx + 1), 100)
+        })
+      }
       const onEnded = () => {
+        console.log(`[Studio] Scene ${idx} ENDED at ${v.currentTime.toFixed(2)}s — transitioning to ${idx + 1}`)
         v.removeEventListener('ended', onEnded)
         playChain(idx + 1)
       }
