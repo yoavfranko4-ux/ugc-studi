@@ -3,52 +3,62 @@ export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
 export async function GET(req) {
-  console.log('[Memory:proxy]', JSON.stringify(process.memoryUsage()));
-  const { searchParams } = new URL(req.url);
-  const videoUrl = searchParams.get('url');
+  const url = new URL(req.url).searchParams.get('url')
+  const startTime = Date.now()
+  const short = url ? (url.length > 80 ? url.slice(0, 80) + '…' : url) : '(no url)'
+  console.log(`[Proxy] START ${short}`)
 
-  if (!videoUrl) return new Response('Missing url', { status: 400 });
+  if (!url) {
+    console.warn('[Proxy] missing url param')
+    return new Response('Missing url', { status: 400 })
+  }
 
-  // Forward Range header from client — critical for video seeking / scrubbing.
-  const rangeHeader = req.headers.get('range');
+  const rangeHeader = req.headers.get('range')
+  if (rangeHeader) console.log(`[Proxy] forwarding Range: ${rangeHeader}`)
 
   try {
-    const upstreamHeaders = {};
-    if (rangeHeader) upstreamHeaders['Range'] = rangeHeader;
+    const upstreamHeaders = {}
+    if (rangeHeader) upstreamHeaders['Range'] = rangeHeader
 
-    const res = await fetch(videoUrl, {
-      headers: upstreamHeaders,
+    const fetchStart = Date.now()
+    const res = await fetch(url, {
       signal: AbortSignal.timeout(30000),
-    });
+      headers: upstreamHeaders,
+    })
+    const headersMs = Date.now() - fetchStart
+    const ct = res.headers.get('content-type') || '(none)'
+    const cl = res.headers.get('content-length') || '(none)'
+    const cr = res.headers.get('content-range') || '(none)'
+    console.log(`[Proxy] fetch response received in ${headersMs}ms, status=${res.status}, content-type=${ct}, content-length=${cl}, content-range=${cr}`)
 
     if (!res.ok && res.status !== 206) {
-      return new Response('Failed to fetch video: ' + res.status, { status: 502 });
+      console.error(`[Proxy] upstream bad status ${res.status} after ${headersMs}ms for ${short}`)
+      return new Response(`Upstream HTTP ${res.status}`, { status: 502 })
     }
 
-    // Stream the body through — do NOT buffer with arrayBuffer().
-    // Buffering holds 10-30MB per request in RAM and causes OOM on Railway.
     const outHeaders = {
-      'Content-Type': res.headers.get('content-type') || 'video/mp4',
+      'Content-Type': ct !== '(none)' ? ct : 'video/mp4',
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'public, max-age=3600',
       'Access-Control-Allow-Origin': '*',
-    };
-
-    const contentLength = res.headers.get('content-length');
-    if (contentLength) outHeaders['Content-Length'] = contentLength;
-
-    const contentRange = res.headers.get('content-range');
-    if (contentRange) outHeaders['Content-Range'] = contentRange;
-
-    return new Response(res.body, {
-      status: res.status, // forward 200 or 206 Partial Content
-      headers: outHeaders,
-    });
-  } catch (e) {
-    const isTimeout = e?.name === 'TimeoutError' || /timeout/i.test(e?.message || '');
-    if (isTimeout) {
-      return new Response('Upstream timeout after 30s', { status: 504 });
     }
-    return new Response('Error: ' + e.message, { status: 500 });
+    if (cl !== '(none)') outHeaders['Content-Length'] = cl
+    if (cr !== '(none)') outHeaders['Content-Range'] = cr
+
+    const response = new Response(res.body, {
+      status: res.status,
+      headers: outHeaders,
+    })
+
+    console.log(`[Proxy] DONE ${short} total=${Date.now() - startTime}ms (headers=${headersMs}ms, streaming body to client…)`)
+    return response
+  } catch (err) {
+    const elapsed = Date.now() - startTime
+    const isTimeout = err?.name === 'TimeoutError' || /timeout/i.test(err?.message || '')
+    console.error(`[Proxy] ERROR ${short} after ${elapsed}ms:`, err.message, isTimeout ? '(TIMEOUT)' : '')
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: isTimeout ? 504 : 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
 }

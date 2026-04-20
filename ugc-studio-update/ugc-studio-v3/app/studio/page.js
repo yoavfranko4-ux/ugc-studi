@@ -457,32 +457,54 @@ export default function Home() {
     const total = remoteUrls.filter(Boolean).length
     setPreloadProgress({ done: 0, total })
 
+    // === DEBUG: bypass Railway /api/proxy to see if it's adding latency. ===
+    //  - USE_PROXY = true  → wrap fal.ai URLs with /api/proxy?url=… (Railway relay)
+    //  - USE_PROXY = false → fetch fal.ai URLs directly from the browser.
+    // If direct fal.ai URLs load without CORS errors, the proxy is unnecessary
+    // overhead. Flip this flag + compare the [Studio] timings in devtools.
+    const USE_PROXY = false
+    const viaProxy = (u) => (USE_PROXY && u && !u.startsWith('/api/')) ? `/api/proxy?url=${encodeURIComponent(u)}` : u
+    console.log(`[Studio] Starting to load ${total} videos (USE_PROXY=${USE_PROXY})`)
+    const loadStart = Date.now()
+
     const preload = async () => {
       // === Parallel blob fetch with cache hit short-circuit ===
       let completed = 0
-      const urls = await Promise.all(remoteUrls.map(async (remoteUrl) => {
+      const urls = await Promise.all(remoteUrls.map(async (remoteUrl, i) => {
         if (!remoteUrl) return null
         // Cache hit — instant
         const cached = blobUrlCache.current.get(remoteUrl)
         if (cached) {
+          console.log(`[Studio] Video ${i+1} cache HIT`)
           completed++
           if (!cancelled) setPreloadProgress({ done: completed, total })
           return cached
         }
+        const fetchUrl = viaProxy(remoteUrl)
+        const start = Date.now()
+        console.log(`[Studio] Video ${i+1} fetch starting… url=${fetchUrl.slice(0, 100)}`)
         try {
-          const resp = await fetch(remoteUrl)
+          const resp = await fetch(fetchUrl)
+          const ttfb = Date.now() - start
+          const cl = resp.headers.get('content-length')
+          const ct = resp.headers.get('content-type')
+          console.log(`[Studio] Video ${i+1} response received in ${ttfb}ms, status=${resp.status}, content-type=${ct}, content-length=${cl}`)
           const blob = await resp.blob()
+          const totalMs = Date.now() - start
+          console.log(`[Studio] Video ${i+1} blob ready in ${totalMs}ms, size=${blob.size} (download=${totalMs - ttfb}ms)`)
           const blobUrl = URL.createObjectURL(blob)
           blobUrlCache.current.set(remoteUrl, blobUrl)
           completed++
           if (!cancelled) setPreloadProgress({ done: completed, total })
           return blobUrl
-        } catch {
+        } catch (err) {
+          console.error(`[Studio] Video ${i+1} FAILED after ${Date.now() - start}ms:`, err?.message || err)
           completed++
           if (!cancelled) setPreloadProgress({ done: completed, total })
           return remoteUrl
         }
       }))
+      console.log(`[Studio] All videos loaded in ${Date.now() - loadStart}ms`)
       if (cancelled) return
       setVideoBlobUrls(urls)
 
