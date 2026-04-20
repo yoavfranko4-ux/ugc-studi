@@ -9,6 +9,7 @@ import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
+import { prewarmVideos } from '../../../lib/video-cache.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -914,6 +915,18 @@ async function runJob(jobId, body) {
       .eq('id', jobId);
 
     console.log(`[Job ${jobId}] Completed successfully`);
+
+    // Fire-and-forget: pre-warm the Railway video cache so that when the
+    // client opens the editor the videos are already resident in memory
+    // and the proxy serves them instantly. This is the fix for fal.ai's
+    // inconsistent geographic CDN latency — Railway's link to fal.ai is
+    // fast and consistent, so we pay the slow fetch once here instead of
+    // in the browser on every page load.
+    try {
+      prewarmVideos(videos.filter(Boolean));
+    } catch (e) {
+      console.warn(`[Job ${jobId}] prewarm invocation failed:`, e.message);
+    }
   } catch (e) {
     console.error(`[Job ${jobId}] Failed:`, e.message);
     await supabase

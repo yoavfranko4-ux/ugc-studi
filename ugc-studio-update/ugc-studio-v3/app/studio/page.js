@@ -475,10 +475,12 @@ export default function Home() {
     const total = remoteUrls.filter(Boolean).length
     setPreloadProgress({ done: 0, total })
 
-    // === DEBUG: bypass Railway /api/proxy to see if it's adding latency. ===
-    //  - USE_PROXY = true  → wrap fal.ai URLs with /api/proxy?url=… (Railway relay)
-    //  - USE_PROXY = false → fetch fal.ai URLs directly from the browser.
-    const USE_PROXY = false
+    // === Route videos through the Railway proxy. ===
+    // fal.ai's geo CDN is inconsistent — some users get 50ms TTFB, others get
+    // 2MB-per-30s. Railway's link to fal.ai is fast and consistent, and the
+    // proxy caches bytes in memory (pre-warmed at job completion), so second
+    // load of the same URL is instant. See lib/video-cache.js.
+    const USE_PROXY = true
     const viaProxy = (u) => (USE_PROXY && u && !u.startsWith('/api/')) ? `/api/proxy?url=${encodeURIComponent(u)}` : u
     console.log(`[Studio] Starting to load ${total} videos (USE_PROXY=${USE_PROXY})`)
     const loadStart = Date.now()
@@ -580,9 +582,23 @@ export default function Home() {
           el.addEventListener('canplaythrough', onCanPlayThrough)
           el.addEventListener('loadeddata', onCanPlay)
           el.addEventListener('error', onError, { once: true })
-          // Short 15s cap — after this we'd rather show the still frame than
-          // keep the user waiting.
-          timeoutId = setTimeout(() => done('timeout'), 15000)
+
+          // Two-phase timeout:
+          //  - At 15s: if any data is buffered or readyState ≥ 2, keep
+          //    waiting — large files over a slow CDN still progress. Only
+          //    mark broken if the stream is truly dead (readyState < 2 AND
+          //    no buffered bytes).
+          //  - At 30s: hard cap. Whatever state we're in, settle.
+          timeoutId = setTimeout(() => {
+            if (settled) return
+            const hasProgress = el.readyState >= 2 || (el.buffered?.length || 0) > 0
+            if (hasProgress) {
+              console.log(`[Studio] Video ${i+1} slow but progressing at 15s (readyState=${el.readyState}, buffered=${el.buffered?.length || 0} ranges) — extending to 30s`)
+              timeoutId = setTimeout(() => done('timeout'), 15000)
+            } else {
+              done('timeout')
+            }
+          }, 15000)
         })
       })
       await Promise.all(readyPromises)
