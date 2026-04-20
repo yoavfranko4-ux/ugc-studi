@@ -289,7 +289,8 @@ function hashBytesForCache(buf) {
 }
 
 export const runtime = 'nodejs'
-export const maxDuration = 180
+export const maxDuration = 300
+export const dynamic = 'force-dynamic'
 
 export async function POST(req) {
   console.log('[Memory:export]', JSON.stringify(process.memoryUsage()))

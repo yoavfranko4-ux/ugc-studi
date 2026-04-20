@@ -1,4 +1,6 @@
 export const runtime = 'nodejs'
+export const maxDuration = 300
+export const dynamic = 'force-dynamic'
 
 export async function GET(req) {
   console.log('[Memory:proxy]', JSON.stringify(process.memoryUsage()));

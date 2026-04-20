@@ -16,6 +16,8 @@ try { ffmpegStaticPath = require('ffmpeg-static') } catch {}
 const execFileAsync = promisify(execFile)
 
 export const maxDuration = 300;
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const FAL_KEY = process.env.FAL_API_KEY;
 if (!FAL_KEY) console.warn('⚠ FAL_API_KEY is not set — NanoBanana frames will fail');
