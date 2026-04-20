@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { fal } from '@fal-ai/client'
 import { supabase } from '../../../lib/supabase'
 import { prepareHebrewForTTS, remapWordTimestamps } from '../../../lib/hebrew-tts.js'
-import { execFile } from 'child_process'
+import { execFile, execSync } from 'child_process'
 import { promisify } from 'util'
 import { writeFile, readFile, mkdir, rm } from 'fs/promises'
 import fs from 'fs'
@@ -14,6 +14,25 @@ const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
 try { ffmpegStaticPath = require('ffmpeg-static') } catch {}
 const execFileAsync = promisify(execFile)
+
+// Resolve the system ffprobe binary (sibling to ffmpeg on Railway/nixpacks).
+// Used to decode-test Kling outputs before handing them to the editor.
+function resolveFfprobePath() {
+  try {
+    const w = execSync('which ffprobe', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+    if (w && fs.existsSync(w)) return w
+  } catch {}
+  for (const p of ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe', '/run/current-system/sw/bin/ffprobe', '/root/.nix-profile/bin/ffprobe']) {
+    if (fs.existsSync(p)) return p
+  }
+  try {
+    const found = execSync("find /nix/store -maxdepth 4 -type f -name ffprobe 2>/dev/null | head -1", { encoding: 'utf8', shell: '/bin/sh' }).trim()
+    if (found && fs.existsSync(found)) return found
+  } catch {}
+  return null
+}
+const ffprobePath = resolveFfprobePath()
+console.log('[Agent] ffprobe binary:', ffprobePath || '(none — Kling output validation will skip ffprobe step)')
 
 export const maxDuration = 300;
 export const runtime = 'nodejs';
@@ -525,56 +544,84 @@ export async function POST(req) {
   }
 }
 
-// Verify a Kling video URL is valid and non-empty.
-// Does a Range GET for the first 64KB and checks:
-//   (a) content-length / downloaded size ≥ 100KB (Kling 5s clips are always > 1MB;
-//       anything smaller is a broken output that will display as a black screen
-//       or stall at readyState=2 in the browser)
-//   (b) bytes 4..8 === "ftyp" (MP4 container magic). This catches HTML error
-//       pages and zero-length placeholders that fal.ai occasionally returns.
-// Returns true only when BOTH checks pass.
-async function verifyVideoUrl(url) {
-  if (!url || typeof url !== 'string') return false;
+// Validate a Kling video URL end-to-end before we hand it to the editor.
+// Previous "verifyVideoUrl" only checked the first 64KB for MP4 magic — that
+// missed cases where fal.ai returns a mostly-intact MP4 that the browser
+// can't actually decode (readyState stays at 0, videoWidth=0). This version
+// adds an ffprobe decode test, which is what actually catches broken outputs.
+//
+// Returns { valid: boolean, reason?: string, width?, height?, duration? }.
+async function validateKlingVideo(url) {
+  if (!url || typeof url !== 'string') return { valid: false, reason: 'no url' };
   try {
-    // Try HEAD for the content-length fast path.
-    const head = await fetch(url, { method: 'HEAD' }).catch(() => null);
-    const headLen = head?.ok ? Number(head.headers.get('content-length') || 0) : 0;
-    if (head?.ok && headLen > 0 && headLen < 100 * 1024) {
-      console.warn(`[verifyVideoUrl] rejecting — HEAD content-length=${headLen} (< 100KB)`);
-      return false;
+    // --- Stage 1: Range GET first 64KB, check MP4 magic bytes ---------------
+    const res = await fetch(url, {
+      headers: { Range: 'bytes=0-65535' },
+      signal: AbortSignal.timeout(10000),
+    }).catch(err => ({ _fetchErr: err }));
+
+    if (res?._fetchErr) {
+      return { valid: false, reason: `fetch error: ${res._fetchErr.message}` };
+    }
+    if (!res.ok && res.status !== 206) {
+      return { valid: false, reason: `status ${res.status}` };
     }
 
-    // Range GET the first 64KB so we can inspect the MP4 magic bytes.
-    const resp = await fetch(url, { headers: { Range: 'bytes=0-65535' } }).catch(() => null);
-    if (!resp || (!resp.ok && resp.status !== 206)) {
-      console.warn(`[verifyVideoUrl] rejecting — HTTP ${resp?.status || 'no response'}`);
-      return false;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length < 12) {
+      return { valid: false, reason: `file too small (${buffer.length}B)` };
     }
-    const buf = Buffer.from(await resp.arrayBuffer());
-    if (buf.length < 32) {
-      console.warn(`[verifyVideoUrl] rejecting — only ${buf.length} bytes in range GET`);
-      return false;
+    const ftyp = buffer.slice(4, 8).toString('ascii');
+    if (ftyp !== 'ftyp') {
+      const preview = buffer.slice(0, 200).toString('latin1').replace(/[^\x20-\x7e]/g, '.');
+      console.error('[Kling] Not valid MP4 — first 200 bytes:', preview);
+      return { valid: false, reason: `not MP4 (got "${ftyp}")` };
     }
-    const magic = buf.slice(4, 8).toString('latin1');
-    if (magic !== 'ftyp') {
-      const ascii = buf.slice(0, 32).toString('latin1').replace(/[^\x20-\x7e]/g, '.');
-      console.warn(`[verifyVideoUrl] rejecting — magic bytes are "${magic}", not "ftyp". First 32 bytes: ${ascii}`);
-      return false;
+
+    // Confirm total content size. Kling 5s clips are always > 500KB; anything
+    // smaller is a truncated/broken output.
+    const contentRange = res.headers.get('content-range') || '';
+    const totalFromRange = Number((contentRange.match(/\/(\d+)$/) || [])[1] || 0);
+    let totalSize = totalFromRange;
+    if (!totalSize) {
+      const head = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) }).catch(() => null);
+      totalSize = Number(head?.headers?.get?.('content-length') || 0);
     }
-    // We only have the first 64KB confirmed; rely on HEAD content-length (or a
-    // final GET if HEAD didn't give us one) to validate total size.
-    if (headLen === 0) {
-      const contentRange = resp.headers.get('content-range') || '';
-      const totalFromRange = Number((contentRange.match(/\/(\d+)$/) || [])[1] || 0);
-      if (totalFromRange > 0 && totalFromRange < 100 * 1024) {
-        console.warn(`[verifyVideoUrl] rejecting — content-range total=${totalFromRange} (< 100KB)`);
-        return false;
-      }
+    if (totalSize > 0 && totalSize < 500 * 1024) {
+      return { valid: false, reason: `size too small (${totalSize}B, < 500KB)` };
     }
-    return true;
+
+    // --- Stage 2: ffprobe decode test ---------------------------------------
+    // ffprobe can read HTTP URLs directly — no need to download the whole file.
+    // If it can't find a video stream with valid dimensions, the browser's
+    // decoder won't be able to either.
+    if (!ffprobePath) {
+      // Missing ffprobe on this environment — fall back to the magic-byte
+      // check we just passed. Better than rejecting every video.
+      return { valid: true, reason: 'magic-bytes only (no ffprobe)', size: totalSize };
+    }
+    try {
+      const { stdout } = await execFileAsync(ffprobePath, [
+        '-v', 'error',
+        '-show_entries', 'stream=codec_type,codec_name,width,height,duration:format=duration',
+        '-of', 'json',
+        url,
+      ], { timeout: 15000, maxBuffer: 1024 * 1024 });
+      const data = JSON.parse(stdout);
+      const videoStream = data.streams?.find(s => s.codec_type === 'video');
+      if (!videoStream) return { valid: false, reason: 'no video stream' };
+      const w = Number(videoStream.width || 0);
+      const h = Number(videoStream.height || 0);
+      if (w < 100 || h < 100) return { valid: false, reason: `invalid dimensions ${w}x${h}` };
+      const dur = Number(videoStream.duration || data.format?.duration || 0);
+      if (dur > 0 && dur < 1) return { valid: false, reason: `duration too short (${dur}s)` };
+      return { valid: true, width: w, height: h, duration: dur, codec: videoStream.codec_name, size: totalSize };
+    } catch (e) {
+      const stderr = e.stderr ? String(e.stderr).slice(-300) : '';
+      return { valid: false, reason: `ffprobe failed: ${e.message} ${stderr}` };
+    }
   } catch (e) {
-    console.warn('[verifyVideoUrl] failed:', e.message);
-    return false;
+    return { valid: false, reason: `validator crashed: ${e.message}` };
   }
 }
 
@@ -752,19 +799,34 @@ async function runJob(jobId, body) {
     console.log(`[Job ${jobId}] Starting all 4 Kling videos in parallel...`);
     const videoMeta = new Array(4).fill('none'); // 'kling' | 'static' | 'none'
     const runKlingOnce = async (i, frameUrl) => {
+      const klingInput = {
+        prompt: scenes[i].kling_prompt,
+        image_url: frameUrl,
+        duration: '5',
+        aspect_ratio: '9:16',
+        cfg_scale: 0.45,
+        negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
+      };
+      // Scene 1 is the "hook" — if it keeps failing we want the full request
+      // dumped so we can see whether the frame URL or prompt is what's making
+      // Kling unhappy.
+      if (i === 0) {
+        console.log(`[Kling] Scene 1 REQUEST:`, JSON.stringify({
+          prompt: klingInput.prompt?.slice(0, 300),
+          image_url: frameUrl?.slice(0, 120),
+          duration: klingInput.duration,
+          aspect_ratio: klingInput.aspect_ratio,
+          cfg_scale: klingInput.cfg_scale,
+        }));
+      }
+
       const result = await fal.subscribe('fal-ai/kling-video/v3/pro/image-to-video', {
-        input: {
-          prompt: scenes[i].kling_prompt,
-          image_url: frameUrl,
-          duration: '5',
-          aspect_ratio: '9:16',
-          cfg_scale: 0.45,
-          negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
-        },
+        input: klingInput,
         pollInterval: 5000
       });
       const videoUrl = result.data.video?.url || null;
       const videoMeta = result.data.video || null;
+
       // Log the full Kling response shape so we can compare working vs broken
       // outputs. `video.file_size`, `video.content_type`, `video.duration`
       // are the fields that matter; `url` is what we hand back.
@@ -778,9 +840,20 @@ async function runJob(jobId, body) {
         height: videoMeta?.height,
         seed: result.data?.seed,
       }));
-      const valid = videoUrl ? await verifyVideoUrl(videoUrl) : false;
-      console.log(`[Agent] Scene ${i+1} Kling output valid? ${valid} url=${videoUrl ? videoUrl.slice(0, 100) : '(null)'}`);
-      return { videoUrl, valid };
+      if (i === 0) {
+        console.log(`[Kling] Scene 1 RAW RESPONSE (first 500):`, JSON.stringify(result.data).slice(0, 500));
+      }
+
+      if (!videoUrl) return { videoUrl: null, valid: false, reason: 'no url returned by fal.ai' };
+
+      // End-to-end validation — MP4 magic, size, AND ffprobe decode test.
+      const v = await validateKlingVideo(videoUrl);
+      if (!v.valid) {
+        console.error(`[Kling] Scene ${i+1} FAILED validation: ${v.reason}  url=${videoUrl.slice(0, 100)}`);
+      } else {
+        console.log(`[Kling] Scene ${i+1} validated OK: ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s, size=${v.size}B`);
+      }
+      return { videoUrl, valid: v.valid, reason: v.reason };
     };
 
     const videos = await Promise.all(frames.map(async (frameUrl, i) => {
@@ -791,17 +864,18 @@ async function runJob(jobId, body) {
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           console.log(`[Job ${jobId}] Kling scene ${i+1}: attempt ${attempt}/3...`);
-          const { videoUrl, valid } = await runKlingOnce(i, frameUrl);
+          const { videoUrl, valid, reason } = await runKlingOnce(i, frameUrl);
+          console.log(`[Kling] Scene ${i+1} attempt ${attempt} validation: valid=${valid}${reason ? `, reason=${reason}` : ''}`);
           if (videoUrl && valid) {
             console.log(`[Job ${jobId}] Kling scene ${i+1}: OK on attempt ${attempt}`);
             videoMeta[i] = 'kling';
             return videoUrl;
           }
-          console.warn(`[Job ${jobId}] Kling scene ${i+1} attempt ${attempt}: ${videoUrl ? 'empty/invalid video' : 'no URL returned'}`);
+          console.error(`[Kling] Scene ${i+1} attempt ${attempt} REJECTED — url=${videoUrl ? videoUrl.slice(0, 100) : '(null)'}, reason=${reason || 'unknown'}`);
         } catch (e) {
           const status = e.status || e.statusCode || 'unknown';
           const body = e.body || e.message || String(e);
-          console.error(`[Job ${jobId}] Kling scene ${i+1} attempt ${attempt} error — status: ${status}, body:`, JSON.stringify(body).slice(0, 600));
+          console.error(`[Kling] Scene ${i+1} attempt ${attempt} ERROR — status: ${status}, body:`, JSON.stringify(body).slice(0, 600));
         }
         if (attempt < 3) {
           await new Promise(r => setTimeout(r, 3000));
