@@ -54,53 +54,6 @@ export default function LandingPage() {
   const step1Ref = useRef(null)
   const step4Ref = useRef(null)
 
-  // Hero carousel — 18 cards (6 frames × 3 copies) for seamless loop.
-  // We keep the logical index in [3, 14] and snap by ±6 when it drifts
-  // past either edge. Each copy's position i shows the same frame as
-  // i±6, so swapping transition:none and jumping is visually invisible.
-  const carouselTrackRef = useRef(null)
-  const carouselInitRef = useRef(true)
-  const [carouselIndex, setCarouselIndex] = useState(6)
-  const isPausedRef = useRef(false)
-
-  const applyCarouselTransform = (index, instant) => {
-    const track = carouselTrackRef.current
-    if (!track) return
-    const card = track.querySelector('.carousel-card')
-    if (!card) return
-    const offset = (card.offsetWidth + 10) * index
-    if (instant) {
-      track.style.transition = 'none'
-      track.style.transform = `translateX(${offset}px)`
-      void track.offsetHeight
-      track.style.transition = ''
-    } else {
-      track.style.transform = `translateX(${offset}px)`
-    }
-  }
-
-  const moveCarousel = (delta) => setCarouselIndex(prev => prev + delta)
-
-  useEffect(() => {
-    applyCarouselTransform(carouselIndex, carouselInitRef.current)
-    carouselInitRef.current = false
-    if (carouselIndex < 3 || carouselIndex > 14) {
-      const t = setTimeout(() => {
-        const wrapped = carouselIndex < 3 ? carouselIndex + 6 : carouselIndex - 6
-        applyCarouselTransform(wrapped, true)
-        setCarouselIndex(wrapped)
-      }, 650)
-      return () => clearTimeout(t)
-    }
-  }, [carouselIndex])
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!isPausedRef.current) setCarouselIndex(prev => prev + 1)
-    }, 4000)
-    return () => clearInterval(interval)
-  }, [])
-
   useEffect(() => {
     if (resultVideoRef.current) resultVideoRef.current.muted = !soundEnabled
   }, [soundEnabled])
@@ -318,61 +271,83 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div className="hero-carousel reveal delay-2">
-            <div className="carousel-label">
-              <span className="pulse" />
-              <span>דוגמאות · SAMPLES</span>
-              <span className="accent">● LIVE</span>
-            </div>
-
-            <div
-              className="carousel-viewport"
-              onMouseEnter={() => { isPausedRef.current = true }}
-              onMouseLeave={() => { isPausedRef.current = false }}
-            >
-              <button
-                type="button"
-                className="carousel-nav carousel-nav-prev"
-                onClick={() => moveCarousel(-1)}
-                aria-label="Previous"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-
-              <div className="carousel-track" ref={carouselTrackRef}>
-                {[1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6].map((n, i) => {
-                  const base = `/landing-assets/frames/frame-0${n}`
-                  return (
-                    <div key={i} className="carousel-card">
-                      <picture>
-                        <source srcSet={`${base}.webp`} type="image/webp" />
-                        <img src={`${base}.jpg`} alt="" loading={i < 6 ? 'eager' : 'lazy'} />
-                      </picture>
-                    </div>
-                  )
-                })}
+          <div className="hero-animation reveal delay-2">
+            <div className="editorial-frame">
+              <div className="label-top">
+                <span className="accent">● LIVE</span> PREVIEW · AUTO-GENERATED
               </div>
+              <div className="label-bottom">3 STEPS · 12 SECONDS · INFINITE LOOP</div>
+              <span className="corner tl" /><span className="corner tr" />
+              <span className="corner bl" /><span className="corner br" />
 
-              <button
-                type="button"
-                className="carousel-nav carousel-nav-next"
-                onClick={() => moveCarousel(1)}
-                aria-label="Next"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <div className="animation-stage">
+                <div className="stage-glow" />
+
+                <div className="steam">
+                  <span /><span /><span /><span /><span /><span />
+                </div>
+
+                <div className="ingredient ingredient-product">
+                  <picture>
+                    <source srcSet={`/landing-assets/product-${currentProduct}.webp`} type="image/webp" />
+                    <img src={`/landing-assets/product-${currentProduct}.jpg`} alt="" />
+                  </picture>
+                  <div className="ingredient-label">מוצר · PRODUCT</div>
+                </div>
+
+                <div className="ingredient ingredient-script">
+                  <div className="script-card">
+                    <div className="script-line" />
+                    <div className="script-line" />
+                    <div className="script-line short" />
+                  </div>
+                  <div className="ingredient-label">סקריפט · SCRIPT</div>
+                </div>
+
+                <div className="ingredient ingredient-avatar">
+                  <picture>
+                    <source srcSet="/landing-assets/avatar-daniel.webp" type="image/webp" />
+                    <img src="/landing-assets/avatar-daniel.jpg" alt="" />
+                  </picture>
+                  <div className="ingredient-label">אווטאר · AVATAR</div>
+                </div>
+
+                <svg className="cauldron" viewBox="0 0 200 160" fill="none" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="cauldronBody" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stopColor="#1a0d14" />
+                      <stop offset="1" stopColor="#0A0908" />
+                    </linearGradient>
+                    <radialGradient id="cauldronInner" cx="0.5" cy="0.3" r="0.7">
+                      <stop offset="0" stopColor="#FF0080" stopOpacity="0.9" />
+                      <stop offset="0.6" stopColor="#FF0080" stopOpacity="0.3" />
+                      <stop offset="1" stopColor="#FF0080" stopOpacity="0" />
+                    </radialGradient>
+                  </defs>
+                  <path
+                    d="M 30 60 Q 30 140 100 145 Q 170 140 170 60 L 180 55 L 175 45 L 25 45 L 20 55 Z"
+                    fill="url(#cauldronBody)"
+                    stroke="#FF0080"
+                    strokeWidth="2"
+                  />
+                  <ellipse cx="100" cy="55" rx="70" ry="10" fill="url(#cauldronInner)" />
+                  <path d="M 25 60 Q 10 65 15 80" stroke="#FF0080" strokeWidth="2" fill="none" />
+                  <path d="M 175 60 Q 190 65 185 80" stroke="#FF0080" strokeWidth="2" fill="none" />
+                  <circle cx="80" cy="52" r="3" fill="#FF0080" className="bubble b1" />
+                  <circle cx="110" cy="50" r="2" fill="#FF0080" className="bubble b2" />
+                  <circle cx="130" cy="55" r="2.5" fill="#FF0080" className="bubble b3" />
                 </svg>
-              </button>
-            </div>
 
-            <div className="carousel-meta">
-              <span>9:16 · VERTICAL</span>
-              <span className="sep">///</span>
-              <span>HEBREW VO</span>
-              <span className="sep">///</span>
-              <span className="accent">6 דוגמאות</span>
+                <div className="result-frame">
+                  <img src={`/landing-assets/poster-${currentProduct}.jpg`} alt="" />
+                  <div className="result-badge">
+                    <span className="check">✓</span>
+                    <span>מוכן</span>
+                  </div>
+                </div>
+
+                <div className="flash" />
+              </div>
             </div>
           </div>
         </div>
@@ -844,97 +819,208 @@ export default function LandingPage() {
         }
 
         /* ============================================================
-           HERO CAROUSEL — horizontal 9:16 card rail with auto-scroll.
+           HERO ANIMATION — 12s recipe loop: ingredients → cauldron → frame.
            ============================================================ */
-        .hero-carousel { position: relative; width: 100%; }
-
-        .carousel-label,
-        .carousel-meta {
-          display: flex; justify-content: center; align-items: center;
-          gap: 12px;
-          font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em;
-          text-transform: uppercase; color: var(--ink-3);
-          margin-bottom: 14px;
-        }
-        .carousel-meta { margin-top: 14px; margin-bottom: 0; }
-        .carousel-label .accent,
-        .carousel-meta .accent { color: var(--accent); font-weight: 700; }
-        .carousel-meta .sep { opacity: .4; }
-        .carousel-label .pulse {
-          width: 7px; height: 7px; border-radius: 50%;
-          background: var(--accent); box-shadow: 0 0 10px var(--accent-glow);
-          animation: pulse-dot 2s ease-in-out infinite;
-        }
-
-        .carousel-viewport {
+        .hero-animation {
           position: relative;
-          overflow: hidden;
-          border-radius: 8px;
-        }
-        .carousel-track {
-          display: flex; gap: 10px;
-          transition: transform .6s cubic-bezier(.2,.8,.2,1);
-          will-change: transform;
-        }
-
-        .carousel-card {
-          flex-shrink: 0;
-          width: calc((100% - 20px) / 2.5);
           aspect-ratio: 9/16;
-          border-radius: 6px; overflow: hidden;
+          max-height: 78vh;
+          justify-self: start;
+          width: 100%;
+        }
+        .animation-stage {
+          position: absolute; inset: 12px;
+          overflow: hidden;
+          border-radius: 6px;
+          background:
+            radial-gradient(circle at 50% 100%, rgba(255,0,128,0.15) 0%, transparent 50%),
+            var(--bg-2);
           border: 1px solid var(--line-2);
-          background: var(--bg-3);
-          box-shadow:
-            0 10px 30px -8px rgba(0,0,0,.5),
-            0 4px 12px -4px rgba(0,0,0,.3);
-          position: relative;
-          transition:
-            transform .4s cubic-bezier(.2,.8,.2,1),
-            border-color .3s,
-            box-shadow .3s;
         }
-        .carousel-card picture,
-        .carousel-card img {
+
+        .stage-glow {
+          position: absolute; bottom: -100px; left: 50%;
+          transform: translateX(-50%);
+          width: 300px; height: 300px;
+          background: radial-gradient(circle, rgba(255,0,128,0.4) 0%, transparent 70%);
+          filter: blur(40px);
+          animation: glowPulse 3s ease-in-out infinite;
+          pointer-events: none;
+        }
+        @keyframes glowPulse {
+          0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
+          50% { opacity: 1; transform: translateX(-50%) scale(1.2); }
+        }
+
+        .cauldron {
+          position: absolute; bottom: 18%; left: 50%;
+          transform: translateX(-50%);
+          width: 45%; max-width: 200px;
+          z-index: 2;
+          filter: drop-shadow(0 0 30px rgba(255,0,128,0.5));
+          animation: cauldronShake 12s ease-in-out infinite;
+        }
+        @keyframes cauldronShake {
+          0%, 45%, 100% { transform: translateX(-50%) rotate(0); }
+          50% { transform: translateX(calc(-50% - 3px)) rotate(-1deg); }
+          51% { transform: translateX(calc(-50% + 3px)) rotate(1deg); }
+          52% { transform: translateX(calc(-50% - 2px)) rotate(-0.5deg); }
+          53% { transform: translateX(calc(-50% + 2px)) rotate(0.5deg); }
+          60% { transform: translateX(-50%) rotate(0); }
+        }
+
+        .bubble { opacity: 0; animation: bubbleUp 2s ease-in-out infinite; }
+        .bubble.b1 { animation-delay: 0s; }
+        .bubble.b2 { animation-delay: 0.6s; }
+        .bubble.b3 { animation-delay: 1.2s; }
+        @keyframes bubbleUp {
+          0% { opacity: 0; transform: translateY(0) scale(0.5); }
+          30% { opacity: 1; }
+          100% { opacity: 0; transform: translateY(-15px) scale(1.2); }
+        }
+
+        .steam {
+          position: absolute; bottom: 40%; left: 50%;
+          transform: translateX(-50%);
+          width: 50%; height: 50%;
+          pointer-events: none; z-index: 3;
+        }
+        .steam span {
+          position: absolute; bottom: 0;
+          left: calc(20% + var(--i, 0) * 12%);
+          width: 20px; height: 20px; border-radius: 50%;
+          background: radial-gradient(circle, rgba(255,0,128,0.6) 0%, transparent 70%);
+          filter: blur(8px); opacity: 0;
+          animation: steamRise 3s ease-out infinite;
+        }
+        .steam span:nth-child(1) { --i: 0; animation-delay: 0s; }
+        .steam span:nth-child(2) { --i: 1; animation-delay: 0.5s; }
+        .steam span:nth-child(3) { --i: 2; animation-delay: 1s; }
+        .steam span:nth-child(4) { --i: 3; animation-delay: 1.5s; }
+        .steam span:nth-child(5) { --i: 4; animation-delay: 2s; }
+        .steam span:nth-child(6) { --i: 5; animation-delay: 2.5s; }
+        @keyframes steamRise {
+          0% { opacity: 0; transform: translateY(0) scale(0.5); }
+          30% { opacity: 0.8; }
+          100% { opacity: 0; transform: translateY(-100px) scale(2); }
+        }
+
+        .ingredient {
+          position: absolute; top: 8%; left: 50%;
+          transform: translateX(-50%);
+          width: 40%; max-width: 140px;
+          aspect-ratio: 1; opacity: 0; z-index: 4;
+        }
+        .ingredient picture,
+        .ingredient img {
           width: 100%; height: 100%;
-          object-fit: cover; display: block;
+          object-fit: cover;
+          border-radius: 8px;
+          border: 2px solid var(--accent);
+          box-shadow: 0 10px 30px rgba(255,0,128,0.4);
+          display: block;
         }
-        .carousel-card:hover {
-          border-color: var(--accent);
-          transform: translateY(-4px) scale(1.02);
+        .ingredient-label {
+          position: absolute; bottom: -24px; left: 50%;
+          transform: translateX(-50%);
+          font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
+          text-transform: uppercase; color: var(--accent);
+          white-space: nowrap; font-weight: 700;
+        }
+
+        .script-card {
+          width: 100%; height: 100%;
+          background: var(--bg-3);
+          border: 2px solid var(--accent);
+          border-radius: 8px;
+          padding: 20px 16px;
+          display: flex; flex-direction: column; justify-content: center;
+          gap: 8px;
+          box-shadow: 0 10px 30px rgba(255,0,128,0.4);
+        }
+        .script-line {
+          height: 6px;
+          background: linear-gradient(90deg, var(--ink-2) 0%, var(--ink-3) 100%);
+          border-radius: 3px;
+        }
+        .script-line.short { width: 60%; }
+
+        .ingredient-product { animation: fallIn 12s infinite; }
+        .ingredient-script { animation: fallIn 12s infinite; animation-delay: 2s; }
+        .ingredient-avatar { animation: fallIn 12s infinite; animation-delay: 4s; }
+
+        @keyframes fallIn {
+          0%   { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.8) rotate(-10deg); }
+          4%   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          10%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          15%  { opacity: 1; transform: translateX(-50%) translateY(60px) scale(0.7) rotate(15deg); }
+          17%  { opacity: 0; transform: translateX(-50%) translateY(120px) scale(0.3) rotate(30deg); }
+          100% { opacity: 0; }
+        }
+
+        .result-frame {
+          position: absolute; bottom: 30%; left: 50%;
+          transform: translateX(-50%) translateY(100px) scale(0.5);
+          width: 45%; max-width: 180px;
+          aspect-ratio: 9/16;
+          opacity: 0; z-index: 5;
+          animation: resultEmerge 12s infinite;
+          animation-delay: 7s;
+        }
+        .result-frame img {
+          width: 100%; height: 100%;
+          object-fit: cover;
+          border-radius: 8px;
+          border: 3px solid var(--accent);
           box-shadow:
-            0 20px 40px -10px rgba(255, 0, 128, .3),
-            0 8px 16px -4px rgba(0,0,0,.5);
-          z-index: 5;
+            0 0 50px rgba(255,0,128,0.6),
+            0 10px 30px rgba(0,0,0,0.5);
+          display: block;
+        }
+        @keyframes resultEmerge {
+          0%, 55%  { opacity: 0; transform: translateX(-50%) translateY(100px) scale(0.3); }
+          62%      { opacity: 1; transform: translateX(-50%) translateY(-30px) scale(1.15); }
+          68%      { transform: translateX(-50%) translateY(0) scale(1); }
+          90%      { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+          100%     { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(1); }
         }
 
-        .carousel-viewport::before,
-        .carousel-viewport::after {
-          content: "";
-          position: absolute; top: 0; bottom: 0;
-          width: 60px; pointer-events: none; z-index: 2;
-        }
-        .carousel-viewport::before { left: 0; background: linear-gradient(to right, var(--bg) 0%, transparent 100%); }
-        .carousel-viewport::after { right: 0; background: linear-gradient(to left, var(--bg) 0%, transparent 100%); }
-
-        .carousel-nav {
-          position: absolute; top: 50%; transform: translateY(-50%);
-          z-index: 10;
-          width: 44px; height: 44px; border-radius: 50%;
-          background: rgba(255, 255, 255, 0.95);
-          border: none; cursor: pointer;
-          display: flex; align-items: center; justify-content: center;
-          color: var(--bg); transition: all .2s;
-          box-shadow: 0 4px 12px rgba(0,0,0,.4);
-        }
-        .carousel-nav:hover {
+        .result-badge {
+          position: absolute; top: -12px; right: -12px;
           background: var(--accent); color: var(--bg);
-          transform: translateY(-50%) scale(1.1);
+          padding: 6px 12px; border-radius: 20px;
+          font-family: var(--mono); font-size: 10px; font-weight: 700;
+          letter-spacing: 0.1em; text-transform: uppercase;
+          display: flex; align-items: center; gap: 5px;
+          box-shadow: 0 4px 12px rgba(255,0,128,0.5);
         }
-        .carousel-nav-prev { left: 10px; }
-        .carousel-nav-next { right: 10px; }
+        .result-badge .check { font-size: 12px; font-weight: 900; }
 
-        @media (min-width: 1400px) {
-          .carousel-card { width: calc((100% - 30px) / 3.2); }
+        .flash {
+          position: absolute; inset: 0;
+          background: white; opacity: 0;
+          pointer-events: none; z-index: 6;
+          animation: flashPulse 12s infinite;
+          animation-delay: 6.5s;
+        }
+        @keyframes flashPulse {
+          0%, 54%, 58%, 100% { opacity: 0; }
+          55% { opacity: 0.7; }
+          56% { opacity: 0.3; }
+          57% { opacity: 0.9; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .ingredient-product,
+          .ingredient-script,
+          .ingredient-avatar,
+          .result-frame,
+          .flash,
+          .cauldron,
+          .stage-glow,
+          .bubble,
+          .steam span { animation: none; }
+          .result-frame { opacity: 1; transform: translateX(-50%); }
         }
         .editorial-frame { position: relative; width: 100%; height: 100%; }
         .editorial-frame .corner {
@@ -1367,11 +1453,12 @@ export default function LandingPage() {
           .pricing-grid { grid-template-columns: 1fr; }
           .scroll-cue { display: none; }
         }
-        @media (max-width: 768px) {
-          .carousel-card { width: calc((100% - 10px) / 1.8); }
-          .carousel-viewport::before,
-          .carousel-viewport::after { width: 30px; }
-          .carousel-nav { width: 36px; height: 36px; }
+        @media (max-width: 900px) {
+          .hero-animation { max-height: 60vh; aspect-ratio: 3/4; }
+          .ingredient { width: 30%; }
+          .ingredient-label { font-size: 9px; bottom: -20px; }
+          .cauldron { width: 35%; }
+          .result-frame { width: 35%; }
         }
 
         .reveal {
