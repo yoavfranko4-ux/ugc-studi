@@ -38,16 +38,19 @@ const PRODUCTS = {
 export default function LandingPage() {
   const [type, setType] = useState('product')   // 'product' | 'business' — hero headline variant
   const [voiceActive, setVoiceActive] = useState('noa')
-  const [currentProduct, setCurrentProduct] = useState('icecream')
+
+  // Two independent product states:
+  //  - heroProduct:  drives the cauldron animation, auto-cycles every 12s,
+  //                  never reacts to flow-section tab clicks.
+  //  - flowProduct:  drives the Step 1-4 demo (tabs, typewriter, dropzone,
+  //                  avatar selection, result video). Never auto-cycles.
+  const [heroProduct, setHeroProduct] = useState('icecream')
+  const [flowProduct, setFlowProduct] = useState('icecream')
+
   const [scrolled, setScrolled] = useState(false)
   const [typedText, setTypedText] = useState('')
   const [hasImage, setHasImage] = useState(false)
   const [imageSrc, setImageSrc] = useState('')
-
-  // Hero recipe animation auto-cycles products every 12s (matches the
-  // fallIn/resultEmerge loop). User tab clicks pause the cycle for 30s so
-  // their selection has a chance to land before we rotate again.
-  const [userInteracted, setUserInteracted] = useState(false)
 
   // Global sound state. Only the Step 4 result video plays audio — hero is
   // now a static frames grid. First toggle dismisses the hint permanently.
@@ -146,12 +149,11 @@ export default function LandingPage() {
     }, 35)
   }
 
-  // Switch product (from tab click). Pauses the hero auto-cycle for 30s
-  // so the user's choice actually sticks.
+  // Switch flow-section product (tab click). Affects Step 1-4 only;
+  // the hero cauldron auto-cycle is fully independent now.
   const switchProduct = (key) => {
-    setUserInteracted(true)
-    if (key === currentProduct) return
-    setCurrentProduct(key)
+    if (key === flowProduct) return
+    setFlowProduct(key)
     const data = PRODUCTS[key]
     retypeText(data.script)
     setHasImage(false)
@@ -166,27 +168,17 @@ export default function LandingPage() {
     }
   }
 
-  // Resume auto-cycle 30s after the last user interaction.
+  // Hero cauldron: rotate every 12s forever. No user-pause logic —
+  // flow tabs can't reach this state.
   useEffect(() => {
-    if (!userInteracted) return
-    const t = setTimeout(() => setUserInteracted(false), 30000)
-    return () => clearTimeout(t)
-  }, [userInteracted])
-
-  // Cycle through products every 12s — matches the hero animation loop.
-  useEffect(() => {
-    if (userInteracted) return
     const interval = setInterval(() => {
-      setCurrentProduct(prev => {
+      setHeroProduct(prev => {
         const i = PRODUCT_CYCLE.indexOf(prev)
-        const next = PRODUCT_CYCLE[(i + 1) % PRODUCT_CYCLE.length]
-        // Temporary diagnostic — remove once the cycle is confirmed stable.
-        console.log(`[Cycle] ${prev} → ${next} at ${Date.now()}`)
-        return next
+        return PRODUCT_CYCLE[(i + 1) % PRODUCT_CYCLE.length]
       })
     }, 12000)
     return () => clearInterval(interval)
-  }, [userInteracted])
+  }, [])
 
   // Start typing when step 1 enters view
   useEffect(() => {
@@ -197,9 +189,9 @@ export default function LandingPage() {
         if (e.isIntersecting && !typingStartedRef.current) {
           typingStartedRef.current = true
           setTimeout(() => {
-            retypeText(PRODUCTS[currentProduct].script)
+            retypeText(PRODUCTS[flowProduct].script)
             setTimeout(() => {
-              setImageSrc(PRODUCTS[currentProduct].image)
+              setImageSrc(PRODUCTS[flowProduct].image)
               setHasImage(true)
             }, 2500)
             setTimeout(() => {
@@ -234,7 +226,8 @@ export default function LandingPage() {
     console.log(`TODO: implement checkout for ${tier}`)
   }
 
-  const data = PRODUCTS[currentProduct]
+  // Flow-section derived data. Hero animation reads heroProduct directly.
+  const data = PRODUCTS[flowProduct]
 
   return (
     <>
@@ -314,7 +307,7 @@ export default function LandingPage() {
               <span className="corner bl" /><span className="corner br" />
 
               <div className="animation-stage-wrapper">
-              <div className="animation-stage" key={currentProduct}>
+              <div className="animation-stage" key={heroProduct}>
                 <div className="stage-glow" />
 
                 <div className="steam">
@@ -323,8 +316,8 @@ export default function LandingPage() {
 
                 <div className="ingredient ingredient-product">
                   <picture>
-                    <source srcSet={`/landing-assets/product-${currentProduct}.webp`} type="image/webp" />
-                    <img src={`/landing-assets/product-${currentProduct}.jpg`} alt="" />
+                    <source srcSet={`/landing-assets/product-${heroProduct}.webp`} type="image/webp" />
+                    <img src={`/landing-assets/product-${heroProduct}.jpg`} alt="" />
                   </picture>
                   <div className="ingredient-label">מוצר · PRODUCT</div>
                 </div>
@@ -340,8 +333,8 @@ export default function LandingPage() {
 
                 <div className="ingredient ingredient-avatar">
                   <picture>
-                    <source srcSet={`/landing-assets/avatar-${PRODUCT_AVATARS[currentProduct]}.webp`} type="image/webp" />
-                    <img src={`/landing-assets/avatar-${PRODUCT_AVATARS[currentProduct]}.jpg`} alt="" />
+                    <source srcSet={`/landing-assets/avatar-${PRODUCT_AVATARS[heroProduct]}.webp`} type="image/webp" />
+                    <img src={`/landing-assets/avatar-${PRODUCT_AVATARS[heroProduct]}.jpg`} alt="" />
                   </picture>
                   <div className="ingredient-label">אווטאר · AVATAR</div>
                 </div>
@@ -402,8 +395,8 @@ export default function LandingPage() {
 
                 <div className="result-frame">
                   <picture>
-                    <source srcSet={`/landing-assets/scene3-${currentProduct}.webp`} type="image/webp" />
-                    <img src={`/landing-assets/scene3-${currentProduct}.jpg`} alt="" />
+                    <source srcSet={`/landing-assets/scene3-${heroProduct}.webp`} type="image/webp" />
+                    <img src={`/landing-assets/scene3-${heroProduct}.jpg`} alt="" />
                   </picture>
                   <div className="result-badge">
                     <span className="check">✓</span>
@@ -451,7 +444,7 @@ export default function LandingPage() {
           ].map(t => (
             <button
               key={t.key}
-              className={`tab ${currentProduct === t.key ? 'active' : ''}`}
+              className={`tab ${flowProduct === t.key ? 'active' : ''}`}
               onClick={() => switchProduct(t.key)}
             >
               <span className="tab-num">{t.num}</span>
