@@ -2,24 +2,29 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+// Product images now ship as {base}.webp + {base}.jpg for mobile fallback,
+// so `image` stores the base path (no extension).
 const PRODUCTS = {
   icecream: {
     script: "חזית הגלידריה הכי צבעונית בתל אביב. גלידה איטלקית עם טעמים ייחודיים, ישיבה בחוץ, אווירה שכונתית חמה. מתאים לקיץ, למשפחות, ולחברים.",
-    image: "/landing-assets/product-icecream.png",
+    image: "/landing-assets/product-icecream",
+    imageW: 1000, imageH: 545,
     video: "/landing-assets/video-icecream.mp4",
     poster: "/landing-assets/poster-icecream.jpg",
     selected: 0,
   },
   kipa: {
     script: "כיפת קטיפה איכותית בגווני ורוד ופודרה עם רקמה מעוצבת. מתאימה לחתונות, לבר מצווה ולשבת. הרגשה רכה, מראה אלגנטי, ייחודית במיוחד.",
-    image: "/landing-assets/product-kipa.webp",
+    image: "/landing-assets/product-kipa",
+    imageW: 500, imageH: 500,
     video: "/landing-assets/video-kipa.mp4",
     poster: "/landing-assets/poster-kipa.jpg",
     selected: 1,
   },
   teeth: {
     script: "אבקת הלבנת שיניים טבעית 100% על בסיס פחם פעיל. מלבינה ומנקה מבלי לפגוע באמייל. רק 30 שניות ביום לחיוך לבן ובוהק.",
-    image: "/landing-assets/product-teeth.jpg",
+    image: "/landing-assets/product-teeth",
+    imageW: 1000, imageH: 1000,
     video: "/landing-assets/video-teeth.mp4",
     poster: "/landing-assets/poster-teeth.jpg",
     selected: 2,
@@ -35,42 +40,33 @@ export default function LandingPage() {
   const [hasImage, setHasImage] = useState(false)
   const [imageSrc, setImageSrc] = useState('')
 
-  // Global sound state. Videos autoplay muted (browser policy); one toggle
-  // unmutes every video on the page. Once the user toggles once, the floating
-  // "לחץ לצליל" hint never reappears.
+  // Global sound state. Only the Step 4 result video plays audio — hero is
+  // now a static frames grid. First toggle dismisses the hint permanently.
   const [soundEnabled, setSoundEnabled] = useState(false)
   const [hintDismissed, setHintDismissed] = useState(false)
-  const [heroHint, setHeroHint] = useState(true)
   const [resultHint, setResultHint] = useState(true)
 
   const typingIntervalRef = useRef(null)
   const branchRef = useRef(null)
   const branchFillRef = useRef(null)
-  const heroVideoRef = useRef(null)
   const resultVideoRef = useRef(null)
   const typingStartedRef = useRef(false)
   const step1Ref = useRef(null)
   const step4Ref = useRef(null)
 
-  // Sync mute state to every <video> the page owns a ref to.
   useEffect(() => {
-    [heroVideoRef.current, resultVideoRef.current].forEach(v => {
-      if (v) v.muted = !soundEnabled
-    })
+    if (resultVideoRef.current) resultVideoRef.current.muted = !soundEnabled
   }, [soundEnabled])
 
-  // Initial 3s pulse for each hint, then auto-hide. Skipped if already dismissed.
   useEffect(() => {
     if (hintDismissed) return
-    const t1 = setTimeout(() => setHeroHint(false), 3000)
-    const t2 = setTimeout(() => setResultHint(false), 3000)
-    return () => { clearTimeout(t1); clearTimeout(t2) }
+    const t = setTimeout(() => setResultHint(false), 3000)
+    return () => clearTimeout(t)
   }, [hintDismissed])
 
   const toggleSound = () => {
     setSoundEnabled(s => !s)
     setHintDismissed(true)
-    setHeroHint(false)
     setResultHint(false)
   }
 
@@ -275,34 +271,24 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div className="hero-video reveal delay-2">
+          <div className="hero-frames reveal delay-2">
             <div className="editorial-frame">
-              <div className="label-top">FRAME 01 / AUTO-GEN &nbsp;·&nbsp; <span className="accent">live preview</span></div>
-              <div className="label-bottom">9:16 · 720×1280 · H.264 · HEBREW VO</div>
+              <div className="label-top">FRAMES 01-06 / AUTO-GEN &nbsp;·&nbsp; <span className="accent">pre-generated</span></div>
+              <div className="label-bottom">9:16 · HEBREW VO · MULTIPLE SCENES</div>
               <span className="corner tl" /><span className="corner tr" />
               <span className="corner bl" /><span className="corner br" />
-              <div
-                className="inner"
-                onMouseEnter={() => { if (!hintDismissed) setHeroHint(true) }}
-                onMouseLeave={() => { if (!hintDismissed) setHeroHint(false) }}
-              >
-                <video ref={heroVideoRef} autoPlay muted loop playsInline poster="/landing-assets/poster-icecream.jpg">
-                  <source src="/landing-assets/video-icecream.mp4" type="video/mp4" />
-                </video>
-                <button
-                  className="sound-toggle"
-                  onClick={toggleSound}
-                  aria-label={soundEnabled ? 'השתק' : 'הפעל סאונד'}
-                >
-                  {soundEnabled ? '🔊' : '🔇'}
-                </button>
-                {heroHint && !hintDismissed && (
-                  <div className="sound-hint">🔊 לחץ לצליל</div>
-                )}
-              </div>
-              <div className="rec-corner">
-                <span className="rec" />
-                <span>LIVE</span>
+              <div className="frames-grid">
+                {[1, 2, 3, 4, 5, 6].map(n => {
+                  const base = `/landing-assets/frames/frame-${String(n).padStart(2, '0')}`
+                  return (
+                    <div key={n} className="frame-tile">
+                      <picture>
+                        <source srcSet={`${base}.webp`} type="image/webp" />
+                        <img src={`${base}.jpg`} alt="" width={1000} height={1792} loading="eager" />
+                      </picture>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </div>
@@ -387,7 +373,12 @@ export default function LandingPage() {
                   גרור תמונה לכאן<br />
                   <span style={{ color: 'var(--ink-3)' }}>JPG · PNG · WEBP</span>
                 </div>
-                {imageSrc && <img src={imageSrc} alt="" />}
+                {imageSrc && (
+                  <picture>
+                    <source srcSet={`${imageSrc}.webp`} type="image/webp" />
+                    <img src={`${imageSrc}.jpg`} alt="" width={data.imageW} height={data.imageH} loading="lazy" />
+                  </picture>
+                )}
                 <div className="demo-dropzone-check">✓ הועלה בהצלחה</div>
               </div>
             </div>
@@ -405,12 +396,15 @@ export default function LandingPage() {
               <div className="cap"><span className="bullet">●</span> CAST · #avatar</div>
               <div className="demo-avatars">
                 {[
-                  { key: 'noa',    img: '/landing-assets/avatar-noa.png',    name: 'נועה',  voice: 'נועה · קול נקבי' },
-                  { key: 'daniel', img: '/landing-assets/avatar-daniel.png', name: 'דניאל', voice: 'דניאל · קול זכרי' },
-                  { key: 'maya',   img: '/landing-assets/avatar-maya.png',   name: 'מיה',   voice: 'מיה · קול נקבי עדין' },
+                  { key: 'noa',    base: '/landing-assets/avatar-noa',    name: 'נועה',  voice: 'נועה · קול נקבי' },
+                  { key: 'daniel', base: '/landing-assets/avatar-daniel', name: 'דניאל', voice: 'דניאל · קול זכרי' },
+                  { key: 'maya',   base: '/landing-assets/avatar-maya',   name: 'מיה',   voice: 'מיה · קול נקבי עדין' },
                 ].map((av, i) => (
                   <div key={av.key} className={`demo-avatar ${i === data.selected ? 'selected' : ''}`}>
-                    <img src={av.img} alt={av.name} />
+                    <picture>
+                      <source srcSet={`${av.base}.webp`} type="image/webp" />
+                      <img src={`${av.base}.jpg`} alt={av.name} width={1000} height={1000} loading="lazy" />
+                    </picture>
                     <div className="name-badge">
                       <span className="name">{av.name}</span>
                       <span className="voice">{av.voice}</span>
@@ -759,9 +753,51 @@ export default function LandingPage() {
           text-transform: uppercase; color: var(--ink-3); margin-top: 28px;
         }
 
-        .hero-video {
+        .hero-video,
+        .hero-frames {
           position: relative; aspect-ratio: 9/16; max-height: 78vh;
           justify-self: start; width: 100%;
+        }
+        .frames-grid {
+          position: absolute; inset: 12px;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          grid-template-rows: repeat(3, 1fr);
+          gap: 6px;
+          border-radius: 4px;
+          overflow: hidden;
+        }
+        .frame-tile {
+          overflow: hidden;
+          background: var(--bg-3);
+          border: 1px solid var(--line);
+          position: relative;
+          opacity: 0;
+          animation: frameIn .6s ease-out forwards;
+        }
+        .frame-tile picture { display: block; width: 100%; height: 100%; }
+        .frame-tile img {
+          width: 100%; height: 100%;
+          object-fit: cover; display: block;
+          transition: transform .6s ease-out;
+        }
+        .frame-tile:hover img { transform: scale(1.08); }
+        .frame-tile:nth-child(1) { animation-delay: .1s; }
+        .frame-tile:nth-child(2) { animation-delay: .2s; }
+        .frame-tile:nth-child(3) { animation-delay: .3s; }
+        .frame-tile:nth-child(4) { animation-delay: .4s; }
+        .frame-tile:nth-child(5) { animation-delay: .5s; }
+        .frame-tile:nth-child(6) { animation-delay: .6s; }
+        @keyframes frameIn {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: none; }
+        }
+
+        /* <picture> should honor parent avatar card dimensions. */
+        .demo-avatar picture {
+          display: block;
+          width: 100%; height: 100%;
+          position: absolute; inset: 0;
         }
         .editorial-frame { position: relative; width: 100%; height: 100%; }
         .editorial-frame .corner {
