@@ -12,9 +12,9 @@ const FFMPEG = path.resolve('node_modules/ffmpeg-static/ffmpeg.exe')
 const PUB = path.resolve('public/landing-assets')
 
 const TARGETS = [
-  { product: 'icecream', timestamp: '00:00:16' },
-  { product: 'kipa',     timestamp: '00:00:16' },
-  { product: 'teeth',    timestamp: '00:00:16' },
+  { product: 'icecream', timestamp: '00:00:12' },
+  { product: 'kipa',     timestamp: '00:00:12' },
+  { product: 'teeth',    timestamp: '00:00:12' },
 ]
 
 const MAX_WIDTH = 1000

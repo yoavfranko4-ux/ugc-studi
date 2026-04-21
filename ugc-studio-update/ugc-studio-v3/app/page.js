@@ -179,7 +179,10 @@ export default function LandingPage() {
     const interval = setInterval(() => {
       setCurrentProduct(prev => {
         const i = PRODUCT_CYCLE.indexOf(prev)
-        return PRODUCT_CYCLE[(i + 1) % PRODUCT_CYCLE.length]
+        const next = PRODUCT_CYCLE[(i + 1) % PRODUCT_CYCLE.length]
+        // Temporary diagnostic — remove once the cycle is confirmed stable.
+        console.log(`[Cycle] ${prev} → ${next} at ${Date.now()}`)
+        return next
       })
     }, 12000)
     return () => clearInterval(interval)
@@ -310,7 +313,8 @@ export default function LandingPage() {
               <span className="corner tl" /><span className="corner tr" />
               <span className="corner bl" /><span className="corner br" />
 
-              <div className="animation-stage">
+              <div className="animation-stage-wrapper">
+              <div className="animation-stage" key={currentProduct}>
                 <div className="stage-glow" />
 
                 <div className="steam">
@@ -408,6 +412,7 @@ export default function LandingPage() {
                 </div>
 
                 <div className="flash" />
+              </div>
               </div>
             </div>
           </div>
@@ -889,14 +894,22 @@ export default function LandingPage() {
           justify-self: start;
           width: 100%;
         }
-        .animation-stage {
+        .animation-stage-wrapper {
           position: absolute; inset: 12px;
           overflow: hidden;
           border-radius: 6px;
+          border: 1px solid var(--line-2);
           background:
             radial-gradient(circle at 50% 100%, rgba(255,0,128,0.15) 0%, transparent 50%),
             var(--bg-2);
-          border: 1px solid var(--line-2);
+        }
+        .animation-stage {
+          position: absolute; inset: 0;
+          animation: stageFadeIn 0.4s ease-out;
+        }
+        @keyframes stageFadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
 
         .stage-glow {
