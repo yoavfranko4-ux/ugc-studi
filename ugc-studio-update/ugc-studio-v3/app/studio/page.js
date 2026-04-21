@@ -1310,7 +1310,7 @@ export default function Home() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 40 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 900, color: '#f0f0ff', marginBottom: 4 }}>יצירת סרטון</h1>
+          <h1 style={{ fontSize: 28, fontWeight: 900, color: '#F5F5F4', marginBottom: 4 }}>יצירת סרטון</h1>
           <p style={{ color: '#52525b', fontSize: 14 }}>Agent AI יוצר 4 סצנות מחוברות — סיפור אחד שלם</p>
         </div>
         <a href="/dashboard" style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#52525b', fontSize: 13, textDecoration: 'none' }}>
@@ -1332,14 +1332,14 @@ export default function Home() {
               <button key={m.id} onClick={() => setMode(m.id)}
                 style={{
                   padding: 18, borderRadius: 14,
-                  border: `2px solid ${sel ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.08)'}`,
-                  background: sel ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)',
+                  border: `2px solid ${sel ? 'rgba(255,0,128,0.6)' : 'rgba(255,255,255,0.08)'}`,
+                  background: sel ? 'rgba(255,0,128,0.08)' : 'rgba(255,255,255,0.02)',
                   cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12,
                   direction: 'rtl', fontFamily: 'Heebo,sans-serif', transition: 'all 200ms ease'
                 }}>
                 <div style={{ fontSize: 28 }}>{m.emoji}</div>
                 <div style={{ flex: 1, textAlign: 'right' }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f0ff' }}>{m.label} {m.emoji}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#F5F5F4' }}>{m.label} {m.emoji}</div>
                   <div style={{ fontSize: 12, color: '#71717a', marginTop: 2 }}>{m.desc}</div>
                 </div>
               </button>
@@ -1351,7 +1351,7 @@ export default function Home() {
       {/* API Keys */}
       <div style={cardS}>
         <button onClick={() => setKeysOpen(o => !o)} style={{ ...ghostBtn, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FF0080" strokeWidth="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
           API Keys
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: keysOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 200ms' }}><polyline points="6 9 12 15 18 9"/></svg>
         </button>
@@ -1359,8 +1359,8 @@ export default function Home() {
           <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div><label style={lblS}>fal.ai Key</label><input type="password" value={falKey} onChange={e => setFalKey(e.target.value)} placeholder="xxxxxxxx:xxxxxxxx" style={{ ...inpS, marginTop: 6 }} /></div>
             <div><label style={lblS}>ElevenLabs Key</label><input type="password" value={elevenKey} onChange={e => setElevenKey(e.target.value)} placeholder="sk_xxxxxxxx" style={{ ...inpS, marginTop: 6 }} /></div>
-            <div style={{ gridColumn: '1/-1', background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.12)', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#52525b' }}>
-              <span style={{ color: '#a855f7', fontWeight: 600 }}>Claude API</span> רץ בשרת — לא צריך מפתח
+            <div style={{ gridColumn: '1/-1', background: 'rgba(255,0,128,0.04)', border: '1px solid rgba(255,0,128,0.12)', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#52525b' }}>
+              <span style={{ color: '#FF0080', fontWeight: 600 }}>Claude API</span> רץ בשרת — לא צריך מפתח
             </div>
           </div>
         )}
@@ -1378,10 +1378,10 @@ export default function Home() {
                   if (!allowed) { setUpgradeOpen(true); return }
                   setSelectedAvatar(av); setCustomAvatar(null)
                 }}
-                style={{ position: 'relative', border: `2px solid ${sel ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 14, overflow: 'hidden', cursor: 'pointer', aspectRatio: '3/4', boxShadow: sel ? '0 0 24px rgba(168,85,247,0.2)' : 'none', transition: 'all 300ms ease' }}>
+                style={{ position: 'relative', border: `2px solid ${sel ? 'rgba(255,0,128,0.6)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 14, overflow: 'hidden', cursor: 'pointer', aspectRatio: '3/4', boxShadow: sel ? '0 0 24px rgba(255,0,128,0.2)' : 'none', transition: 'all 300ms ease' }}>
                 <img src={av.url} alt={av.name} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: allowed ? 'none' : 'grayscale(1) brightness(0.55)' }} />
                 <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', padding: '20px 6px 6px', fontSize: 11, color: 'rgba(255,255,255,0.8)', textAlign: 'center', fontWeight: 500 }}>{av.name}</div>
-                {sel && <div style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {sel && <div style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, background: 'linear-gradient(135deg, #FF0080, #FF0080)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
                 </div>}
                 {!allowed && <div style={{ position: 'absolute', top: 6, left: 6, padding: '3px 8px', borderRadius: 6, background: 'rgba(255,0,128,0.9)', color: '#fff', fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>🔒 פרו בלבד</div>}
@@ -1489,8 +1489,8 @@ export default function Home() {
                 style={{
                   padding: 18,
                   borderRadius: 14,
-                  border: `2px solid ${selected ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.08)'}`,
-                  background: selected ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)',
+                  border: `2px solid ${selected ? 'rgba(255,0,128,0.6)' : 'rgba(255,255,255,0.08)'}`,
+                  background: selected ? 'rgba(255,0,128,0.08)' : 'rgba(255,255,255,0.02)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -1504,7 +1504,7 @@ export default function Home() {
               >
                 <div style={{ fontSize: 32 }}>{v.emoji}</div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f0ff' }}>{v.name}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#F5F5F4' }}>{v.name}</div>
                   <div style={{ fontSize: 12, color: '#71717a', marginTop: 2 }}>{v.gender === 'female' ? 'קול נשי' : 'קול גברי'}</div>
                 </div>
                 {!allowed && <div style={{ position: 'absolute', top: 6, left: 6, padding: '3px 8px', borderRadius: 6, background: 'rgba(255,0,128,0.9)', color: '#fff', fontSize: 10, fontWeight: 700 }}>🔒 פרו בלבד</div>}
@@ -1522,9 +1522,9 @@ export default function Home() {
                   }}
                   style={{
                     width: 36, height: 36, borderRadius: '50%',
-                    background: isPlaying ? 'rgba(239,68,68,0.15)' : 'rgba(168,85,247,0.15)',
-                    border: `1px solid ${isPlaying ? 'rgba(239,68,68,0.4)' : 'rgba(168,85,247,0.4)'}`,
-                    color: isPlaying ? '#ef4444' : '#a855f7',
+                    background: isPlaying ? 'rgba(239,68,68,0.15)' : 'rgba(255,0,128,0.15)',
+                    border: `1px solid ${isPlaying ? 'rgba(239,68,68,0.4)' : 'rgba(255,0,128,0.4)'}`,
+                    color: isPlaying ? '#ef4444' : '#FF0080',
                     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
                   }}
                   title={isPlaying ? 'עצור' : 'נגן'}
@@ -1535,7 +1535,7 @@ export default function Home() {
                 </button>
                 {selected && (
                   <div style={{ position: 'absolute' }}>
-                    <div style={{ width: 20, height: 20, background: '#a855f7', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: -28, marginTop: -24 }}>
+                    <div style={{ width: 20, height: 20, background: '#FF0080', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: -28, marginTop: -24 }}>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
                     </div>
                   </div>
@@ -1559,24 +1559,24 @@ export default function Home() {
   if (step === 'generating') return (
     <div style={pageStyle}>
       <div style={{ textAlign: 'center', marginBottom: 40 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.15)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-          <div style={{ width: 24, height: 24, border: '3px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(255,0,128,0.08)', border: '1px solid rgba(255,0,128,0.15)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+          <div style={{ width: 24, height: 24, border: '3px solid rgba(255,0,128,0.2)', borderTopColor: '#FF0080', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
         </div>
-        <h2 style={{ fontSize: 24, fontWeight: 900, color: '#f0f0ff', marginBottom: 8 }}>Agent עובד...</h2>
+        <h2 style={{ fontSize: 24, fontWeight: 900, color: '#F5F5F4', marginBottom: 8 }}>Agent עובד...</h2>
         <p style={{ color: '#52525b', fontSize: 14 }}>יוצר סיפור מחובר עם 4 סצנות — 8-12 דקות</p>
       </div>
 
       <div style={cardS}>
         {AGENT_STEPS.map((s) => {
           const st = agentStatus[s.id]
-          const colors = { active: '#a855f7', done: '#22c55e', error: '#ef4444' }
+          const colors = { active: '#FF0080', done: '#22c55e', error: '#ef4444' }
           const c = colors[st] || '#27272a'
           return (
-            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 18px', background: st === 'active' ? 'rgba(168,85,247,0.04)' : 'transparent', borderRadius: 12, border: `1px solid ${st === 'active' ? 'rgba(168,85,247,0.2)' : st === 'done' ? 'rgba(34,197,94,0.15)' : st === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.04)'}`, marginBottom: 8, transition: 'all 0.4s ease' }}>
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 18px', background: st === 'active' ? 'rgba(255,0,128,0.04)' : 'transparent', borderRadius: 12, border: `1px solid ${st === 'active' ? 'rgba(255,0,128,0.2)' : st === 'done' ? 'rgba(34,197,94,0.15)' : st === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.04)'}`, marginBottom: 8, transition: 'all 0.4s ease' }}>
               <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${c}12`, color: c, flexShrink: 0 }}>
                 {st === 'done' ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5"><path d="M20 6L9 17l-5-5"/></svg>
                   : st === 'error' ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                  : st === 'active' ? <div style={{ width: 16, height: 16, border: '2px solid rgba(168,85,247,0.3)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  : st === 'active' ? <div style={{ width: 16, height: 16, border: '2px solid rgba(255,0,128,0.3)', borderTopColor: '#FF0080', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
                   : s.icon}
               </div>
               <div style={{ flex: 1, fontWeight: 600, fontSize: 14, color: st ? '#e4e4e7' : '#52525b' }}>{s.label}</div>
@@ -1613,7 +1613,7 @@ export default function Home() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             מודעה חדשה
           </button>
-          <h2 style={{ fontSize: 20, fontWeight: 900, color: '#f0f0ff', margin: 0 }}>עריכת סרטון</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 900, color: '#F5F5F4', margin: 0 }}>עריכת סרטון</h2>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {saveMsg && <span style={{ fontSize: 12, color: saveMsg.startsWith('שגיאה') ? '#ef4444' : '#22c55e', fontWeight: 600 }}>{saveMsg}</span>}
@@ -1621,7 +1621,7 @@ export default function Home() {
             {savingEdit ? <div style={{ width: 14, height: 14, border: '2px solid rgba(34,197,94,0.3)', borderTopColor: '#22c55e', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>}
             שמור עריכה
           </button>
-          <button onClick={playAll} style={{ ...ghostBtn, color: playing ? '#ef4444' : '#a855f7', borderColor: playing ? 'rgba(239,68,68,0.3)' : 'rgba(168,85,247,0.3)' }}>
+          <button onClick={playAll} style={{ ...ghostBtn, color: playing ? '#ef4444' : '#FF0080', borderColor: playing ? 'rgba(239,68,68,0.3)' : 'rgba(255,0,128,0.3)' }}>
             {playing ? '⏹ עצור' : '▶ הפעל הכל'}
           </button>
           <button onClick={exportMp4} disabled={exporting} style={{ ...bigBtn, width: 'auto', padding: '10px 28px', margin: 0, fontSize: 14 }}>
@@ -1640,7 +1640,7 @@ export default function Home() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {SUBTITLE_STYLES.map(s => (
                 <button key={s.id} onClick={() => setSubtitleStyle(s.id)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: subtitleStyle === s.id ? 'rgba(168,85,247,0.08)' : 'transparent', border: `1px solid ${subtitleStyle === s.id ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 12, color: subtitleStyle === s.id ? '#d4d4ff' : '#71717a', fontFamily: 'Heebo,sans-serif', transition: 'all 0.2s' }}>
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: subtitleStyle === s.id ? 'rgba(255,0,128,0.08)' : 'transparent', border: `1px solid ${subtitleStyle === s.id ? 'rgba(255,0,128,0.3)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 12, color: subtitleStyle === s.id ? '#d4d4ff' : '#71717a', fontFamily: 'Heebo,sans-serif', transition: 'all 0.2s' }}>
                   <span style={{ fontWeight: 600, minWidth: 50 }}>{s.label}</span>
                   <span style={{ fontSize: 11, color: '#52525b' }}>{s.desc}</span>
                 </button>
@@ -1671,14 +1671,14 @@ export default function Home() {
           <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
             <div style={{ ...secTitle, marginBottom: 10, fontSize: 12 }}>אפקטים ומעברים</div>
             <button onClick={() => setSfxEnabled(v => !v)}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: sfxEnabled ? 'rgba(168,85,247,0.06)' : 'transparent', border: `1px solid ${sfxEnabled ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 12, color: sfxEnabled ? '#d4d4ff' : '#52525b', fontFamily: 'Heebo,sans-serif', width: '100%', marginBottom: 8, transition: 'all 0.2s' }}>
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: sfxEnabled ? 'rgba(255,0,128,0.06)' : 'transparent', border: `1px solid ${sfxEnabled ? 'rgba(255,0,128,0.2)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 12, color: sfxEnabled ? '#d4d4ff' : '#52525b', fontFamily: 'Heebo,sans-serif', width: '100%', marginBottom: 8, transition: 'all 0.2s' }}>
               <span>🔊</span><span style={{ flex: 1, textAlign: 'right' }}>אפקטי סאונד</span>
-              <span style={{ fontSize: 10, fontWeight: 700, color: sfxEnabled ? '#a855f7' : '#3f3f46' }}>{sfxEnabled ? 'ON' : 'OFF'}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: sfxEnabled ? '#FF0080' : '#3f3f46' }}>{sfxEnabled ? 'ON' : 'OFF'}</span>
             </button>
             <div style={{ display: 'flex', gap: 4 }}>
               {TRANSITIONS.map(t => (
                 <button key={t.id} onClick={() => setTransition(t.id)}
-                  style={{ flex: 1, padding: '7px 6px', background: transition === t.id ? 'rgba(168,85,247,0.08)' : 'transparent', border: `1px solid ${transition === t.id ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 11, color: transition === t.id ? '#d4d4ff' : '#52525b', fontFamily: 'Heebo,sans-serif', textAlign: 'center', transition: 'all 0.2s' }}>
+                  style={{ flex: 1, padding: '7px 6px', background: transition === t.id ? 'rgba(255,0,128,0.08)' : 'transparent', border: `1px solid ${transition === t.id ? 'rgba(255,0,128,0.3)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 11, color: transition === t.id ? '#d4d4ff' : '#52525b', fontFamily: 'Heebo,sans-serif', textAlign: 'center', transition: 'all 0.2s' }}>
                   {t.label}
                 </button>
               ))}
@@ -1702,8 +1702,8 @@ export default function Home() {
                   marginTop: 10,
                   width: '100%',
                   padding: '10px 12px',
-                  background: hasRerecorded ? 'rgba(255,255,255,0.02)' : 'linear-gradient(135deg, #7c3aed, #a855f7)',
-                  border: `1px solid ${hasRerecorded ? 'rgba(255,255,255,0.06)' : 'rgba(168,85,247,0.5)'}`,
+                  background: hasRerecorded ? 'rgba(255,255,255,0.02)' : 'linear-gradient(135deg, #FF0080, #FF0080)',
+                  border: `1px solid ${hasRerecorded ? 'rgba(255,255,255,0.06)' : 'rgba(255,0,128,0.5)'}`,
                   color: hasRerecorded ? '#52525b' : '#ffffff',
                   borderRadius: 10,
                   fontSize: 12,
@@ -1712,7 +1712,7 @@ export default function Home() {
                   direction: 'rtl',
                   cursor: hasRerecorded || rerecording ? 'not-allowed' : 'pointer',
                   opacity: hasRerecorded || rerecording ? 0.6 : 1,
-                  boxShadow: hasRerecorded ? 'none' : '0 4px 14px rgba(124,58,237,0.25)',
+                  boxShadow: hasRerecorded ? 'none' : '0 4px 14px rgba(255,0,128,0.25)',
                   transition: 'all 200ms ease',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
                 }}>
@@ -1731,8 +1731,8 @@ export default function Home() {
 
             {/* Edit panel — textarea + record/cancel */}
             {showRerecordPanel && (
-              <div style={{ marginTop: 10, padding: 10, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: 10 }}>
-                <div style={{ fontSize: 11, color: '#a855f7', fontWeight: 700, marginBottom: 6, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
+              <div style={{ marginTop: 10, padding: 10, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,0,128,0.25)', borderRadius: 10 }}>
+                <div style={{ fontSize: 11, color: '#FF0080', fontWeight: 700, marginBottom: 6, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
                   עריכת טקסט הקריינות
                 </div>
                 <textarea
@@ -1743,10 +1743,10 @@ export default function Home() {
                   style={{
                     width: '100%',
                     background: 'rgba(0,0,0,0.4)',
-                    border: '1px solid rgba(168,85,247,0.3)',
+                    border: '1px solid rgba(255,0,128,0.3)',
                     borderRadius: 8,
                     padding: 8,
-                    color: '#f0f0ff',
+                    color: '#F5F5F4',
                     fontSize: 12,
                     fontFamily: 'Heebo,sans-serif',
                     direction: 'rtl',
@@ -1763,7 +1763,7 @@ export default function Home() {
                     style={{
                       flex: 1,
                       padding: '8px 10px',
-                      background: rerecording || !rerecordText.trim() ? 'rgba(168,85,247,0.2)' : 'linear-gradient(135deg, #7c3aed, #a855f7)',
+                      background: rerecording || !rerecordText.trim() ? 'rgba(255,0,128,0.2)' : 'linear-gradient(135deg, #FF0080, #FF0080)',
                       border: 'none',
                       color: 'white',
                       borderRadius: 8,
@@ -1794,7 +1794,7 @@ export default function Home() {
             <div style={{ ...secTitle, marginBottom: 8, fontSize: 12 }}>סצנה {currentScene + 1} — {result?.story?.scenes?.[currentScene]?.type}</div>
             <div style={{ fontSize: 10, color: '#52525b', lineHeight: 1.6, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
               <div style={{ marginBottom: 4 }}><span style={{ color: '#22c55e', fontWeight: 600 }}>{result?.story?.scenes?.[currentScene]?.subtitle}</span></div>
-              <div><span style={{ color: '#8b5cf6', fontWeight: 500 }}>Kling:</span> {result?.story?.scenes?.[currentScene]?.kling_prompt?.slice(0, 120)}...</div>
+              <div><span style={{ color: '#FF0080', fontWeight: 500 }}>Kling:</span> {result?.story?.scenes?.[currentScene]?.kling_prompt?.slice(0, 120)}...</div>
             </div>
           </div>
 
@@ -1805,7 +1805,7 @@ export default function Home() {
               {result?.videos?.map((url, i) => (
                 <div key={i} style={{ background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 6, padding: '6px 8px', textAlign: 'center', fontSize: 10 }}>
                   <div style={{ color: '#52525b', marginBottom: 2 }}>{sceneLabels[i]}</div>
-                  {url ? <a href={url} target="_blank" rel="noreferrer" style={{ color: '#a855f7', textDecoration: 'none', fontWeight: 600 }}>הורד</a> : <span style={{ color: '#27272a' }}>--</span>}
+                  {url ? <a href={url} target="_blank" rel="noreferrer" style={{ color: '#FF0080', textDecoration: 'none', fontWeight: 600 }}>הורד</a> : <span style={{ color: '#27272a' }}>--</span>}
                 </div>
               ))}
             </div>
@@ -1870,7 +1870,7 @@ export default function Home() {
             <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
             {!playing && !videosReady && (
               <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, minWidth: 180 }}>
-                <div style={{ width: 36, height: 36, border: '3px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                <div style={{ width: 36, height: 36, border: '3px solid rgba(255,0,128,0.2)', borderTopColor: '#FF0080', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
                 <span style={{ color: '#a1a1aa', fontSize: 13, fontWeight: 600, fontFamily: 'Heebo,sans-serif' }}>
                   {preloadProgress.total > 0
                     ? `טוען ${preloadProgress.done}/${preloadProgress.total} סרטונים (זה יכול לקחת כמה שניות)`
@@ -1878,7 +1878,7 @@ export default function Home() {
                 </span>
                 {preloadProgress.total > 0 && (
                   <div style={{ width: 160, height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
-                    <div style={{ width: `${(preloadProgress.done / preloadProgress.total) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #7c3aed, #a855f7)', transition: 'width 200ms ease' }} />
+                    <div style={{ width: `${(preloadProgress.done / preloadProgress.total) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #FF0080, #FF0080)', transition: 'width 200ms ease' }} />
                   </div>
                 )}
                 {(slowLoadWarning || Object.keys(brokenScenes).length > 0) && (
@@ -1910,7 +1910,7 @@ export default function Home() {
               </div>
             )}
             {!playing && videosReady && (
-              <button onClick={playAll} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 72, height: 72, borderRadius: '50%', background: 'rgba(168,85,247,0.8)', border: '2px solid rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)', transition: 'all 200ms ease' }}>
+              <button onClick={playAll} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 72, height: 72, borderRadius: '50%', background: 'rgba(255,0,128,0.8)', border: '2px solid rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)', transition: 'all 200ms ease' }}>
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="white" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               </button>
             )}
@@ -1920,7 +1920,7 @@ export default function Home() {
               </button>
             )}
             {/* Current scene badge */}
-            <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(168,85,247,0.8)', borderRadius: 8, padding: '4px 10px', fontSize: 11, color: '#fff', fontWeight: 700, backdropFilter: 'blur(4px)' }}>
+            <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(255,0,128,0.8)', borderRadius: 8, padding: '4px 10px', fontSize: 11, color: '#fff', fontWeight: 700, backdropFilter: 'blur(4px)' }}>
               סצנה {currentScene + 1} — {result?.story?.scenes?.[currentScene]?.type}
             </div>
           </div>
@@ -1938,8 +1938,8 @@ export default function Home() {
 
         {/* Track 1: Video clips */}
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4, gap: 0 }}>
-          <div style={{ width: 68, flexShrink: 0, fontSize: 9, color: '#a855f7', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          <div style={{ width: 68, flexShrink: 0, fontSize: 9, color: '#FF0080', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FF0080" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
             Video
           </div>
           <div style={{ flex: 1, display: 'flex', gap: 2, height: 48 }}>
@@ -1954,7 +1954,7 @@ export default function Home() {
                   onDragOver={(e) => handleDragOver(e, orderIdx)}
                   onDragEnd={handleDragEnd}
                   onClick={() => loadScene(sceneIdx)}
-                  style={{ flex: '1 1 0', minWidth: 0, background: isActive ? 'rgba(168,85,247,0.15)' : 'rgba(168,85,247,0.06)', border: `1.5px solid ${isActive ? 'rgba(168,85,247,0.6)' : isDragging ? 'rgba(168,85,247,0.4)' : 'rgba(168,85,247,0.12)'}`, borderRadius: 6, overflow: 'hidden', cursor: 'grab', opacity: isDragging ? 0.5 : 1, transition: 'all 150ms ease', display: 'flex', alignItems: 'center', gap: 0, position: 'relative' }}>
+                  style={{ flex: '1 1 0', minWidth: 0, background: isActive ? 'rgba(255,0,128,0.15)' : 'rgba(255,0,128,0.06)', border: `1.5px solid ${isActive ? 'rgba(255,0,128,0.6)' : isDragging ? 'rgba(255,0,128,0.4)' : 'rgba(255,0,128,0.12)'}`, borderRadius: 6, overflow: 'hidden', cursor: 'grab', opacity: isDragging ? 0.5 : 1, transition: 'all 150ms ease', display: 'flex', alignItems: 'center', gap: 0, position: 'relative' }}>
                   <div style={{ width: 48, height: '100%', flexShrink: 0, background: BG, position: 'relative', overflow: 'hidden' }}>
                     {videoUrl
                       ? <video src={videoUrl} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onLoadedMetadata={e => { e.target.currentTime = 1 }} />
@@ -1962,11 +1962,11 @@ export default function Home() {
                     }
                   </div>
                   <div style={{ flex: 1, padding: '2px 6px', overflow: 'hidden' }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: isActive ? '#d4b4ff' : '#8b5cf6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scene?.type || sceneLabels[sceneIdx]}</div>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: isActive ? '#d4b4ff' : '#FF0080', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scene?.type || sceneLabels[sceneIdx]}</div>
                     <div style={{ fontSize: 7, color: '#52525b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'Heebo,sans-serif', direction: 'rtl' }}>{scene?.subtitle?.slice(0, 30)}</div>
                   </div>
                   <div style={{ position: 'absolute', top: 2, right: 4, fontSize: 7, color: '#52525b', fontWeight: 600, fontFamily: 'monospace' }}>5.0s</div>
-                  <div style={{ position: 'absolute', top: 2, left: 50, width: 14, height: 14, borderRadius: 3, background: isActive ? '#a855f7' : 'rgba(168,85,247,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#fff', fontWeight: 700 }}>{orderIdx + 1}</div>
+                  <div style={{ position: 'absolute', top: 2, left: 50, width: 14, height: 14, borderRadius: 3, background: isActive ? '#FF0080' : 'rgba(255,0,128,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#fff', fontWeight: 700 }}>{orderIdx + 1}</div>
                 </div>
               )
             })}
@@ -2025,7 +2025,7 @@ export default function Home() {
         {/* Playhead / progress indicator */}
         <div style={{ marginLeft: 72, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.04)', display: 'flex', overflow: 'hidden' }}>
           {clipOrder.map((sceneIdx, i) => (
-            <div key={i} style={{ flex: 1, background: currentScene === sceneIdx ? 'linear-gradient(90deg, #7c3aed, #a855f7)' : 'rgba(168,85,247,0.1)', borderRight: i < clipOrder.length - 1 ? '1px solid rgba(0,0,0,0.3)' : 'none', transition: 'background 300ms ease' }} />
+            <div key={i} style={{ flex: 1, background: currentScene === sceneIdx ? 'linear-gradient(90deg, #FF0080, #FF0080)' : 'rgba(255,0,128,0.1)', borderRight: i < clipOrder.length - 1 ? '1px solid rgba(0,0,0,0.3)' : 'none', transition: 'background 300ms ease' }} />
           ))}
         </div>
       </div>
@@ -2066,14 +2066,14 @@ export default function Home() {
   )
 }
 
-const BG = '#09090b'
+const BG = '#0A0908'
 const CARD_BG = 'rgba(255,255,255,0.03)'
 const BORDER = '1px solid rgba(255,255,255,0.08)'
-const GLOW = '0 0 30px rgba(124,58,237,0.3)'
+const GLOW = '0 0 30px rgba(255,0,128,0.3)'
 const pageStyle = { position: 'relative', zIndex: 1, maxWidth: 900, margin: '0 auto', padding: '32px 20px' }
 const cardS = { background: CARD_BG, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: BORDER, borderRadius: 18, padding: 24, marginBottom: 16 }
-const secTitle = { fontSize: 13, fontWeight: 700, color: '#a855f7', letterSpacing: 1, marginBottom: 16 }
+const secTitle = { fontSize: 13, fontWeight: 700, color: '#FF0080', letterSpacing: 1, marginBottom: 16 }
 const lblS = { fontSize: 13, color: '#71717a', display: 'block', fontWeight: 500 }
-const inpS = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '14px 16px', color: '#f0f0ff', fontSize: 14, outline: 'none', width: '100%', direction: 'ltr', fontFamily: 'monospace', transition: 'all 300ms ease' }
+const inpS = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '14px 16px', color: '#F5F5F4', fontSize: 14, outline: 'none', width: '100%', direction: 'ltr', fontFamily: 'monospace', transition: 'all 300ms ease' }
 const ghostBtn = { background: 'rgba(255,255,255,0.03)', border: BORDER, color: '#71717a', padding: '8px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontFamily: 'Heebo,sans-serif', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 200ms ease' }
-const bigBtn = { width: '100%', padding: 18, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', border: 'none', borderRadius: 14, color: 'white', fontFamily: 'Heebo,sans-serif', fontSize: 18, fontWeight: 700, cursor: 'pointer', marginTop: 8, boxShadow: GLOW, transition: 'all 300ms ease' }
+const bigBtn = { width: '100%', padding: 18, background: 'linear-gradient(135deg, #FF0080, #FF0080)', border: 'none', borderRadius: 14, color: 'white', fontFamily: 'Heebo,sans-serif', fontSize: 18, fontWeight: 700, cursor: 'pointer', marginTop: 8, boxShadow: GLOW, transition: 'all 300ms ease' }

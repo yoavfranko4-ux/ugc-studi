@@ -39,16 +39,16 @@ export default function LoginPage() {
   return (
     <div style={{ minHeight: '100vh', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, position: 'relative', overflow: 'hidden' }}>
       {/* Background gradient orbs */}
-      <div style={{ position: 'absolute', top: '-20%', right: '-10%', width: 500, height: 500, borderRadius: '50%', background: 'radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%)', filter: 'blur(80px)', pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', bottom: '-20%', left: '-10%', width: 400, height: 400, borderRadius: '50%', background: 'radial-gradient(circle, rgba(168,85,247,0.08) 0%, transparent 70%)', filter: 'blur(80px)', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', top: '-20%', right: '-10%', width: 500, height: 500, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,0,128,0.12) 0%, transparent 70%)', filter: 'blur(80px)', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', bottom: '-20%', left: '-10%', width: 400, height: 400, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,0,128,0.08) 0%, transparent 70%)', filter: 'blur(80px)', pointerEvents: 'none' }} />
 
       <div style={{ width: '100%', maxWidth: 420, position: 'relative', zIndex: 1, opacity: mounted ? 1 : 0, transform: mounted ? 'translateY(0)' : 'translateY(20px)', transition: 'all 600ms cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 900, color: '#fff', marginBottom: 16, boxShadow: GLOW }}>U</div>
-          <h1 style={{ fontSize: 28, fontWeight: 900, color: '#f0f0ff', marginBottom: 6 }}>
-            Yotzr
-          </h1>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <span style={{ fontFamily: 'Heebo, system-ui, sans-serif', fontSize: 36, fontWeight: 900, color: '#F5F5F4', letterSpacing: '-0.03em', lineHeight: 1 }}>yotzr</span>
+            <span style={{ width: 12, height: 12, borderRadius: 3, background: '#FF0080', boxShadow: '0 0 20px rgba(255,0,128,0.5)' }} />
+          </div>
           <p style={{ color: '#52525b', fontSize: 15 }}>
             {isSignUp ? 'צור חשבון חדש' : 'התחבר לחשבון שלך'}
           </p>
@@ -65,7 +65,7 @@ export default function LoginPage() {
               placeholder="you@example.com"
               required
               style={inpS}
-              onFocus={e => { e.target.style.borderColor = 'rgba(168,85,247,0.5)'; e.target.style.boxShadow = '0 0 20px rgba(168,85,247,0.1)' }}
+              onFocus={e => { e.target.style.borderColor = 'rgba(255,0,128,0.5)'; e.target.style.boxShadow = '0 0 20px rgba(255,0,128,0.1)' }}
               onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.boxShadow = 'none' }}
             />
           </div>
@@ -79,7 +79,7 @@ export default function LoginPage() {
               required
               minLength={6}
               style={inpS}
-              onFocus={e => { e.target.style.borderColor = 'rgba(168,85,247,0.5)'; e.target.style.boxShadow = '0 0 20px rgba(168,85,247,0.1)' }}
+              onFocus={e => { e.target.style.borderColor = 'rgba(255,0,128,0.5)'; e.target.style.boxShadow = '0 0 20px rgba(255,0,128,0.1)' }}
               onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.boxShadow = 'none' }}
             />
           </div>
@@ -100,7 +100,7 @@ export default function LoginPage() {
           </button>
 
           <div style={{ textAlign: 'center', marginTop: 20 }}>
-            <button type="button" onClick={() => { setIsSignUp(!isSignUp); setError('') }} style={{ background: 'none', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: 14, fontFamily: 'Heebo,sans-serif', fontWeight: 500 }}>
+            <button type="button" onClick={() => { setIsSignUp(!isSignUp); setError('') }} style={{ background: 'none', border: 'none', color: '#FF0080', cursor: 'pointer', fontSize: 14, fontFamily: 'Heebo,sans-serif', fontWeight: 500 }}>
               {isSignUp ? 'כבר יש לך חשבון? התחבר' : 'אין לך חשבון? הירשם'}
             </button>
           </div>
@@ -119,11 +119,11 @@ export default function LoginPage() {
   )
 }
 
-const BG = '#09090b'
+const BG = '#0A0908'
 const CARD_BG = 'rgba(255,255,255,0.03)'
 const BORDER = '1px solid rgba(255,255,255,0.08)'
 const BLUR = 'blur(12px)'
-const GLOW = '0 0 30px rgba(124,58,237,0.3)'
+const GLOW = '0 0 30px rgba(255,0,128,0.3)'
 const lblS = { fontSize: 13, color: '#71717a', display: 'block', marginBottom: 8, fontWeight: 500 }
-const inpS = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '14px 16px', color: '#f0f0ff', fontSize: 15, outline: 'none', width: '100%', direction: 'ltr', fontFamily: 'monospace', transition: 'all 300ms ease' }
-const bigBtn = { width: '100%', padding: 16, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', border: 'none', borderRadius: 14, color: 'white', fontFamily: 'Heebo,sans-serif', fontSize: 17, fontWeight: 700, cursor: 'pointer', boxShadow: '0 0 30px rgba(124,58,237,0.3)', transition: 'all 300ms ease' }
+const inpS = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '14px 16px', color: '#F5F5F4', fontSize: 15, outline: 'none', width: '100%', direction: 'ltr', fontFamily: 'monospace', transition: 'all 300ms ease' }
+const bigBtn = { width: '100%', padding: 16, background: 'linear-gradient(135deg, #FF0080, #FF0080)', border: 'none', borderRadius: 14, color: 'white', fontFamily: 'Heebo,sans-serif', fontSize: 17, fontWeight: 700, cursor: 'pointer', boxShadow: '0 0 30px rgba(255,0,128,0.3)', transition: 'all 300ms ease' }

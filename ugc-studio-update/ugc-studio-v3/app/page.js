@@ -27,6 +27,8 @@ const PRODUCTS = {
 }
 
 export default function LandingPage() {
+  const [type, setType] = useState('product')   // 'product' | 'business' — hero headline variant
+  const [voiceActive, setVoiceActive] = useState('noa')
   const [currentProduct, setCurrentProduct] = useState('icecream')
   const [scrolled, setScrolled] = useState(false)
   const [typedText, setTypedText] = useState('')
@@ -241,13 +243,19 @@ export default function LandingPage() {
         <div className="hero-content">
           <div className="hero-text">
             <div className="eyebrow reveal"><span className="dot">●</span> YOTZR · BETA&nbsp;&nbsp;//&nbsp;&nbsp;AI VIDEO ADS · HEBREW NATIVE</div>
+            <div className="hero-toggle reveal delay-1">
+              <button className={type === 'product' ? 'active' : ''} onClick={() => setType('product')}>סרטון למוצר</button>
+              <button className={type === 'business' ? 'active' : ''} onClick={() => setType('business')}>סרטון לעסק</button>
+            </div>
             <h1 className="display-h1 reveal delay-1">
               <div>הפרסומת</div>
               <div>הבאה <span className="accent">שלך.</span></div>
               <div><span className="stroke">3 דקות.</span><span className="en">· 3 min</span></div>
             </h1>
             <p className="hero-sub reveal delay-2">
-              סרטוני UGC מקצועיים בעברית — בלי מצלמה, בלי שחקנים, בלי סטודיו. בחר אווטאר, העלה מוצר, קבל סרטון מוכן לפרסום.
+              {type === 'business'
+                ? 'סרטוני שיווק לעסק — מסעדה, חנות, קליניקה, מספרה. תיאור קצר, תמונות של המקום, ואווטאר מגיש את העסק.'
+                : 'סרטוני UGC מקצועיים בעברית — בלי מצלמה, בלי שחקנים. בחר אווטאר, העלה מוצר, קבל סרטון מוכן.'}
             </p>
             <div className="hero-cta-row reveal delay-3">
               <a href="#pricing" className="btn btn-primary btn-lg">
@@ -396,11 +404,48 @@ export default function LandingPage() {
             <div className="step-visual">
               <div className="cap"><span className="bullet">●</span> CAST · #avatar</div>
               <div className="demo-avatars">
-                {['נועה', 'דניאל', 'מיה', 'יוסי', 'שירה', 'עומר'].map((name, i) => (
-                  <div key={name} className={`demo-avatar ${i === data.selected ? 'selected' : ''}`}>
-                    <span className="name">{name}</span>
+                {[
+                  { key: 'noa',    img: '/landing-assets/avatar-noa.png',    name: 'נועה',  voice: 'נועה · קול נקבי' },
+                  { key: 'daniel', img: '/landing-assets/avatar-daniel.png', name: 'דניאל', voice: 'דניאל · קול זכרי' },
+                  { key: 'maya',   img: '/landing-assets/avatar-maya.png',   name: 'מיה',   voice: 'מיה · קול נקבי עדין' },
+                ].map((av, i) => (
+                  <div key={av.key} className={`demo-avatar ${i === data.selected ? 'selected' : ''}`}>
+                    <img src={av.img} alt={av.name} />
+                    <div className="name-badge">
+                      <span className="name">{av.name}</span>
+                      <span className="voice">{av.voice}</span>
+                    </div>
                   </div>
                 ))}
+              </div>
+
+              <div className="voice-picker">
+                <div className="voice-picker-label">בחר קול · VOICE</div>
+                <div className="voice-options">
+                  <button
+                    type="button"
+                    className={`voice-option ${voiceActive === 'noa' ? 'active' : ''}`}
+                    onClick={() => setVoiceActive('noa')}
+                  >
+                    <span className="voice-icon">♀</span>
+                    <span>נועה</span>
+                    <span className="voice-tag">נקבי</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`voice-option ${voiceActive === 'daniel' ? 'active' : ''}`}
+                    onClick={() => setVoiceActive('daniel')}
+                  >
+                    <span className="voice-icon">♂</span>
+                    <span>דניאל</span>
+                    <span className="voice-tag">זכרי</span>
+                  </button>
+                  <button type="button" className="voice-option locked" disabled>
+                    <span className="voice-icon">🔒</span>
+                    <span>קול פרימיום</span>
+                    <span className="voice-tag">PRO</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -489,7 +534,8 @@ export default function LandingPage() {
           </div>
 
           {/* BASIC */}
-          <div className="plan reveal delay-2">
+          <div className="plan featured reveal delay-2">
+            <div className="plan-badge">⭐ הכי פופולרי</div>
             <div className="plan-icon">💼</div>
             <div className="plan-label">BASIC · בייסיק</div>
             <div className="plan-name">בייסיק</div>
@@ -502,13 +548,12 @@ export default function LandingPage() {
               <li><span className="check">✓</span>ייצוא 4K</li>
               <li><span className="check">✓</span>מצב &quot;סרטון עסק&quot;</li>
             </ul>
-            <button className="btn btn-ghost plan-cta" onClick={() => onCheckout('basic')}>שדרג לבייסיק</button>
+            <button className="btn btn-primary plan-cta" onClick={() => onCheckout('basic')}>שדרג לבייסיק</button>
             <div className="plan-note">ביטול בכל עת</div>
           </div>
 
           {/* PRO */}
-          <div className="plan featured reveal delay-3">
-            <div className="plan-badge">⭐ הכי פופולרי</div>
+          <div className="plan reveal delay-3">
             <div className="plan-icon">🔥</div>
             <div className="plan-label">PRO · פרו</div>
             <div className="plan-name">פרו</div>
@@ -522,7 +567,7 @@ export default function LandingPage() {
               <li><span className="check">✓</span>עדיפות בתור</li>
               <li><span className="check">✓</span>תמיכה אישית ב-WhatsApp</li>
             </ul>
-            <button className="btn btn-primary plan-cta" onClick={() => onCheckout('pro')}>שדרג לפרו</button>
+            <button className="btn btn-ghost plan-cta" onClick={() => onCheckout('pro')}>שדרג לפרו</button>
             <div className="plan-note">ביטול בכל עת · Early access</div>
           </div>
         </div>
@@ -641,6 +686,20 @@ export default function LandingPage() {
         .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 30px -8px var(--accent); }
         .btn-lg { padding: 18px 30px; font-size: 15px; }
         .btn-lg svg { width: 16px; height: 16px; }
+
+        .hero-toggle {
+          display: inline-flex; gap: 4px;
+          background: var(--bg-2); border: 1px solid var(--line);
+          border-radius: 6px; padding: 4px; margin-bottom: 24px;
+        }
+        .hero-toggle button {
+          padding: 10px 22px; border-radius: 4px;
+          font-family: var(--body); font-weight: 600; font-size: 14px;
+          color: var(--ink-2); background: transparent;
+          border: none; cursor: pointer; transition: all .2s;
+        }
+        .hero-toggle button.active { background: var(--accent); color: var(--bg); }
+        .hero-toggle button:hover:not(.active) { color: var(--ink); }
 
         .hero {
           position: relative; padding: 120px 40px 60px;
@@ -910,27 +969,36 @@ export default function LandingPage() {
 
         .demo-avatars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
         .demo-avatar {
-          aspect-ratio: 1; border-radius: 4px;
+          aspect-ratio: 3/4; border-radius: 4px;
           border: 2px solid var(--line); background: var(--bg-3);
           position: relative; overflow: hidden;
           transition: all .3s; cursor: pointer;
-          display: flex; align-items: flex-end; padding: 8px;
+        }
+        .demo-avatar img {
+          width: 100%; height: 100%;
+          object-fit: cover; display: block;
+        }
+        .demo-avatar .name-badge {
+          position: absolute; bottom: 0; left: 0; right: 0;
+          padding: 12px 10px 10px;
+          background: linear-gradient(to top, rgba(0,0,0,.9), transparent);
         }
         .demo-avatar .name {
-          font-family: var(--mono); font-size: 9px; letter-spacing: .12em;
-          text-transform: uppercase; color: var(--ink-2);
-          position: relative; z-index: 2;
+          display: block;
+          font-family: var(--display); font-weight: 700; font-size: 14px;
+          color: var(--ink);
         }
-        .demo-avatar::before {
-          content: ""; position: absolute; inset: 0;
-          background: var(--grad); z-index: 0;
+        .demo-avatar .voice {
+          display: block;
+          font-family: var(--mono); font-size: 9px; letter-spacing: .12em;
+          text-transform: uppercase; color: var(--accent);
+          margin-top: 3px;
         }
         .demo-avatar.selected {
           border-color: var(--accent);
           box-shadow: 0 0 30px var(--accent-glow);
           transform: scale(1.05);
         }
-        .demo-avatar.selected .name { color: var(--ink); }
         .demo-avatar.selected::after {
           content: "✓"; position: absolute; top: 6px; right: 6px;
           width: 20px; height: 20px; background: var(--accent);
@@ -938,12 +1006,36 @@ export default function LandingPage() {
           display: flex; align-items: center; justify-content: center;
           font-size: 11px; font-weight: 700; z-index: 3;
         }
-        .demo-avatar:nth-child(1) { --grad: linear-gradient(135deg, #c28a6f 0%, #8b5a3c 100%); }
-        .demo-avatar:nth-child(2) { --grad: linear-gradient(135deg, #6b7280 0%, #374151 100%); }
-        .demo-avatar:nth-child(3) { --grad: linear-gradient(135deg, #d9a58c 0%, #8b4513 100%); }
-        .demo-avatar:nth-child(4) { --grad: linear-gradient(135deg, #e8b89b 0%, #b8795a 100%); }
-        .demo-avatar:nth-child(5) { --grad: linear-gradient(135deg, #a89582 0%, #655648 100%); }
-        .demo-avatar:nth-child(6) { --grad: linear-gradient(135deg, #cfb098 0%, #8b6c4e 100%); }
+
+        .voice-picker {
+          margin-top: 20px; padding-top: 20px;
+          border-top: 1px solid var(--line);
+        }
+        .voice-picker-label {
+          font-family: var(--mono); font-size: 10px; letter-spacing: .22em;
+          text-transform: uppercase; color: var(--ink-3); margin-bottom: 12px;
+        }
+        .voice-options { display: flex; gap: 8px; flex-wrap: wrap; }
+        .voice-option {
+          display: inline-flex; align-items: center; gap: 8px;
+          padding: 10px 14px;
+          background: var(--bg-3); border: 1px solid var(--line-2);
+          border-radius: 4px; font-size: 13px; color: var(--ink-2);
+          cursor: pointer; transition: all .2s;
+          font-family: var(--body);
+        }
+        .voice-option.active {
+          border-color: var(--accent);
+          background: rgba(255,0,128,.1);
+          color: var(--ink);
+        }
+        .voice-option.locked { opacity: .5; cursor: not-allowed; }
+        .voice-icon { color: var(--accent); font-size: 16px; }
+        .voice-tag {
+          font-family: var(--mono); font-size: 9px; letter-spacing: .15em;
+          text-transform: uppercase; color: var(--ink-3);
+        }
+        .voice-option.active .voice-tag { color: var(--accent); }
 
         .demo-result {
           position: relative; display: flex; flex-direction: column;

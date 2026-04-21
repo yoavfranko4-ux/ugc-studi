@@ -55,7 +55,7 @@ export default function DashboardPage() {
   if (loading) return (
     <div style={{ minHeight: '100vh', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-        <div style={{ width: 40, height: 40, border: '3px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <div style={{ width: 40, height: 40, border: '3px solid rgba(255,0,128,0.2)', borderTopColor: '#FF0080', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
         <span style={{ color: '#52525b', fontSize: 14 }}>טוען...</span>
       </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
@@ -81,19 +81,19 @@ export default function DashboardPage() {
   ]
 
   return (
-    <div style={{ minHeight: '100vh', background: BG, color: '#f0f0ff', display: 'flex' }}>
+    <div style={{ minHeight: '100vh', background: BG, color: '#F5F5F4', display: 'flex' }}>
       {/* Sidebar */}
       <aside style={{ width: sidebarOpen ? 240 : 0, minHeight: '100vh', background: 'rgba(255,255,255,0.02)', borderLeft: BORDER, display: 'flex', flexDirection: 'column', transition: 'width 300ms ease', overflow: 'hidden', flexShrink: 0 }}>
         <div style={{ padding: '20px 16px', borderBottom: BORDER, display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <span style={{ fontFamily: 'Heebo, system-ui, sans-serif', fontSize: 20, fontWeight: 900, color: '#f0f0ff', letterSpacing: '-0.03em', whiteSpace: 'nowrap' }}>yotzr</span>
+            <span style={{ fontFamily: 'Heebo, system-ui, sans-serif', fontSize: 20, fontWeight: 900, color: '#F5F5F4', letterSpacing: '-0.03em', whiteSpace: 'nowrap' }}>yotzr</span>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: '#FF0080', boxShadow: '0 0 12px rgba(255,0,128,0.5)', display: 'inline-block' }} />
           </div>
         </div>
 
         <nav style={{ flex: 1, padding: '12px 8px' }}>
           {sidebarItems.map((item, i) => (
-            <a key={i} href={item.href || '#'} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, marginBottom: 4, color: item.active ? '#a855f7' : '#52525b', background: item.active ? 'rgba(168,85,247,0.08)' : 'transparent', textDecoration: 'none', fontSize: 14, fontWeight: item.active ? 600 : 400, transition: 'all 200ms ease', whiteSpace: 'nowrap' }}>
+            <a key={i} href={item.href || '#'} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, marginBottom: 4, color: item.active ? '#FF0080' : '#52525b', background: item.active ? 'rgba(255,0,128,0.08)' : 'transparent', textDecoration: 'none', fontSize: 14, fontWeight: item.active ? 600 : 400, transition: 'all 200ms ease', whiteSpace: 'nowrap' }}>
               {item.icon}
               {item.label}
             </a>
@@ -103,7 +103,7 @@ export default function DashboardPage() {
         {/* User section */}
         <div style={{ padding: '16px', borderTop: BORDER }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(168,85,247,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#a855f7', flexShrink: 0 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(255,0,128,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#FF0080', flexShrink: 0 }}>
               {(user?.email?.[0] || 'U').toUpperCase()}
             </div>
             <div style={{ overflow: 'hidden' }}>
@@ -122,7 +122,7 @@ export default function DashboardPage() {
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>
           <div>
-            <h1 style={{ fontSize: 24, fontWeight: 800, color: '#f0f0ff', marginBottom: 4 }}>
+            <h1 style={{ fontSize: 24, fontWeight: 800, color: '#F5F5F4', marginBottom: 4 }}>
               שלום, {user?.email?.split('@')[0]}
             </h1>
             <p style={{ color: '#52525b', fontSize: 14 }}>
@@ -142,37 +142,37 @@ export default function DashboardPage() {
               {/* Plan card */}
               <div style={glassCard}>
                 <div style={{ fontSize: 12, color: '#52525b', marginBottom: 8, fontWeight: 500 }}>תוכנית נוכחית</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: '#f0f0ff', marginBottom: 4 }}>{plan.name}</div>
+                <div style={{ fontSize: 24, fontWeight: 900, color: '#F5F5F4', marginBottom: 4 }}>{plan.name}</div>
                 <div style={{ color: '#52525b', fontSize: 13 }}>&#8362;{plan.price} / {plan.days === 3 ? '3 ימים' : 'חודש'}</div>
-                {getRenewalDate() && <div style={{ color: '#a855f7', fontSize: 12, marginTop: 8, fontWeight: 500 }}>חידוש: {getRenewalDate()}</div>}
+                {getRenewalDate() && <div style={{ color: '#FF0080', fontSize: 12, marginTop: 8, fontWeight: 500 }}>חידוש: {getRenewalDate()}</div>}
               </div>
 
               {/* Videos left */}
               <div style={glassCard}>
                 <div style={{ fontSize: 12, color: '#52525b', marginBottom: 8, fontWeight: 500 }}>סרטונים נותרו</div>
-                <div style={{ fontSize: 42, fontWeight: 900, background: 'linear-gradient(135deg, #a855f7, #7c3aed)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', lineHeight: 1 }}>{videosLeft}</div>
+                <div style={{ fontSize: 42, fontWeight: 900, background: 'linear-gradient(135deg, #FF0080, #FF0080)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', lineHeight: 1 }}>{videosLeft}</div>
                 <div style={{ color: '#52525b', fontSize: 12, marginTop: 8 }}>מתוך {plan.videos}</div>
               </div>
 
               {/* Videos created */}
               <div style={glassCard}>
                 <div style={{ fontSize: 12, color: '#52525b', marginBottom: 8, fontWeight: 500 }}>סרטונים שנוצרו</div>
-                <div style={{ fontSize: 42, fontWeight: 900, color: '#f0f0ff', lineHeight: 1 }}>{videosUsed}</div>
+                <div style={{ fontSize: 42, fontWeight: 900, color: '#F5F5F4', lineHeight: 1 }}>{videosUsed}</div>
                 <div style={{ marginTop: 12 }}>
                   <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 100, height: 6, overflow: 'hidden' }}>
-                    <div style={{ background: 'linear-gradient(90deg, #7c3aed, #a855f7)', height: '100%', width: `${progressPercent}%`, borderRadius: 100, transition: 'width 0.5s ease', boxShadow: '0 0 10px rgba(168,85,247,0.4)' }} />
+                    <div style={{ background: 'linear-gradient(90deg, #FF0080, #FF0080)', height: '100%', width: `${progressPercent}%`, borderRadius: 100, transition: 'width 0.5s ease', boxShadow: '0 0 10px rgba(255,0,128,0.4)' }} />
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Create Video CTA */}
-            <button onClick={() => window.location.href = '/studio'} style={{ ...glassCard, width: '100%', padding: '24px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', border: '1px solid rgba(168,85,247,0.2)', background: 'rgba(168,85,247,0.04)', marginBottom: 24, textAlign: 'right', fontFamily: 'Heebo,sans-serif' }}>
+            <button onClick={() => window.location.href = '/studio'} style={{ ...glassCard, width: '100%', padding: '24px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', border: '1px solid rgba(255,0,128,0.2)', background: 'rgba(255,0,128,0.04)', marginBottom: 24, textAlign: 'right', fontFamily: 'Heebo,sans-serif' }}>
               <div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: '#f0f0ff', marginBottom: 4 }}>צור סרטון UGC חדש</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#F5F5F4', marginBottom: 4 }}>צור סרטון UGC חדש</div>
                 <div style={{ fontSize: 13, color: '#52525b' }}>Agent AI יוצר 4 סצנות מחוברות עם קריינות עברית</div>
               </div>
-              <div style={{ width: 48, height: 48, borderRadius: 14, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: GLOW, flexShrink: 0 }}>
+              <div style={{ width: 48, height: 48, borderRadius: 14, background: 'linear-gradient(135deg, #FF0080, #FF0080)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: GLOW, flexShrink: 0 }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7" style={{ transform: 'scaleX(-1)', transformOrigin: 'center' }} /></svg>
               </div>
             </button>
@@ -180,7 +180,7 @@ export default function DashboardPage() {
             {/* Video History — shows saved edits as cards */}
             <div style={glassCard}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#f0f0ff' }}>היסטוריית סרטונים</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#F5F5F4' }}>היסטוריית סרטונים</h3>
                 <span style={{ fontSize: 12, color: '#3f3f46' }}>{savedEdits.length} סרטונים</span>
               </div>
               {savedEdits.length === 0 ? (
@@ -207,7 +207,7 @@ export default function DashboardPage() {
                           )}
                           <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.7)', borderRadius: 4, padding: '2px 6px', fontSize: 10, color: '#fff', fontWeight: 600 }}>20s</div>
                           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,0.8))', padding: '16px 10px 8px' }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: '#f0f0ff', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>{d.product_name || `סרטון ${i + 1}`}</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#F5F5F4', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>{d.product_name || `סרטון ${i + 1}`}</div>
                           </div>
                         </div>
                         {/* Info + buttons */}
@@ -221,7 +221,7 @@ export default function DashboardPage() {
                           </div>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button onClick={() => { const params = new URLSearchParams({ editId: edit.id }); window.location.href = `/studio?${params}` }}
-                              style={{ flex: 1, padding: '7px 0', background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: 8, color: '#a855f7', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'Heebo,sans-serif' }}>
+                              style={{ flex: 1, padding: '7px 0', background: 'rgba(255,0,128,0.08)', border: '1px solid rgba(255,0,128,0.25)', borderRadius: 8, color: '#FF0080', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'Heebo,sans-serif' }}>
                               המשך עריכה
                             </button>
                             {d.videos?.[0] && (
@@ -243,10 +243,10 @@ export default function DashboardPage() {
           /* No subscription */
           <>
             <div style={{ textAlign: 'center', marginBottom: 40, padding: '20px 0' }}>
-              <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.15)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(255,0,128,0.08)', border: '1px solid rgba(255,0,128,0.15)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FF0080" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
               </div>
-              <h2 style={{ fontSize: 22, fontWeight: 800, color: '#f0f0ff', marginBottom: 8 }}>אין לך מנוי פעיל</h2>
+              <h2 style={{ fontSize: 22, fontWeight: 800, color: '#F5F5F4', marginBottom: 8 }}>אין לך מנוי פעיל</h2>
               <p style={{ color: '#52525b', fontSize: 15 }}>בחר תוכנית כדי להתחיל ליצור סרטוני UGC מדהימים</p>
             </div>
 
@@ -256,17 +256,17 @@ export default function DashboardPage() {
                 { key: 'basic', name: 'Basic', price: 299, videos: 4, period: 'חודש', highlight: true },
                 { key: 'pro', name: 'Pro', price: 499, videos: 8, period: 'חודש', highlight: false },
               ].map(p => (
-                <div key={p.key} style={{ ...glassCard, padding: 28, textAlign: 'center', position: 'relative', border: p.highlight ? '1.5px solid rgba(168,85,247,0.4)' : BORDER, background: p.highlight ? 'rgba(168,85,247,0.06)' : CARD_BG }}>
-                  {p.highlight && <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: 'linear-gradient(135deg, #7c3aed, #a855f7)', color: '#fff', fontSize: 11, fontWeight: 700, padding: '4px 16px', borderRadius: 100, boxShadow: GLOW }}>הכי פופולרי</div>}
+                <div key={p.key} style={{ ...glassCard, padding: 28, textAlign: 'center', position: 'relative', border: p.highlight ? '1.5px solid rgba(255,0,128,0.4)' : BORDER, background: p.highlight ? 'rgba(255,0,128,0.06)' : CARD_BG }}>
+                  {p.highlight && <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: 'linear-gradient(135deg, #FF0080, #FF0080)', color: '#fff', fontSize: 11, fontWeight: 700, padding: '4px 16px', borderRadius: 100, boxShadow: GLOW }}>הכי פופולרי</div>}
                   <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8, marginTop: p.highlight ? 8 : 0, color: '#e4e4e7' }}>{p.name}</div>
-                  <div style={{ fontSize: 36, fontWeight: 900, background: 'linear-gradient(135deg, #a855f7, #7c3aed)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 4 }}>&#8362;{p.price}</div>
+                  <div style={{ fontSize: 36, fontWeight: 900, background: 'linear-gradient(135deg, #FF0080, #FF0080)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 4 }}>&#8362;{p.price}</div>
                   <div style={{ color: '#52525b', fontSize: 13, marginBottom: 20 }}>/ {p.period}</div>
                   <div style={{ color: '#71717a', fontSize: 14, marginBottom: 24 }}>{p.videos} {p.videos === 1 ? 'סרטון' : 'סרטונים'}</div>
-                  <button onClick={() => setContactMsg(p.key)} style={{ width: '100%', padding: 14, background: p.highlight ? 'linear-gradient(135deg, #7c3aed, #a855f7)' : 'transparent', border: p.highlight ? 'none' : '1px solid rgba(168,85,247,0.3)', borderRadius: 12, color: '#fff', fontFamily: 'Heebo,sans-serif', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: p.highlight ? GLOW : 'none', transition: 'all 300ms ease' }}>
+                  <button onClick={() => setContactMsg(p.key)} style={{ width: '100%', padding: 14, background: p.highlight ? 'linear-gradient(135deg, #FF0080, #FF0080)' : 'transparent', border: p.highlight ? 'none' : '1px solid rgba(255,0,128,0.3)', borderRadius: 12, color: '#fff', fontFamily: 'Heebo,sans-serif', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: p.highlight ? GLOW : 'none', transition: 'all 300ms ease' }}>
                     בחר תוכנית
                   </button>
                   {contactMsg === p.key && (
-                    <div style={{ marginTop: 12, background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#a855f7' }}>
+                    <div style={{ marginTop: 12, background: 'rgba(255,0,128,0.06)', border: '1px solid rgba(255,0,128,0.2)', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#FF0080' }}>
                       צור קשר לרכישה
                     </div>
                   )}
@@ -282,10 +282,10 @@ export default function DashboardPage() {
   )
 }
 
-const BG = '#09090b'
+const BG = '#0A0908'
 const CARD_BG = 'rgba(255,255,255,0.03)'
 const BORDER = '1px solid rgba(255,255,255,0.08)'
 const BLUR = 'blur(12px)'
-const GLOW = '0 0 30px rgba(124,58,237,0.3)'
+const GLOW = '0 0 30px rgba(255,0,128,0.3)'
 const glassCard = { background: CARD_BG, backdropFilter: BLUR, WebkitBackdropFilter: BLUR, border: BORDER, borderRadius: 16, padding: 24 }
-const ctaBtn = { display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: 'linear-gradient(135deg, #7c3aed, #a855f7)', border: 'none', borderRadius: 12, color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'Heebo,sans-serif', boxShadow: GLOW, transition: 'all 300ms ease' }
+const ctaBtn = { display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: 'linear-gradient(135deg, #FF0080, #FF0080)', border: 'none', borderRadius: 12, color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'Heebo,sans-serif', boxShadow: GLOW, transition: 'all 300ms ease' }

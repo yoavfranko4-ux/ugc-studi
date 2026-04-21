@@ -1,3 +1,5 @@
+import './styles/theme.css';
+
 export const metadata = {
   title: 'Yotzr · הפרסומת הבאה שלך. 3 דקות.',
   description: 'סרטוני UGC מקצועיים בעברית — בלי מצלמה, בלי שחקנים, בלי סטודיו. בחר אווטאר, העלה מוצר, קבל סרטון מוכן לפרסום.',
@@ -14,9 +16,7 @@ export default function RootLayout({ children }) {
           rel="stylesheet"
         />
       </head>
-      <body style={{ margin: 0, padding: 0, background: '#0A0908', color: '#F5F5F4' }}>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

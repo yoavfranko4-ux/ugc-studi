@@ -1,0 +1,89 @@
+/* ============================================================
+   YOTZR · Shared theme — loaded globally via app/layout.js.
+   Colors, fonts and reusable button/card utilities.
+   ============================================================ */
+
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+}
+body { margin: 0; padding: 0; }
+
+:root {
+  --bg: #0A0908;
+  --bg-2: #111010;
+  --bg-3: #1a1918;
+  --ink: #F5F5F4;
+  --ink-2: rgba(245, 245, 244, 0.64);
+  --ink-3: rgba(245, 245, 244, 0.38);
+  --line: rgba(245, 245, 244, 0.10);
+  --line-2: rgba(245, 245, 244, 0.18);
+  --accent: #FF0080;
+  --accent-2: #1E90FF;
+  --accent-soft: rgba(255, 0, 128, 0.12);
+  --accent-glow: rgba(255, 0, 128, 0.4);
+
+  --font-display: "Heebo", "Assistant", system-ui, sans-serif;
+  --font-body: "Assistant", "Heebo", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+.font-display { font-family: var(--font-display); font-weight: 900; letter-spacing: -0.03em; }
+.font-body { font-family: var(--font-body); }
+.font-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 700;
+}
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px -8px var(--accent);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line-2);
+}
+.btn-ghost:hover {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 24px;
+}
+.card-hover {
+  transition: border-color 0.25s, transform 0.25s;
+}
+.card-hover:hover {
+  border-color: var(--line-2);
+  transform: translateY(-2px);
+}

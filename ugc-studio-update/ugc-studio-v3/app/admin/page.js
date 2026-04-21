@@ -139,7 +139,7 @@ export default function AdminPage() {
                         onClick={() => handleGrant(u.id, u.email)}
                         disabled={!selectedPlan[u.id] || granting[u.id]}
                         style={{
-                          background: selectedPlan[u.id] ? 'linear-gradient(135deg,#7c3aed,#5b21b6)' : '#333',
+                          background: selectedPlan[u.id] ? 'linear-gradient(135deg,#FF0080,#5b21b6)' : '#333',
                           border: 'none',
                           borderRadius: 8,
                           padding: '8px 18px',
