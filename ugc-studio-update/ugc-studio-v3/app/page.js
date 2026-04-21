@@ -271,63 +271,74 @@ export default function LandingPage() {
             </div>
           </div>
 
+          <div className="hero-columns reveal delay-2">
+            <div className="editorial-frame">
+              <div className="label-top">
+                FRAMES / AUTO-GEN &nbsp;·&nbsp; <span className="accent">live feed</span>
+              </div>
+              <div className="label-bottom">9:16 · HEBREW VO · 6 SAMPLES</div>
+              <span className="corner tl" /><span className="corner tr" />
+              <span className="corner bl" /><span className="corner br" />
+
+              <div className="columns-viewport">
+                {/* Col 1 — slow up */}
+                <div className="column col-1">
+                  <div className="column-track">
+                    {[1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6].map((n, i) => {
+                      const base = `/landing-assets/frames/frame-0${n}`
+                      return (
+                        <div key={`c1-${i}`} className="column-frame">
+                          <picture>
+                            <source srcSet={`${base}.webp`} type="image/webp" />
+                            <img src={`${base}.jpg`} alt="" loading={i < 6 ? 'eager' : 'lazy'} />
+                          </picture>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Col 2 — medium DOWN */}
+                <div className="column col-2">
+                  <div className="column-track reverse">
+                    {[4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3].map((n, i) => {
+                      const base = `/landing-assets/frames/frame-0${n}`
+                      return (
+                        <div key={`c2-${i}`} className="column-frame">
+                          <picture>
+                            <source srcSet={`${base}.webp`} type="image/webp" />
+                            <img src={`${base}.jpg`} alt="" loading={i < 6 ? 'eager' : 'lazy'} />
+                          </picture>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Col 3 — fast up */}
+                <div className="column col-3">
+                  <div className="column-track">
+                    {[2, 6, 3, 1, 5, 4, 2, 6, 3, 1, 5, 4].map((n, i) => {
+                      const base = `/landing-assets/frames/frame-0${n}`
+                      return (
+                        <div key={`c3-${i}`} className="column-frame">
+                          <picture>
+                            <source srcSet={`${base}.webp`} type="image/webp" />
+                            <img src={`${base}.jpg`} alt="" loading={i < 6 ? 'eager' : 'lazy'} />
+                          </picture>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="scroll-cue">
           <span>גלול · SCROLL</span>
           <span className="line" />
-        </div>
-      </section>
-
-      {/* HERO MARQUEE — full-width horizontal scroller */}
-      <section className="hero-marquee">
-        <div className="marquee-label">
-          <span className="pulse" />
-          <span>+2,047 סרטונים נוצרו השבוע</span>
-          <span className="sep">///</span>
-          <span>AUTOPLAY</span>
-          <span className="sep">///</span>
-          <span className="accent">HOVER TO PAUSE</span>
-        </div>
-
-        <div className="marquee-track">
-          <div className="marquee-row">
-            {[1, 2, 3, 4, 5, 6].map(n => {
-              const base = `/landing-assets/frames/frame-0${n}`
-              return (
-                <div key={`a-${n}`} className={`marquee-frame tilt-${n}`}>
-                  <picture>
-                    <source srcSet={`${base}.webp`} type="image/webp" />
-                    <img src={`${base}.jpg`} alt="" loading="lazy" width={1000} height={1792} />
-                  </picture>
-                  {n === 2 && <div className="frame-badge badge-new">● NEW</div>}
-                  {n === 4 && <div className="frame-badge badge-trending">+2K</div>}
-                  {n === 5 && <div className="frame-badge badge-hot">🔥 VIRAL</div>}
-                </div>
-              )
-            })}
-            {[1, 2, 3, 4, 5, 6].map(n => {
-              const base = `/landing-assets/frames/frame-0${n}`
-              return (
-                <div key={`b-${n}`} className={`marquee-frame tilt-${n}`} aria-hidden="true">
-                  <picture>
-                    <source srcSet={`${base}.webp`} type="image/webp" />
-                    <img src={`${base}.jpg`} alt="" loading="lazy" width={1000} height={1792} />
-                  </picture>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="marquee-bottom">
-          <span>9:16 · VERTICAL</span>
-          <span className="sep">///</span>
-          <span>HEBREW VOICEOVER</span>
-          <span className="sep">///</span>
-          <span>H.264 MP4</span>
-          <span className="sep">///</span>
-          <span className="accent">READY TO POST</span>
         </div>
       </section>
 
@@ -727,8 +738,8 @@ export default function LandingPage() {
         .hero-toggle button:hover:not(.active) { color: var(--ink); }
 
         .hero {
-          position: relative; padding: 120px 40px 40px;
-          min-height: auto; display: flex; flex-direction: column; overflow: hidden;
+          position: relative; padding: 120px 40px 60px;
+          min-height: 100vh; display: flex; flex-direction: column; overflow: hidden;
         }
         .hero-ticker {
           position: absolute; top: 90px; right: 0; left: 0; height: 36px;
@@ -750,22 +761,17 @@ export default function LandingPage() {
         @keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(50%); } }
 
         .hero-content {
-          display: flex; flex-direction: column;
-          align-items: center; text-align: center;
-          gap: 32px; flex: 1;
-          margin-top: 80px;
-          max-width: 1000px; margin-inline: auto;
-          width: 100%;
+          display: grid; grid-template-columns: 1.1fr .9fr;
+          gap: 60px; align-items: center; flex: 1; margin-top: 80px;
         }
-        .hero-content > * { margin-top: 0; }
         .eyebrow {
           font-family: var(--mono); font-size: 11px; letter-spacing: .22em;
-          text-transform: uppercase; color: var(--ink-3);
+          text-transform: uppercase; color: var(--ink-3); margin-bottom: 20px;
         }
         .eyebrow .dot { color: var(--accent); }
         .display-h1 {
           font-family: var(--display); font-weight: 900; letter-spacing: -.04em;
-          line-height: .92; color: var(--ink); font-size: clamp(70px, 10vw, 180px);
+          line-height: .92; color: var(--ink); font-size: clamp(60px, 9vw, 140px);
         }
         .display-h1 .accent { color: var(--accent); }
         .display-h1 .stroke { -webkit-text-stroke: 2px var(--ink); color: transparent; }
@@ -774,29 +780,19 @@ export default function LandingPage() {
           text-transform: uppercase; font-size: .16em; display: inline-block;
           vertical-align: middle; color: var(--ink-3); margin-inline-start: 16px;
         }
-        .hero-text {
-          display: flex; flex-direction: column; align-items: center;
-          width: 100%;
-        }
         .hero-sub {
           font-size: 22px; font-weight: 400; color: var(--ink-2);
-          max-width: 600px; line-height: 1.45; margin-top: 32px;
-          text-align: center;
+          max-width: 560px; line-height: 1.45; margin-top: 32px;
         }
-        .hero-cta-row {
-          display: flex; gap: 12px; margin-top: 40px;
-          align-items: center; justify-content: center; flex-wrap: wrap;
-        }
+        .hero-cta-row { display: flex; gap: 12px; margin-top: 40px; align-items: center; flex-wrap: wrap; }
         .hero-cta-micro {
           font-family: var(--mono); font-size: 10px; letter-spacing: .15em;
           text-transform: uppercase; color: var(--ink-3); margin-inline-start: 8px;
-          margin-top: 12px; text-align: center;
         }
         .hero-cta-micro .check { color: var(--accent); margin-left: 4px; }
         .hero-footnote {
           font-family: var(--mono); font-size: 11px; letter-spacing: .15em;
           text-transform: uppercase; color: var(--ink-3); margin-top: 28px;
-          text-align: center;
         }
 
         /* <picture> should honor parent avatar card dimensions. */
@@ -807,104 +803,65 @@ export default function LandingPage() {
         }
 
         /* ============================================================
-           HERO MARQUEE — full-width infinite horizontal scroller.
+           HERO COLUMNS — three vertical auto-scrolling frame columns.
            ============================================================ */
-        .hero-marquee {
+        .hero-columns {
           position: relative;
-          padding: 40px 0 60px;
-          overflow: hidden;
-          background: linear-gradient(
-            to bottom,
-            transparent 0%,
-            rgba(255, 0, 128, 0.03) 50%,
-            transparent 100%
-          );
-          border-top: 1px solid var(--line);
-          border-bottom: 1px solid var(--line);
-        }
-        .marquee-label,
-        .marquee-bottom {
-          display: flex; justify-content: center; align-items: center;
-          gap: 16px; padding: 0 40px;
-          font-family: var(--mono); font-size: 11px; letter-spacing: 0.22em;
-          text-transform: uppercase; color: var(--ink-3); flex-wrap: wrap;
-        }
-        .marquee-label .sep,
-        .marquee-bottom .sep { color: var(--ink-3); opacity: .4; }
-        .marquee-label .accent,
-        .marquee-bottom .accent { color: var(--accent); }
-        .marquee-label .pulse {
-          width: 8px; height: 8px; border-radius: 50%;
-          background: var(--accent); box-shadow: 0 0 12px var(--accent-glow);
-          animation: pulse-dot 2s ease-in-out infinite;
-        }
-        .marquee-label { margin-bottom: 30px; }
-        .marquee-bottom { margin-top: 30px; }
-
-        .marquee-track {
-          position: relative;
+          aspect-ratio: 9/16;
+          max-height: 78vh;
+          justify-self: start;
           width: 100%;
+        }
+        .columns-viewport {
+          position: absolute; inset: 12px;
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 8px;
+          border-radius: 4px;
           overflow: hidden;
-          mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
-          -webkit-mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
-        }
-        .marquee-row {
-          display: flex; gap: 20px; width: fit-content;
-          animation: marquee-scroll 50s linear infinite;
-          padding: 20px 0;
-        }
-        .marquee-row:hover { animation-play-state: paused; }
-        @keyframes marquee-scroll {
-          from { transform: translateX(0); }
-          to { transform: translateX(-50%); }
-        }
-
-        .marquee-frame {
-          flex-shrink: 0;
-          width: 220px; aspect-ratio: 9/16;
-          border-radius: 6px; overflow: hidden;
-          border: 1px solid var(--line-2);
           background: var(--bg-3);
-          box-shadow:
-            0 12px 30px -8px rgba(0,0,0,.6),
-            0 4px 12px -4px rgba(0,0,0,.4);
-          position: relative;
-          transition:
-            transform .3s cubic-bezier(.2,.8,.2,1),
-            border-color .3s ease-out,
-            box-shadow .3s ease-out;
-          cursor: pointer;
         }
-        .marquee-frame picture,
-        .marquee-frame img {
+        .column {
+          position: relative; overflow: hidden;
+          mask-image: linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%);
+          -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%);
+        }
+        .column-track {
+          display: flex; flex-direction: column;
+          gap: 8px; will-change: transform;
+        }
+        .col-1 .column-track { animation: scrollUp 40s linear infinite; }
+        .col-2 .column-track.reverse { animation: scrollDown 30s linear infinite; }
+        .col-3 .column-track { animation: scrollUp 25s linear infinite; }
+        @keyframes scrollUp {
+          0% { transform: translateY(0); }
+          100% { transform: translateY(-50%); }
+        }
+        @keyframes scrollDown {
+          0% { transform: translateY(-50%); }
+          100% { transform: translateY(0); }
+        }
+        .column:hover .column-track { animation-play-state: paused; }
+
+        .column-frame {
+          flex-shrink: 0; width: 100%;
+          aspect-ratio: 9/16;
+          border-radius: 3px; overflow: hidden;
+          border: 1px solid var(--line);
+          background: var(--bg-3);
+          position: relative;
+          transition: all .3s cubic-bezier(.2,.8,.2,1);
+        }
+        .column-frame picture,
+        .column-frame img {
           width: 100%; height: 100%;
           object-fit: cover; display: block;
         }
-        .marquee-frame.tilt-1 { transform: rotate(-1.5deg); }
-        .marquee-frame.tilt-2 { transform: rotate(1deg); }
-        .marquee-frame.tilt-3 { transform: rotate(-0.5deg); }
-        .marquee-frame.tilt-4 { transform: rotate(2deg); }
-        .marquee-frame.tilt-5 { transform: rotate(-2deg); }
-        .marquee-frame.tilt-6 { transform: rotate(1.5deg); }
-        .marquee-frame:hover {
-          transform: rotate(0deg) translateY(-8px) scale(1.08);
+        .column-frame:hover {
           border-color: var(--accent);
-          box-shadow:
-            0 20px 50px -10px rgba(255,0,128,.4),
-            0 10px 20px -6px rgba(0,0,0,.5);
+          box-shadow: 0 0 30px rgba(255, 0, 128, 0.4);
           z-index: 10;
         }
-
-        .frame-badge {
-          position: absolute; top: 12px; right: 12px;
-          padding: 5px 10px; border-radius: 3px;
-          font-family: var(--mono); font-size: 10px; font-weight: 700;
-          letter-spacing: 0.12em; text-transform: uppercase;
-          backdrop-filter: blur(10px); z-index: 2;
-        }
-        .badge-new { background: rgba(255,0,128,.9); color: var(--bg); }
-        .badge-trending { background: rgba(30,144,255,.9); color: var(--bg); }
-        .badge-hot { background: rgba(255,165,0,.95); color: var(--bg); }
         .editorial-frame { position: relative; width: 100%; height: 100%; }
         .editorial-frame .corner {
           position: absolute; width: 14px; height: 14px;
@@ -1322,8 +1279,13 @@ export default function LandingPage() {
         @media (max-width: 900px) {
           .nav { padding: 16px 20px; }
           .nav-links { display: none; }
-          .hero { padding: 100px 20px 30px; }
-          .hero-content { margin-top: 60px; }
+          .hero { padding: 100px 20px 60px; }
+          .hero-content { grid-template-columns: 1fr; gap: 50px; margin-top: 60px; }
+          .hero-columns { max-height: 60vh; aspect-ratio: 3/4; }
+          .columns-viewport { grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+          .col-1 .column-track { animation-duration: 30s; }
+          .col-2 .column-track.reverse { animation-duration: 22s; }
+          .col-3 .column-track { animation-duration: 18s; }
           .section-divider { padding: 0 20px; margin: 40px 0 30px; }
           .flow-section, .pricing-section { padding: 30px 20px 80px; }
           .step { grid-template-columns: 50px 1fr; gap: 20px; padding: 40px 0; }
@@ -1336,18 +1298,9 @@ export default function LandingPage() {
           .pricing-grid { grid-template-columns: 1fr; }
           .scroll-cue { display: none; }
         }
-        @media (max-width: 768px) {
-          .marquee-frame { width: 160px; }
-          .marquee-row { gap: 14px; animation-duration: 40s; }
-          .marquee-label, .marquee-bottom {
-            font-size: 9px; padding: 0 20px; gap: 10px;
-          }
-          .hero-marquee { padding: 30px 0 40px; }
-        }
         @media (max-width: 480px) {
-          .marquee-frame { width: 130px; }
-          .marquee-label .sep:nth-of-type(n+2),
-          .marquee-bottom .sep:nth-of-type(n+2) { display: none; }
+          .columns-viewport { grid-template-columns: 1fr 1fr; }
+          .col-3 { display: none; }
         }
 
         .reveal {
