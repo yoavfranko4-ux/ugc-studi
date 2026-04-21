@@ -54,6 +54,53 @@ export default function LandingPage() {
   const step1Ref = useRef(null)
   const step4Ref = useRef(null)
 
+  // Hero carousel — 18 cards (6 frames × 3 copies) for seamless loop.
+  // We keep the logical index in [3, 14] and snap by ±6 when it drifts
+  // past either edge. Each copy's position i shows the same frame as
+  // i±6, so swapping transition:none and jumping is visually invisible.
+  const carouselTrackRef = useRef(null)
+  const carouselInitRef = useRef(true)
+  const [carouselIndex, setCarouselIndex] = useState(6)
+  const isPausedRef = useRef(false)
+
+  const applyCarouselTransform = (index, instant) => {
+    const track = carouselTrackRef.current
+    if (!track) return
+    const card = track.querySelector('.carousel-card')
+    if (!card) return
+    const offset = (card.offsetWidth + 10) * index
+    if (instant) {
+      track.style.transition = 'none'
+      track.style.transform = `translateX(${offset}px)`
+      void track.offsetHeight
+      track.style.transition = ''
+    } else {
+      track.style.transform = `translateX(${offset}px)`
+    }
+  }
+
+  const moveCarousel = (delta) => setCarouselIndex(prev => prev + delta)
+
+  useEffect(() => {
+    applyCarouselTransform(carouselIndex, carouselInitRef.current)
+    carouselInitRef.current = false
+    if (carouselIndex < 3 || carouselIndex > 14) {
+      const t = setTimeout(() => {
+        const wrapped = carouselIndex < 3 ? carouselIndex + 6 : carouselIndex - 6
+        applyCarouselTransform(wrapped, true)
+        setCarouselIndex(wrapped)
+      }, 650)
+      return () => clearTimeout(t)
+    }
+  }, [carouselIndex])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isPausedRef.current) setCarouselIndex(prev => prev + 1)
+    }, 4000)
+    return () => clearInterval(interval)
+  }, [])
+
   useEffect(() => {
     if (resultVideoRef.current) resultVideoRef.current.muted = !soundEnabled
   }, [soundEnabled])
@@ -271,67 +318,61 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div className="hero-columns reveal delay-2">
-            <div className="editorial-frame">
-              <div className="label-top">
-                FRAMES / AUTO-GEN &nbsp;·&nbsp; <span className="accent">live feed</span>
+          <div className="hero-carousel reveal delay-2">
+            <div className="carousel-label">
+              <span className="pulse" />
+              <span>דוגמאות · SAMPLES</span>
+              <span className="accent">● LIVE</span>
+            </div>
+
+            <div
+              className="carousel-viewport"
+              onMouseEnter={() => { isPausedRef.current = true }}
+              onMouseLeave={() => { isPausedRef.current = false }}
+            >
+              <button
+                type="button"
+                className="carousel-nav carousel-nav-prev"
+                onClick={() => moveCarousel(-1)}
+                aria-label="Previous"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+
+              <div className="carousel-track" ref={carouselTrackRef}>
+                {[1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6].map((n, i) => {
+                  const base = `/landing-assets/frames/frame-0${n}`
+                  return (
+                    <div key={i} className="carousel-card">
+                      <picture>
+                        <source srcSet={`${base}.webp`} type="image/webp" />
+                        <img src={`${base}.jpg`} alt="" loading={i < 6 ? 'eager' : 'lazy'} />
+                      </picture>
+                    </div>
+                  )
+                })}
               </div>
-              <div className="label-bottom">9:16 · HEBREW VO · 6 SAMPLES</div>
-              <span className="corner tl" /><span className="corner tr" />
-              <span className="corner bl" /><span className="corner br" />
 
-              <div className="columns-viewport">
-                {/* Col 1 — slow up */}
-                <div className="column col-1">
-                  <div className="column-track">
-                    {[1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6].map((n, i) => {
-                      const base = `/landing-assets/frames/frame-0${n}`
-                      return (
-                        <div key={`c1-${i}`} className="column-frame">
-                          <picture>
-                            <source srcSet={`${base}.webp`} type="image/webp" />
-                            <img src={`${base}.jpg`} alt="" loading={i < 6 ? 'eager' : 'lazy'} />
-                          </picture>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
+              <button
+                type="button"
+                className="carousel-nav carousel-nav-next"
+                onClick={() => moveCarousel(1)}
+                aria-label="Next"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
 
-                {/* Col 2 — medium DOWN */}
-                <div className="column col-2">
-                  <div className="column-track reverse">
-                    {[4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3].map((n, i) => {
-                      const base = `/landing-assets/frames/frame-0${n}`
-                      return (
-                        <div key={`c2-${i}`} className="column-frame">
-                          <picture>
-                            <source srcSet={`${base}.webp`} type="image/webp" />
-                            <img src={`${base}.jpg`} alt="" loading={i < 6 ? 'eager' : 'lazy'} />
-                          </picture>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {/* Col 3 — fast up */}
-                <div className="column col-3">
-                  <div className="column-track">
-                    {[2, 6, 3, 1, 5, 4, 2, 6, 3, 1, 5, 4].map((n, i) => {
-                      const base = `/landing-assets/frames/frame-0${n}`
-                      return (
-                        <div key={`c3-${i}`} className="column-frame">
-                          <picture>
-                            <source srcSet={`${base}.webp`} type="image/webp" />
-                            <img src={`${base}.jpg`} alt="" loading={i < 6 ? 'eager' : 'lazy'} />
-                          </picture>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
+            <div className="carousel-meta">
+              <span>9:16 · VERTICAL</span>
+              <span className="sep">///</span>
+              <span>HEBREW VO</span>
+              <span className="sep">///</span>
+              <span className="accent">6 דוגמאות</span>
             </div>
           </div>
         </div>
@@ -803,64 +844,97 @@ export default function LandingPage() {
         }
 
         /* ============================================================
-           HERO COLUMNS — three vertical auto-scrolling frame columns.
+           HERO CAROUSEL — horizontal 9:16 card rail with auto-scroll.
            ============================================================ */
-        .hero-columns {
-          position: relative;
-          aspect-ratio: 9/16;
-          max-height: 78vh;
-          justify-self: start;
-          width: 100%;
-        }
-        .columns-viewport {
-          position: absolute; inset: 12px;
-          display: grid;
-          grid-template-columns: 1fr 1fr 1fr;
-          gap: 8px;
-          border-radius: 4px;
-          overflow: hidden;
-          background: var(--bg-3);
-        }
-        .column {
-          position: relative; overflow: hidden;
-          mask-image: linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%);
-          -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%);
-        }
-        .column-track {
-          display: flex; flex-direction: column;
-          gap: 8px; will-change: transform;
-        }
-        .col-1 .column-track { animation: scrollUp 40s linear infinite; }
-        .col-2 .column-track.reverse { animation: scrollDown 30s linear infinite; }
-        .col-3 .column-track { animation: scrollUp 25s linear infinite; }
-        @keyframes scrollUp {
-          0% { transform: translateY(0); }
-          100% { transform: translateY(-50%); }
-        }
-        @keyframes scrollDown {
-          0% { transform: translateY(-50%); }
-          100% { transform: translateY(0); }
-        }
-        .column:hover .column-track { animation-play-state: paused; }
+        .hero-carousel { position: relative; width: 100%; }
 
-        .column-frame {
-          flex-shrink: 0; width: 100%;
-          aspect-ratio: 9/16;
-          border-radius: 3px; overflow: hidden;
-          border: 1px solid var(--line);
-          background: var(--bg-3);
-          position: relative;
-          transition: all .3s cubic-bezier(.2,.8,.2,1);
+        .carousel-label,
+        .carousel-meta {
+          display: flex; justify-content: center; align-items: center;
+          gap: 12px;
+          font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em;
+          text-transform: uppercase; color: var(--ink-3);
+          margin-bottom: 14px;
         }
-        .column-frame picture,
-        .column-frame img {
+        .carousel-meta { margin-top: 14px; margin-bottom: 0; }
+        .carousel-label .accent,
+        .carousel-meta .accent { color: var(--accent); font-weight: 700; }
+        .carousel-meta .sep { opacity: .4; }
+        .carousel-label .pulse {
+          width: 7px; height: 7px; border-radius: 50%;
+          background: var(--accent); box-shadow: 0 0 10px var(--accent-glow);
+          animation: pulse-dot 2s ease-in-out infinite;
+        }
+
+        .carousel-viewport {
+          position: relative;
+          overflow: hidden;
+          border-radius: 8px;
+        }
+        .carousel-track {
+          display: flex; gap: 10px;
+          transition: transform .6s cubic-bezier(.2,.8,.2,1);
+          will-change: transform;
+        }
+
+        .carousel-card {
+          flex-shrink: 0;
+          width: calc((100% - 20px) / 2.5);
+          aspect-ratio: 9/16;
+          border-radius: 6px; overflow: hidden;
+          border: 1px solid var(--line-2);
+          background: var(--bg-3);
+          box-shadow:
+            0 10px 30px -8px rgba(0,0,0,.5),
+            0 4px 12px -4px rgba(0,0,0,.3);
+          position: relative;
+          transition:
+            transform .4s cubic-bezier(.2,.8,.2,1),
+            border-color .3s,
+            box-shadow .3s;
+        }
+        .carousel-card picture,
+        .carousel-card img {
           width: 100%; height: 100%;
           object-fit: cover; display: block;
         }
-        .column-frame:hover {
+        .carousel-card:hover {
           border-color: var(--accent);
-          box-shadow: 0 0 30px rgba(255, 0, 128, 0.4);
+          transform: translateY(-4px) scale(1.02);
+          box-shadow:
+            0 20px 40px -10px rgba(255, 0, 128, .3),
+            0 8px 16px -4px rgba(0,0,0,.5);
+          z-index: 5;
+        }
+
+        .carousel-viewport::before,
+        .carousel-viewport::after {
+          content: "";
+          position: absolute; top: 0; bottom: 0;
+          width: 60px; pointer-events: none; z-index: 2;
+        }
+        .carousel-viewport::before { left: 0; background: linear-gradient(to right, var(--bg) 0%, transparent 100%); }
+        .carousel-viewport::after { right: 0; background: linear-gradient(to left, var(--bg) 0%, transparent 100%); }
+
+        .carousel-nav {
+          position: absolute; top: 50%; transform: translateY(-50%);
           z-index: 10;
+          width: 44px; height: 44px; border-radius: 50%;
+          background: rgba(255, 255, 255, 0.95);
+          border: none; cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+          color: var(--bg); transition: all .2s;
+          box-shadow: 0 4px 12px rgba(0,0,0,.4);
+        }
+        .carousel-nav:hover {
+          background: var(--accent); color: var(--bg);
+          transform: translateY(-50%) scale(1.1);
+        }
+        .carousel-nav-prev { left: 10px; }
+        .carousel-nav-next { right: 10px; }
+
+        @media (min-width: 1400px) {
+          .carousel-card { width: calc((100% - 30px) / 3.2); }
         }
         .editorial-frame { position: relative; width: 100%; height: 100%; }
         .editorial-frame .corner {
@@ -1281,11 +1355,6 @@ export default function LandingPage() {
           .nav-links { display: none; }
           .hero { padding: 100px 20px 60px; }
           .hero-content { grid-template-columns: 1fr; gap: 50px; margin-top: 60px; }
-          .hero-columns { max-height: 60vh; aspect-ratio: 3/4; }
-          .columns-viewport { grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-          .col-1 .column-track { animation-duration: 30s; }
-          .col-2 .column-track.reverse { animation-duration: 22s; }
-          .col-3 .column-track { animation-duration: 18s; }
           .section-divider { padding: 0 20px; margin: 40px 0 30px; }
           .flow-section, .pricing-section { padding: 30px 20px 80px; }
           .step { grid-template-columns: 50px 1fr; gap: 20px; padding: 40px 0; }
@@ -1298,9 +1367,11 @@ export default function LandingPage() {
           .pricing-grid { grid-template-columns: 1fr; }
           .scroll-cue { display: none; }
         }
-        @media (max-width: 480px) {
-          .columns-viewport { grid-template-columns: 1fr 1fr; }
-          .col-3 { display: none; }
+        @media (max-width: 768px) {
+          .carousel-card { width: calc((100% - 10px) / 1.8); }
+          .carousel-viewport::before,
+          .carousel-viewport::after { width: 30px; }
+          .carousel-nav { width: 36px; height: 36px; }
         }
 
         .reveal {
