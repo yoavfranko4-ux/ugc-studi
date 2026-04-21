@@ -342,34 +342,65 @@ export default function LandingPage() {
                   <div className="ingredient-label">אווטאר · AVATAR</div>
                 </div>
 
-                <svg className="cauldron" viewBox="0 0 200 160" fill="none" aria-hidden="true">
+                <svg className="cauldron" viewBox="0 0 300 220" fill="none" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
                   <defs>
                     <linearGradient id="cauldronBody" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stopColor="#1a0d14" />
+                      <stop offset="0" stopColor="#2a1520" />
+                      <stop offset="0.5" stopColor="#1a0d14" />
                       <stop offset="1" stopColor="#0A0908" />
                     </linearGradient>
                     <radialGradient id="cauldronInner" cx="0.5" cy="0.3" r="0.7">
-                      <stop offset="0" stopColor="#FF0080" stopOpacity="0.9" />
-                      <stop offset="0.6" stopColor="#FF0080" stopOpacity="0.3" />
+                      <stop offset="0" stopColor="#FF0080" stopOpacity="1" />
+                      <stop offset="0.6" stopColor="#FF0080" stopOpacity="0.5" />
                       <stop offset="1" stopColor="#FF0080" stopOpacity="0" />
                     </radialGradient>
+                    <linearGradient id="rimGradient" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0" stopColor="#FF0080" stopOpacity="0.6" />
+                      <stop offset="0.5" stopColor="#FF0080" stopOpacity="1" />
+                      <stop offset="1" stopColor="#FF0080" stopOpacity="0.6" />
+                    </linearGradient>
                   </defs>
+
                   <path
-                    d="M 30 60 Q 30 140 100 145 Q 170 140 170 60 L 180 55 L 175 45 L 25 45 L 20 55 Z"
+                    d="M 40 80 Q 40 195 150 205 Q 260 195 260 80 L 275 72 L 268 56 L 32 56 L 25 72 Z"
                     fill="url(#cauldronBody)"
                     stroke="#FF0080"
-                    strokeWidth="2"
+                    strokeWidth="2.5"
                   />
-                  <ellipse cx="100" cy="55" rx="70" ry="10" fill="url(#cauldronInner)" />
-                  <path d="M 25 60 Q 10 65 15 80" stroke="#FF0080" strokeWidth="2" fill="none" />
-                  <path d="M 175 60 Q 190 65 185 80" stroke="#FF0080" strokeWidth="2" fill="none" />
-                  <circle cx="80" cy="52" r="3" fill="#FF0080" className="bubble b1" />
-                  <circle cx="110" cy="50" r="2" fill="#FF0080" className="bubble b2" />
-                  <circle cx="130" cy="55" r="2.5" fill="#FF0080" className="bubble b3" />
+                  <line x1="32" y1="56" x2="268" y2="56" stroke="url(#rimGradient)" strokeWidth="3" />
+                  <ellipse cx="150" cy="70" rx="105" ry="14" fill="url(#cauldronInner)" />
+
+                  <text
+                    x="150"
+                    y="145"
+                    textAnchor="middle"
+                    fontFamily="Heebo, sans-serif"
+                    fontSize="36"
+                    fontWeight="900"
+                    fill="#FF0080"
+                    fillOpacity="0.95"
+                    letterSpacing="3"
+                  >
+                    yotzr
+                  </text>
+                  <rect x="215" y="130" width="8" height="8" fill="#FF0080" />
+                  <line x1="60" y1="170" x2="240" y2="170" stroke="#FF0080" strokeWidth="1" strokeOpacity="0.3" />
+
+                  <path d="M 32 80 Q 10 90 18 115" stroke="#FF0080" strokeWidth="3" fill="none" />
+                  <path d="M 268 80 Q 290 90 282 115" stroke="#FF0080" strokeWidth="3" fill="none" />
+
+                  <circle cx="95" cy="68" r="4" fill="#FF0080" className="bubble b1" />
+                  <circle cx="130" cy="62" r="3" fill="#FF0080" className="bubble b2" />
+                  <circle cx="165" cy="70" r="3.5" fill="#FF0080" className="bubble b3" />
+                  <circle cx="200" cy="65" r="3" fill="#FF0080" className="bubble b4" />
+                  <circle cx="225" cy="68" r="2.5" fill="#FF0080" className="bubble b5" />
                 </svg>
 
                 <div className="result-frame">
-                  <img src={`/landing-assets/poster-${currentProduct}.jpg`} alt="" />
+                  <picture>
+                    <source srcSet={`/landing-assets/scene3-${currentProduct}.webp`} type="image/webp" />
+                    <img src={`/landing-assets/scene3-${currentProduct}.jpg`} alt="" />
+                  </picture>
                   <div className="result-badge">
                     <span className="check">✓</span>
                     <span>מוכן</span>
@@ -883,26 +914,27 @@ export default function LandingPage() {
         }
 
         .cauldron {
-          position: absolute; bottom: 18%; left: 50%;
+          position: absolute; bottom: 12%; left: 50%;
           transform: translateX(-50%);
-          width: 45%; max-width: 200px;
+          width: 65%; max-width: 320px;
           z-index: 2;
-          filter: drop-shadow(0 0 30px rgba(255,0,128,0.5));
-          animation: cauldronShake 12s ease-in-out infinite;
+          filter: drop-shadow(0 0 50px rgba(255,0,128,0.6));
+          animation: cauldronShake 12s linear infinite;
         }
         @keyframes cauldronShake {
-          0%, 45%, 100% { transform: translateX(-50%) rotate(0); }
-          50% { transform: translateX(calc(-50% - 3px)) rotate(-1deg); }
-          51% { transform: translateX(calc(-50% + 3px)) rotate(1deg); }
-          52% { transform: translateX(calc(-50% - 2px)) rotate(-0.5deg); }
-          53% { transform: translateX(calc(-50% + 2px)) rotate(0.5deg); }
-          60% { transform: translateX(-50%) rotate(0); }
+          0%, 50%, 67%, 100% { transform: translateX(-50%) rotate(0); }
+          54% { transform: translateX(calc(-50% - 4px)) rotate(-1deg); }
+          57% { transform: translateX(calc(-50% + 4px)) rotate(1deg); }
+          60% { transform: translateX(calc(-50% - 3px)) rotate(-0.5deg); }
+          63% { transform: translateX(calc(-50% + 3px)) rotate(0.5deg); }
         }
 
         .bubble { opacity: 0; animation: bubbleUp 2s ease-in-out infinite; }
         .bubble.b1 { animation-delay: 0s; }
         .bubble.b2 { animation-delay: 0.6s; }
         .bubble.b3 { animation-delay: 1.2s; }
+        .bubble.b4 { animation-delay: 1.8s; }
+        .bubble.b5 { animation-delay: 2.4s; }
         @keyframes bubbleUp {
           0% { opacity: 0; transform: translateY(0) scale(0.5); }
           30% { opacity: 1; }
@@ -936,9 +968,9 @@ export default function LandingPage() {
         }
 
         .ingredient {
-          position: absolute; top: 8%; left: 50%;
+          position: absolute; top: 5%; left: 50%;
           transform: translateX(-50%);
-          width: 40%; max-width: 140px;
+          width: 38%; max-width: 160px;
           aspect-ratio: 1; opacity: 0; z-index: 4;
         }
         .ingredient picture,
@@ -975,45 +1007,64 @@ export default function LandingPage() {
         }
         .script-line.short { width: 60%; }
 
-        .ingredient-product { animation: fallIn 12s infinite; }
-        .ingredient-script { animation: fallIn 12s infinite; animation-delay: 2s; }
-        .ingredient-avatar { animation: fallIn 12s infinite; animation-delay: 4s; }
+        .ingredient-product { animation: fallInProduct 12s linear infinite; animation-delay: 0s; }
+        .ingredient-script  { animation: fallInScript  12s linear infinite; animation-delay: 0s; }
+        .ingredient-avatar  { animation: fallInAvatar  12s linear infinite; animation-delay: 0s; }
 
-        @keyframes fallIn {
+        @keyframes fallInProduct {
           0%   { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.8) rotate(-10deg); }
           4%   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
-          10%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
-          15%  { opacity: 1; transform: translateX(-50%) translateY(60px) scale(0.7) rotate(15deg); }
-          17%  { opacity: 0; transform: translateX(-50%) translateY(120px) scale(0.3) rotate(30deg); }
-          100% { opacity: 0; }
+          8%   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          13%  { opacity: 1; transform: translateX(-50%) translateY(80px) scale(0.7) rotate(15deg); }
+          16%  { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+          17%, 100% { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+        }
+        @keyframes fallInScript {
+          0%, 17% { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.8) rotate(-10deg); }
+          21%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          25%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          30%  { opacity: 1; transform: translateX(-50%) translateY(80px) scale(0.7) rotate(15deg); }
+          33%  { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+          34%, 100% { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+        }
+        @keyframes fallInAvatar {
+          0%, 33% { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.8) rotate(-10deg); }
+          38%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          42%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          47%  { opacity: 1; transform: translateX(-50%) translateY(80px) scale(0.7) rotate(15deg); }
+          50%  { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+          51%, 100% { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
         }
 
         .result-frame {
           position: absolute; bottom: 30%; left: 50%;
           transform: translateX(-50%) translateY(100px) scale(0.5);
-          width: 45%; max-width: 180px;
+          width: 42%; max-width: 170px;
           aspect-ratio: 9/16;
           opacity: 0; z-index: 5;
-          animation: resultEmerge 12s infinite;
-          animation-delay: 7s;
+          animation: resultEmerge 12s linear infinite;
+          animation-delay: 0s;
         }
+        .result-frame picture,
         .result-frame img {
           width: 100%; height: 100%;
           object-fit: cover;
           border-radius: 8px;
+          display: block;
+        }
+        .result-frame img {
           border: 3px solid var(--accent);
           box-shadow:
             0 0 50px rgba(255,0,128,0.6),
             0 10px 30px rgba(0,0,0,0.5);
-          display: block;
         }
         @keyframes resultEmerge {
-          0%, 55%  { opacity: 0; transform: translateX(-50%) translateY(100px) scale(0.3); }
-          62%      { opacity: 1; transform: translateX(-50%) translateY(-30px) scale(1.15); }
-          68%      { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-          88%      { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-          93%      { opacity: 0; transform: translateX(-50%) translateY(-40px) scale(0.7); }
-          100%     { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.5); }
+          0%, 67%    { opacity: 0; transform: translateX(-50%) translateY(100px) scale(0.3); }
+          72%        { opacity: 1; transform: translateX(-50%) translateY(-30px) scale(1.15); }
+          76%        { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+          88%        { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+          92%        { opacity: 0; transform: translateX(-50%) translateY(-30px) scale(0.8); }
+          93%, 100%  { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.5); }
         }
 
         .result-badge {
@@ -1031,14 +1082,14 @@ export default function LandingPage() {
           position: absolute; inset: 0;
           background: white; opacity: 0;
           pointer-events: none; z-index: 6;
-          animation: flashPulse 12s infinite;
-          animation-delay: 6.5s;
+          animation: flashPulse 12s linear infinite;
+          animation-delay: 0s;
         }
         @keyframes flashPulse {
-          0%, 54%, 58%, 100% { opacity: 0; }
-          55% { opacity: 0.7; }
-          56% { opacity: 0.3; }
-          57% { opacity: 0.9; }
+          0%, 65%, 70%, 100% { opacity: 0; }
+          67% { opacity: 0.7; }
+          68% { opacity: 0.3; }
+          69% { opacity: 0.9; }
         }
 
         @media (prefers-reduced-motion: reduce) {
