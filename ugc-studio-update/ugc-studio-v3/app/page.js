@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+// Product → presenter avatar (keeps the recipe animation visually coherent).
+const PRODUCT_AVATARS = { icecream: 'noa', kipa: 'daniel', teeth: 'maya' }
+const PRODUCT_CYCLE = ['icecream', 'kipa', 'teeth']
+
 // Product images now ship as {base}.webp + {base}.jpg for mobile fallback,
 // so `image` stores the base path (no extension).
 const PRODUCTS = {
@@ -39,6 +43,11 @@ export default function LandingPage() {
   const [typedText, setTypedText] = useState('')
   const [hasImage, setHasImage] = useState(false)
   const [imageSrc, setImageSrc] = useState('')
+
+  // Hero recipe animation auto-cycles products every 12s (matches the
+  // fallIn/resultEmerge loop). User tab clicks pause the cycle for 30s so
+  // their selection has a chance to land before we rotate again.
+  const [userInteracted, setUserInteracted] = useState(false)
 
   // Global sound state. Only the Step 4 result video plays audio — hero is
   // now a static frames grid. First toggle dismisses the hint permanently.
@@ -137,8 +146,10 @@ export default function LandingPage() {
     }, 35)
   }
 
-  // Switch product (from tab click)
+  // Switch product (from tab click). Pauses the hero auto-cycle for 30s
+  // so the user's choice actually sticks.
   const switchProduct = (key) => {
+    setUserInteracted(true)
     if (key === currentProduct) return
     setCurrentProduct(key)
     const data = PRODUCTS[key]
@@ -154,6 +165,25 @@ export default function LandingPage() {
       rv.play().catch(() => {})
     }
   }
+
+  // Resume auto-cycle 30s after the last user interaction.
+  useEffect(() => {
+    if (!userInteracted) return
+    const t = setTimeout(() => setUserInteracted(false), 30000)
+    return () => clearTimeout(t)
+  }, [userInteracted])
+
+  // Cycle through products every 12s — matches the hero animation loop.
+  useEffect(() => {
+    if (userInteracted) return
+    const interval = setInterval(() => {
+      setCurrentProduct(prev => {
+        const i = PRODUCT_CYCLE.indexOf(prev)
+        return PRODUCT_CYCLE[(i + 1) % PRODUCT_CYCLE.length]
+      })
+    }, 12000)
+    return () => clearInterval(interval)
+  }, [userInteracted])
 
   // Start typing when step 1 enters view
   useEffect(() => {
@@ -306,8 +336,8 @@ export default function LandingPage() {
 
                 <div className="ingredient ingredient-avatar">
                   <picture>
-                    <source srcSet="/landing-assets/avatar-daniel.webp" type="image/webp" />
-                    <img src="/landing-assets/avatar-daniel.jpg" alt="" />
+                    <source srcSet={`/landing-assets/avatar-${PRODUCT_AVATARS[currentProduct]}.webp`} type="image/webp" />
+                    <img src={`/landing-assets/avatar-${PRODUCT_AVATARS[currentProduct]}.jpg`} alt="" />
                   </picture>
                   <div className="ingredient-label">אווטאר · AVATAR</div>
                 </div>
@@ -980,9 +1010,10 @@ export default function LandingPage() {
         @keyframes resultEmerge {
           0%, 55%  { opacity: 0; transform: translateX(-50%) translateY(100px) scale(0.3); }
           62%      { opacity: 1; transform: translateX(-50%) translateY(-30px) scale(1.15); }
-          68%      { transform: translateX(-50%) translateY(0) scale(1); }
-          90%      { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-          100%     { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(1); }
+          68%      { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+          88%      { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+          93%      { opacity: 0; transform: translateX(-50%) translateY(-40px) scale(0.7); }
+          100%     { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.5); }
         }
 
         .result-badge {
