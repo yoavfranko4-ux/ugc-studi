@@ -33,13 +33,44 @@ export default function LandingPage() {
   const [hasImage, setHasImage] = useState(false)
   const [imageSrc, setImageSrc] = useState('')
 
+  // Global sound state. Videos autoplay muted (browser policy); one toggle
+  // unmutes every video on the page. Once the user toggles once, the floating
+  // "לחץ לצליל" hint never reappears.
+  const [soundEnabled, setSoundEnabled] = useState(false)
+  const [hintDismissed, setHintDismissed] = useState(false)
+  const [heroHint, setHeroHint] = useState(true)
+  const [resultHint, setResultHint] = useState(true)
+
   const typingIntervalRef = useRef(null)
   const branchRef = useRef(null)
   const branchFillRef = useRef(null)
+  const heroVideoRef = useRef(null)
   const resultVideoRef = useRef(null)
   const typingStartedRef = useRef(false)
   const step1Ref = useRef(null)
   const step4Ref = useRef(null)
+
+  // Sync mute state to every <video> the page owns a ref to.
+  useEffect(() => {
+    [heroVideoRef.current, resultVideoRef.current].forEach(v => {
+      if (v) v.muted = !soundEnabled
+    })
+  }, [soundEnabled])
+
+  // Initial 3s pulse for each hint, then auto-hide. Skipped if already dismissed.
+  useEffect(() => {
+    if (hintDismissed) return
+    const t1 = setTimeout(() => setHeroHint(false), 3000)
+    const t2 = setTimeout(() => setResultHint(false), 3000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [hintDismissed])
+
+  const toggleSound = () => {
+    setSoundEnabled(s => !s)
+    setHintDismissed(true)
+    setHeroHint(false)
+    setResultHint(false)
+  }
 
   // Nav scroll
   useEffect(() => {
@@ -242,10 +273,24 @@ export default function LandingPage() {
               <div className="label-bottom">9:16 · 720×1280 · H.264 · HEBREW VO</div>
               <span className="corner tl" /><span className="corner tr" />
               <span className="corner bl" /><span className="corner br" />
-              <div className="inner">
-                <video autoPlay muted loop playsInline poster="/landing-assets/poster-icecream.jpg">
+              <div
+                className="inner"
+                onMouseEnter={() => { if (!hintDismissed) setHeroHint(true) }}
+                onMouseLeave={() => { if (!hintDismissed) setHeroHint(false) }}
+              >
+                <video ref={heroVideoRef} autoPlay muted loop playsInline poster="/landing-assets/poster-icecream.jpg">
                   <source src="/landing-assets/video-icecream.mp4" type="video/mp4" />
                 </video>
+                <button
+                  className="sound-toggle"
+                  onClick={toggleSound}
+                  aria-label={soundEnabled ? 'השתק' : 'הפעל סאונד'}
+                >
+                  {soundEnabled ? '🔊' : '🔇'}
+                </button>
+                {heroHint && !hintDismissed && (
+                  <div className="sound-hint">🔊 לחץ לצליל</div>
+                )}
               </div>
               <div className="rec-corner">
                 <span className="rec" />
@@ -371,10 +416,24 @@ export default function LandingPage() {
             <div className="step-visual">
               <div className="cap"><span className="bullet">●</span> OUTPUT · #ready</div>
               <div className="demo-result">
-                <div className="demo-video">
+                <div
+                  className="demo-video"
+                  onMouseEnter={() => { if (!hintDismissed) setResultHint(true) }}
+                  onMouseLeave={() => { if (!hintDismissed) setResultHint(false) }}
+                >
                   <video ref={resultVideoRef} muted loop playsInline poster={data.poster} key={data.video}>
                     <source src={data.video} type="video/mp4" />
                   </video>
+                  <button
+                    className="sound-toggle"
+                    onClick={toggleSound}
+                    aria-label={soundEnabled ? 'השתק' : 'הפעל סאונד'}
+                  >
+                    {soundEnabled ? '🔊' : '🔇'}
+                  </button>
+                  {resultHint && !hintDismissed && (
+                    <div className="sound-hint">🔊 לחץ לצליל</div>
+                  )}
                 </div>
                 <div className="demo-result-meta">
                   <span><span className="accent">●</span> 20s</span>
@@ -1054,6 +1113,38 @@ export default function LandingPage() {
         .reveal.delay-2 { transition-delay: .2s; }
         .reveal.delay-3 { transition-delay: .3s; }
         .reveal.delay-4 { transition-delay: .4s; }
+
+        /* Sound controls — per-video toggle + first-time hint. */
+        .sound-toggle {
+          position: absolute; top: 16px; right: 16px; z-index: 10;
+          width: 40px; height: 40px; border-radius: 50%;
+          background: rgba(0,0,0,.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+          border: 1px solid rgba(255,255,255,.14);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 18px; line-height: 1; cursor: pointer;
+          transition: transform .2s, background .2s, border-color .2s;
+        }
+        .sound-toggle:hover {
+          background: rgba(0,0,0,.85);
+          border-color: var(--accent);
+          transform: scale(1.08);
+        }
+        .sound-hint {
+          position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+          z-index: 10; pointer-events: none;
+          background: rgba(0,0,0,.75); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+          border: 1px solid var(--accent);
+          color: var(--ink);
+          padding: 8px 14px; border-radius: 100px;
+          font-family: var(--body); font-weight: 600; font-size: 12px;
+          letter-spacing: .02em; white-space: nowrap;
+          animation: sound-hint-pulse 1.2s ease-in-out infinite;
+          box-shadow: 0 6px 20px rgba(255,0,128,.3);
+        }
+        @keyframes sound-hint-pulse {
+          0%, 100% { transform: translateX(-50%) scale(1); opacity: .95; }
+          50% { transform: translateX(-50%) scale(1.06); opacity: 1; }
+        }
       `}</style>
     </>
   )
