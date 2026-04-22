@@ -51,6 +51,7 @@ export default function LandingPage() {
   const [typedText, setTypedText] = useState('')
   const [hasImage, setHasImage] = useState(false)
   const [imageSrc, setImageSrc] = useState('')
+  const [loadingPlan, setLoadingPlan] = useState(null)
 
   // Global sound state. Only the Step 4 result video plays audio — hero is
   // now a static frames grid. First toggle dismisses the hint permanently.
@@ -222,8 +223,26 @@ export default function LandingPage() {
     return () => obs.disconnect()
   }, [])
 
-  const onCheckout = (tier) => {
-    console.log(`TODO: implement checkout for ${tier}`)
+  const onCheckout = async (planType) => {
+    if (loadingPlan) return
+    setLoadingPlan(planType)
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planType }),
+      })
+      const data = await res.json()
+      if (data.success && data.url) {
+        window.location.href = data.url
+        return
+      }
+      alert('שגיאה: ' + (data.error || 'לא הצלחנו ליצור דף תשלום'))
+      setLoadingPlan(null)
+    } catch (err) {
+      alert('שגיאת רשת: ' + err.message)
+      setLoadingPlan(null)
+    }
   }
 
   // Flow-section derived data. Hero animation reads heroProduct directly.
@@ -640,7 +659,13 @@ export default function LandingPage() {
               <li><span className="check">✓</span>ייצוא MP4 מלא</li>
               <li><span className="check">✓</span>עריכה מלאה</li>
             </ul>
-            <button className="btn btn-ghost plan-cta" onClick={() => onCheckout('trial')}>התחל ניסיון · ₪20</button>
+            <button
+              className="btn btn-ghost plan-cta"
+              onClick={() => onCheckout('trial')}
+              disabled={loadingPlan !== null}
+            >
+              {loadingPlan === 'trial' ? 'טוען...' : 'התחל ניסיון · ₪20'}
+            </button>
             <div className="plan-note">ללא חידוש אוטומטי<br />מסתיים אחרי 3 ימים</div>
           </div>
 
@@ -659,7 +684,13 @@ export default function LandingPage() {
               <li><span className="check">✓</span>ייצוא 4K</li>
               <li><span className="check">✓</span>מצב &quot;סרטון עסק&quot;</li>
             </ul>
-            <button className="btn btn-primary plan-cta" onClick={() => onCheckout('basic')}>שדרג לבייסיק</button>
+            <button
+              className="btn btn-primary plan-cta"
+              onClick={() => onCheckout('basic')}
+              disabled={loadingPlan !== null}
+            >
+              {loadingPlan === 'basic' ? 'טוען...' : 'שדרג לבייסיק'}
+            </button>
             <div className="plan-note">ביטול בכל עת</div>
           </div>
 
@@ -678,7 +709,13 @@ export default function LandingPage() {
               <li><span className="check">✓</span>עדיפות בתור</li>
               <li><span className="check">✓</span>תמיכה אישית ב-WhatsApp</li>
             </ul>
-            <button className="btn btn-ghost plan-cta" onClick={() => onCheckout('pro')}>שדרג לפרו</button>
+            <button
+              className="btn btn-ghost plan-cta"
+              onClick={() => onCheckout('pro')}
+              disabled={loadingPlan !== null}
+            >
+              {loadingPlan === 'pro' ? 'טוען...' : 'שדרג לפרו'}
+            </button>
             <div className="plan-note">ביטול בכל עת · Early access</div>
           </div>
         </div>
@@ -694,10 +731,15 @@ export default function LandingPage() {
             ב-3 דקות תהיה לך פרסומת מוכנה לשידור.
           </p>
           <div className="reveal delay-2">
-            <a href="#pricing" className="btn btn-primary btn-lg">
-              נסה 3 ימים ב-₪20
+            <button
+              type="button"
+              className="btn btn-primary btn-lg"
+              onClick={() => onCheckout('trial')}
+              disabled={loadingPlan !== null}
+            >
+              {loadingPlan === 'trial' ? 'טוען...' : 'נסה 3 ימים ב-₪20'}
               <svg viewBox="0 0 16 16" fill="none"><path d="M13 8l-6 5V3l6 5z" fill="currentColor" /></svg>
-            </a>
+            </button>
           </div>
         </div>
       </section>
