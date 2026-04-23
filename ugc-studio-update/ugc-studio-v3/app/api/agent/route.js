@@ -926,6 +926,19 @@ async function frameToStaticVideo(frameUrl, durationSec = 5) {
   }
 }
 
+// Map an avatar URL / filename to the actor id used by lib/ugc-skills. The
+// skill's Layer-1 identity lock needs this to pick the right actor card.
+// Returns null for unknown / user-uploaded avatars so the caller can fall
+// back to the legacy (non-skill) prompt path safely.
+function mapAvatarToActorId(avatarUrl) {
+  if (!avatarUrl) return null;
+  const url = String(avatarUrl).toLowerCase();
+  if (url.includes('noa')) return 'noa';
+  if (url.includes('daniel')) return 'daniel';
+  if (url.includes('maya')) return 'maya';
+  return null;
+}
+
 async function runJob(jobId, body) {
   try {
     const {
@@ -1014,7 +1027,40 @@ async function runJob(jobId, body) {
           // contextual setting (candlelight / golden hour / car / beach) isn't
           // fought by baked-in defaults.
           const scene4Context = i === 3 && !productOnly;
-          const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, { productOnly, scene4Context });
+          const baseOpts = { productOnly, scene4Context };
+          const actorId = mapAvatarToActorId(avatarUrl);
+          const beat = i + 1;
+          const isBusinessCraft = videoType === 'business';
+
+          // Skill-first with legacy fallback. If the skill path throws (bad
+          // input, NanoBanana rejects the longer prompt, etc.) we retry with
+          // the legacy wrap so the job still ships a frame.
+          let frameUrl = null;
+          const useSkill = Boolean(actorId && !productOnly);
+          console.log('[NB] path decision', {
+            scene: i + 1,
+            path: useSkill ? 'skill-driven' : 'legacy',
+            actorId,
+            beat,
+            productOnly,
+            avatarUrl: avatarUrl?.slice(0, 80)
+          });
+          if (useSkill) {
+            try {
+              frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, {
+                ...baseOpts,
+                actorId,
+                beat,
+                productName,
+                isBusinessCraft
+              });
+            } catch (err) {
+              console.warn(`[NB] Skill path failed on scene ${i + 1}, falling back to legacy:`, err.message);
+              frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, baseOpts);
+            }
+          } else {
+            frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, baseOpts);
+          }
           frames.push(frameUrl);
           if (frameUrl) prevFrame = frameUrl;
         } catch (e) {
