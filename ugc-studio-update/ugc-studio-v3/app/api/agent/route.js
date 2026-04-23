@@ -53,7 +53,13 @@ const SCENE_DURATIONS = [5, 5, 5, 5];
 async function generateNBFrame(prompt, imageUrls, maxRetries = 3, opts = {}) {
   const validUrls = imageUrls.filter(Boolean);
   const productOnly = opts.productOnly === true;
-  console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, productOnly, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
+  // scene4Context: scene 4 is the aspirational-result shot that breaks out of
+  // the standard window-daylight bedroom/bathroom frame. Drop the default
+  // lighting layer (Claude's prompt supplies the contextual lighting like
+  // candlelight / golden hour / restaurant warmth) and drop the vehicle
+  // negative so car-accessory products can actually show the car.
+  const scene4Context = opts.scene4Context === true;
+  console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, productOnly, scene4Context, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
 
   let enhancedPrompt;
   if (productOnly) {
@@ -88,7 +94,14 @@ async function generateNBFrame(prompt, imageUrls, maxRetries = 3, opts = {}) {
     const naturalLight = 'natural mixed indoor lighting — soft window daylight plus a nearby warm room practical, uneven jaw-line shadow, one side of the face slightly in shadow, mild color-temperature mismatch between window and room lamp, no studio softbox, no rim light, no beauty dish, no ring light';
     const motionFeel = 'slight handheld one-hand micro-shake, subtle motion blur on hair strands near the cheek, soft focus across the whole frame with nothing tack sharp, one eye marginally more in focus than the other, candid unposed framing slightly off-center and tilted a few degrees, head not dead-level, captured between expressions — eyelid mid-close or mouth in the middle of forming a word, never a finished pose';
     const antiAI = 'avoid overly polished AI aesthetic, avoid glossy cinematic bokeh, avoid symmetrical studio framing, avoid catalog-model pose, avoid perfectly smooth skin, avoid plastic look, avoid 8k, avoid award-winning photography look, avoid any LUT or color grading, looks like a real person on their front camera not a render';
-    enhancedPrompt = `${frameGrabOpener}. ${anatomyPrefix} ${prompt}, ${selfieRealism}, ${iPhoneCamera}, ${naturalLight}, ${motionFeel}, ${antiAI}, real avatar not model, ${singleHandRule} exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle, no burned-in subtitles or captions or on-screen text or graphic overlays. ${negativeConcepts}`;
+    // For scene 4 (aspirational result), drop the default window-daylight
+    // lighting layer so Claude's contextual lighting (candlelight, golden
+    // hour, restaurant warmth, beach light, park daylight) dominates; also
+    // drop the "NEVER in a car / vehicle" negative so car-accessory scene 4
+    // can legitimately show the car. The no-phone rule stays in all scenes.
+    const lightingPart = scene4Context ? '' : `, ${naturalLight}`;
+    const vehicleNegative = scene4Context ? '' : ', NEVER in a car, NEVER in a vehicle';
+    enhancedPrompt = `${frameGrabOpener}. ${anatomyPrefix} ${prompt}, ${selfieRealism}, ${iPhoneCamera}${lightingPart}, ${motionFeel}, ${antiAI}, real avatar not model, ${singleHandRule} exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene${vehicleNegative}, no burned-in subtitles or captions or on-screen text or graphic overlays. ${negativeConcepts}`;
   }
 
   const endpointId = validUrls.length === 0
@@ -509,8 +522,37 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 - Cleaning products → ALWAYS: "kitchen or bathroom"
 - NEVER put clothing/fashion scenes in a car. NEVER put dental scenes in a bedroom.
 - NEVER put ANY product in a car scene UNLESS it is explicitly a car accessory. Cars are ONLY for car accessories.
+- THE SETTING MAP ABOVE APPLIES TO SCENES 1, 2, 3 ONLY. Scene 4 deliberately breaks out of this map — see rule 5a for the scene-4 "aspirational result" setting.
 
-6. EVERY nb_prompt MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". If the avatar holds a product, say "holding the product with ONE hand only, other hand visible and relaxed at side". Avoid describing multiple items held at once or hands doing multiple simultaneous actions.
+5a. SCENE 4 — ASPIRATIONAL CONTEXTUAL RESULT (OVERRIDES rule 5 for scene 4):
+Scene 4 must NOT be a generic "avatar holding product" shot in the same room as scene 3. It must show the LIFESTYLE the product enables — the specific moment that tells the viewer "this is the life I live with this product now". The scene-4 context must emotionally resolve the pain from scene 1 (if pain was "embarrassed to smile at dinner", scene 4 is "laughing openly at a dinner with friends" — the SAME moment the pain ruined, now transformed).
+
+Scene-4 context MUST be:
+- SPECIFIC, not vague ("Friday-night family Shabbat dinner", not "at home").
+- ASPIRATIONAL but REALISTIC (not luxury-fantasy; a warm real moment).
+- An authentic iPhone-selfie capture of a real lived moment (the selfie aesthetic is preserved; only the background and lighting change).
+- A setting where the product is still naturally visible on/with the avatar OR the EFFECT of the product is visible (a confident smile for whitening, a styled outfit for fashion, etc.).
+- The lighting MUST come from the context (candlelight, golden hour, restaurant warmth, beach light, park daylight, overhead café pendants) — NOT the default "window daylight + room practical" used in scenes 1/3.
+
+Category → contextual-result cheat sheet (pick the closest match; reason about the product if none fit):
+- Religious/spiritual item (kippah, tzitzit, candles, tallit) → warm Friday-night Shabbat dinner with candlelight, family visible in soft-focus background, communal meal / at synagogue with soft stained-glass light
+- Teeth whitening / dental → laughing openly at a cosy restaurant dinner with friends, confident smile visible / first-date coffee-shop moment / wedding or event table
+- Fashion / clothing / dress → night out at a stylish restaurant, outfit visible / arriving at a work event / celebration with friends in soft bar light
+- Beauty / skincare / cosmetics → glowing moment getting ready under warm vanity lights / date-night selfie with candlelight / rooftop-evening selfie
+- Hair product / styling → confident moment right before a big evening out, styled hair visible / day-out selfie in golden-hour park light
+- Food / drink / gelato / coffee → enjoying it at the beach with sand and ocean behind / picnic in the park with friends / morning coffee on a balcony with a view
+- Home goods / decor / candles → hosting friends around a beautifully set table, warm room light / relaxing on a cozy couch with the decor visible
+- Baby / kids product → playing with a visibly happy child on a living-room rug / park or picnic moment with the child smiling
+- Fitness / supplement / workout gear → post-workout gym selfie / after a run in a sunny park / sunrise outdoor workout
+- Sleep product → waking up rested in a sunlit bedroom / feeling energised during a bright productive day
+- Car accessory → sitting in the driver's seat at golden hour with warm light through the windshield / leaning against the driver's side at a scenic overlook (car-accessory products MAY use vehicle settings in scene 4 only — this is the ONE scene-4 exception to rule 5/6's no-vehicle rule)
+- Tech / gadget / app → using it naturally in the real-life moment the product enables (e.g., confidently navigating a busy street with a navigation gadget)
+- Cleaning / household → enjoying a clean, calm home, hosting friends effortlessly
+- Service / subscription / B2C app → the OUTCOME the service delivers (satisfied family around a delivered-food table, confident moment after a style-service session)
+
+Scene-4 TONE: satisfied, quietly confident, content in the moment — NOT a frozen posed grin. A closed-lip warm smile in context reads more authentic than a big forced smile.
+
+6. EVERY nb_prompt for scenes 1/3 MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". SCENE 4 follows the same anatomy rule BUT its ending must OMIT "NEVER in a car, NEVER in a vehicle" — scene 4 may legitimately show the car for car-accessory products (see rule 5a). The no-phone rule stays for scene 4. If the avatar holds a product, say "holding the product with ONE hand only, other hand visible and relaxed at side". Avoid describing multiple items held at once or hands doing multiple simultaneous actions.
 
 7. SCENE STRUCTURE (follows the hook formula):
 - Scene 1 (כאב — Hook): Avatar ALONE showing the specific problem — NO product visible, NO product mentioned
@@ -578,8 +620,8 @@ Return ONLY valid JSON (no markdown):
     },
     {
       "type": "תוצאה",
-      "nb_prompt": "Unedited still frame pulled from a handheld iPhone selfie video, not a photograph. Avatar genuinely happy with result of using ${productName}, natural closed-lip smile (mouth stays closed, corners of mouth lifted, eyes soften and crinkle slightly at the outer corners), caught between expressions not a finished pose. Product naturally visible, if held the fingers wrap naturally around it with visible grip tension. Shot on iPhone 15 Pro front camera, native wide lens around 26mm, autofocus hunts gently with focus pulsing, real unretouched skin with visible pores, subtle uneven skin tone, slight natural oil sheen on nose and forehead, faint pink flush on cheeks, subtle darker half-moons under the eyes, tiny flyaway hairs catching the light, natural facial asymmetry, soft window daylight mixed with warm room practical, uneven jaw shadow, subtle barrel distortion at corners, auto white balance, faint luminance grain, faint rolling-shutter skew, flat washed-out color, uncolor-graded, low saturation, handheld one-hand micro-shake with subtle motion blur on hair strands, soft focus across the whole frame, framing slightly off-center and tilted a few degrees, head not dead-level, no airbrushing, no beauty filter, no studio lighting, no 8k, no LUT, looks like a real person on their front camera not a render, correct human anatomy, no burned-in subtitles or captions or on-screen text or graphic overlays, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar showing positive result after using ${productName}. Physics of motion: closed-lip warm smile forms gradually with corners of mouth lifting and skin softening around the outer eyes in genuine relief, small subtle nod with hair following just behind the head movement and catching the light, eyes break contact with the lens briefly then refocus, casual relaxed point toward camera with one hand — natural fingertip extension no rigid mannequin pose. Product naturally visible in frame, if held the fingers remain firmly anchored with visible grip tension (no hand morphing, no melted fingers). Handheld iPhone front-camera feel with mild one-hand wobble, autofocus pulses gently, silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
+      "nb_prompt": "Unedited still frame pulled from a handheld iPhone selfie video, not a photograph. ASPIRATIONAL RESULT CONTEXT for ${productName} — pick a specific setting from rule 5a that shows the lifestyle this product enables and that emotionally resolves the scene-1 pain. WRITE THE SPECIFIC SETTING HERE (examples: for a kippah — 'at a warm Friday-night Shabbat family dinner with soft candlelight, family members visible in soft-focus around the table, white linen tablecloth, challah bread'; for teeth whitening — 'laughing openly at a cosy dinner with friends in a warm restaurant, wine glasses and plates softly out of focus in the foreground'; for a dress — 'arriving at a stylish café at golden hour, outfit fully visible, city street softly out of focus behind'; for a car accessory — 'sitting in the driver's seat at golden hour with warm light coming through the windshield'). Avatar is in that setting with a natural closed-lip warm smile (mouth stays closed, corners of mouth lifted, eyes soften and crinkle at the outer corners), caught between expressions not a finished pose. The product is naturally visible — either worn/held/used, or its EFFECT is visible (confident smile for whitening, styled outfit on body, glowing skin). CONTEXT-APPROPRIATE lighting from the setting (candlelight / golden hour / restaurant warmth / beach light / park daylight) — NOT generic window daylight. Shot on iPhone 15 Pro front camera, native wide lens around 26mm, autofocus hunts gently with focus pulsing, real unretouched skin with visible pores, subtle uneven skin tone, slight natural oil sheen on nose and forehead, faint pink flush on cheeks, subtle darker half-moons under the eyes, tiny flyaway hairs catching the light, natural facial asymmetry, subtle barrel distortion at corners, auto white balance, faint luminance grain, faint rolling-shutter skew, flat washed-out color, uncolor-graded, low saturation, handheld one-hand micro-shake with subtle motion blur on hair strands, soft focus across the whole frame, framing slightly off-center and tilted a few degrees, head not dead-level, no airbrushing, no beauty filter, no 8k, no LUT, looks like a real person on their front camera not a render, correct human anatomy, no burned-in subtitles or captions or on-screen text or graphic overlays, NEVER show a phone or mobile device in any scene",
+      "kling_prompt": "Avatar in the ASPIRATIONAL RESULT CONTEXT for ${productName} (the specific setting from the scene-4 nb_prompt above). Physics of motion + ENVIRONMENT MOTION: motion appropriate to the setting — at a dinner, other hands or wine glasses move softly in the foreground periphery and candles flicker gently; at a beach, hair sways in the sea breeze with sand and ocean behind; at a café, ambient bustle hints in the soft-focus background; in a car, warm windshield light drifts across the face as the camera micro-shifts. Avatar's closed-lip warm smile forms gradually with corners of mouth lifting and skin softening around the outer eyes in genuine quiet confidence, small subtle nod with hair following the head movement and catching the light, eyes briefly break contact with the lens — maybe glance at someone off-screen as if sharing the moment — then refocus on the camera, optional small hand-on-heart gesture or relaxed point toward camera. Product naturally visible in frame; if held, fingers remain firmly anchored with visible grip tension (no hand morphing, no melted fingers). Handheld iPhone front-camera feel with mild one-hand wobble, autofocus pulses gently. Silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
       "subtitle": "same as voiceover_scene4"
     }
   ]
@@ -942,7 +984,12 @@ async function runJob(jobId, body) {
               if (preparedProduct && (i === 2 || i === 3)) imageUrls.push(preparedProduct);
             }
           }
-          const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, { productOnly });
+          // Scene 4 is the aspirational-result shot — tell generateNBFrame to
+          // drop the default lighting and vehicle-negative overlays so the
+          // contextual setting (candlelight / golden hour / car / beach) isn't
+          // fought by baked-in defaults.
+          const scene4Context = i === 3 && !productOnly;
+          const frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, { productOnly, scene4Context });
           frames.push(frameUrl);
           if (frameUrl) prevFrame = frameUrl;
         } catch (e) {
@@ -1230,8 +1277,12 @@ function getDefaultScenes(productName, applicationArea, productDesc) {
     },
     {
       type: 'תוצאה',
-      nb_prompt: `avatar genuinely happy with result of using ${productName}, natural smile showing positive outcome, product naturally visible, correct human anatomy, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar genuinely happy showing positive result after using ${productName}, natural smile, product visible, pointing at camera, ${STABLE}`,
+      // Aspirational-result fallback: avatar in a contextual moment that
+      // shows the lifestyle ${productName} enables (warm restaurant dinner,
+      // golden-hour outdoor moment, etc.) rather than a generic "happy
+      // holding product" shot. Claude's live script overrides this.
+      nb_prompt: `avatar in an aspirational contextual moment showing the lifestyle ${productName} enables — e.g., a warm restaurant dinner with friends softly visible in background, or a golden-hour moment outdoors — closed-lip confident smile, product naturally visible or its effect visible, context-appropriate warm lighting, correct human anatomy, NEVER show a phone or mobile device in any scene`,
+      kling_prompt: `Avatar in the aspirational contextual moment for ${productName}, closed-lip warm smile forms gradually with eyes softening, small subtle nod, environment alive behind — soft-focus periphery motion of the setting, product naturally visible, ${STABLE}`,
       subtitle: `תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`
     }
   ];
@@ -1344,8 +1395,11 @@ function getBusinessDefaultScenes(name, desc) {
     },
     {
       type: 'הזמנה',
-      nb_prompt: `avatar wearing ${uniform} standing at the entrance of ${name} near the sign, open welcoming gesture with hands, warm relaxed smile with mouth closed, business signage visible in background, golden hour warm lighting, inviting atmosphere, ${silentRule}, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar stands near ${name} sign, gentle welcoming gesture with open hands, slight head nod, mouth-closed warm smile, ${STABLE}`,
+      // Business-success contextual-result fallback: avatar IN the thriving
+      // moment of the business (customers visibly enjoying, workspace alive)
+      // rather than alone by the sign. Claude's live script overrides this.
+      nb_prompt: `avatar wearing ${uniform} inside ${name} at a business-success moment — workspace alive with customers/activity softly visible in background, ${name} signage or branded element in frame, warm relaxed smile with mouth closed, quiet professional pride, context-appropriate warm lighting from the venue, inviting atmosphere, ${silentRule}, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene`,
+      kling_prompt: `Avatar in the business-success moment of ${name}, mouth-closed warm smile forms gradually with eyes softening in quiet pride, customers or activity moving softly in the background, small welcoming nod, ${STABLE}`,
       subtitle: `בואו ל${name} — אתם חייבים לנסות`
     }
   ];
@@ -1402,7 +1456,14 @@ NEW 4-SCENE STRUCTURE:
 - Scene 1 (👋 הכנסה): avatar wearing ${uniform}, inside the ${venue}, starting their workday — putting on apron / standing behind the counter / arriving at the workspace. Mouth closed. Voiceover HOOK.
 - Scene 2 (✨ פעולה): EXTREME CLOSE-UP of ${closeUp}. NO face, NO full person — only hands and tools/products. Uses business/product reference photos for authenticity. Voiceover describes the craft.
 - Scene 3 (🏪 בפעולה): avatar ${scene3Action} inside the ${venue}. Mouth closed, focused professional expression. Voiceover describes the story / unique value of ${name}.
-- Scene 4 (🚀 הזמנה): avatar at entrance of ${name}, near the sign/logo or behind the counter. Open welcoming gesture, warm relaxed mouth-closed smile. Voiceover CTA.
+- Scene 4 (🚀 הזמנה — BUSINESS-SUCCESS CONTEXTUAL RESULT): NOT just the avatar standing by the sign. Show the BUSINESS ALIVE AND THRIVING — the lifestyle/moment the business delivers to its customers, with the owner/employee happy IN that moment. Category → business-success context:
+  * restaurant → peak-service dining room with happy customers at tables in soft-focus background, owner at the pass with a quiet satisfied smile and a finished plate visible / outdoor terrace packed at sunset
+  * fashion/boutique → store full of engaged customers browsing the rack, owner at the counter with a satisfied warm smile, garments visible on mannequins behind
+  * clinic → calm consultation room with a happy client (off-camera or from behind — do NOT show identifiable client face) having just finished a treatment, clinician smiling quietly with professional pride
+  * salon → mid-styling moment with a happy client's styled hair visible (client face partly off-frame or from behind), stylist confident with tools in hand
+  * fitness → full class energised in soft-focus behind the trainer, trainer at the front with a proud calm smile, clients mid-movement
+  * generic service → the OUTCOME moment — finished work handed to a satisfied customer (customer from behind or partial), branded van / signage / tools visible, golden-hour exterior
+The lighting for scene 4 comes from the context (golden-hour terrace, warm dining-room pendants, mid-day natural daylight through the shopfront) — NOT generic "warm interior". The avatar may appear alongside their customers/workspace being USED, not alone by the sign.
 
 VOICEOVER TIMING — STRICT:
 - Scene 1: ~10 Hebrew words — hook about ${name}, third-person narration.
@@ -1418,7 +1479,7 @@ SENTENCE COMPLETENESS (CRITICAL):
 HOOK (voiceover_scene1) — PRE-SET:
 voiceover_scene1 is already: "${hook}" — use this EXACT text.
 
-EVERY nb_prompt for scenes 1, 3, 4 MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". Scene 2 (hands-only close-up) must explicitly say "NO face visible, NO full person, only hands and tools".
+EVERY nb_prompt for scenes 1 and 3 MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". Scene 4 follows the same anatomy rule BUT its ending must OMIT "NEVER in a car, NEVER in a vehicle" — service businesses may legitimately show a branded vehicle in the success-result context. The no-phone rule stays for scene 4. Scene 2 (hands-only close-up) must explicitly say "NO face visible, NO full person, only hands and tools".
 
 EVERY nb_prompt for scenes with the avatar MUST include: "silent, NOT speaking, NOT looking like talking, mouth closed or natural relaxed smile, no open-mouth expression, no lip movement implied".
 
@@ -1452,8 +1513,8 @@ Return ONLY valid JSON (no markdown):
     },
     {
       "type": "הזמנה",
-      "nb_prompt": "avatar wearing ${uniform} standing at the entrance of ${name} near the sign, open welcoming gesture with hands, warm relaxed smile with mouth closed, business signage visible in background, golden hour warm lighting, inviting atmosphere, silent NOT speaking, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar stands near ${name} sign, gentle welcoming gesture with open hands slight head nod, mouth-closed warm smile, silent no talking no lip movement, smooth natural motion only, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference",
+      "nb_prompt": "avatar wearing ${uniform} inside the BUSINESS-SUCCESS CONTEXTUAL RESULT for ${name} — WRITE THE SPECIFIC MOMENT HERE based on the category (e.g., for a restaurant: 'standing calmly at the pass in a packed dining room at dinner service, happy customers softly out of focus at tables behind, warm pendant lighting, a finished plate visible on the pass'; for a fashion boutique: 'at the counter of the store with customers browsing the racks behind, satisfied warm smile, garments on mannequins softly visible'; for a salon: 'mid-styling with a happy client's styled hair visible from behind, tools in one hand, quiet professional pride'; for a clinic: 'quietly confident in a calm treatment room with a client off-camera or from behind'; for a fitness studio: 'at the front of the room with a full class moving behind, trainer with a proud calm expression'; for a generic service: 'outside next to the branded van at golden hour handing finished work to a customer shown from behind'). Warm relaxed mouth-closed smile, quiet pride. ${name} signage or branded element visible somewhere in frame. CONTEXTUAL LIGHTING from the scene (warm pendants, golden-hour, daylight through the shopfront) — NOT generic warm interior. Silent NOT speaking, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene",
+      "kling_prompt": "Avatar in the BUSINESS-SUCCESS CONTEXTUAL RESULT scene described in the scene-4 nb_prompt — physics + environment motion: customers move gently in the soft-focus background, other hands or glasses or tools drift softly in the periphery, ${name} signage or branded element catches the contextual light. Avatar's closed-lip warm smile forms gradually with eyes softening at the outer corners in quiet professional pride, small subtle nod or calm looking-around gesture, eyes may briefly glance at a customer or finished work off-screen then refocus on the lens, optional small welcoming hand gesture. Handheld documentary-style iPhone feel with mild wobble, silent no talking no lip movement, mouth closed or naturally relaxed, smooth natural motion only, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
       "subtitle": "same as voiceover_scene4"
     }
   ]
