@@ -197,37 +197,73 @@ function scriptHasForeignWords(fullText) {
   return FOREIGN_BORROWED_WORDS.some(re => re.test(fullText));
 }
 
-// Enforce the strict 4-beat UGC structure. Scene 2 MUST be the discovery
-// bridge ("עד ש..." / "ואז גיליתי ...") — short, product-name-bearing. Scene 3
-// MUST be benefits + emotional payoff, and MUST NOT open with "עד שגיליתי"
-// (that would mean the discovery was placed after benefits, the exact failure
-// we're trying to fix). Any violation triggers one regeneration.
+// Enforce the strict 4-beat UGC structure and return ALL violations found, so
+// the regeneration step can show Claude the complete list of what to fix.
+// - Scene 1 (BEAT 1): specific category-anchored pain; no generic filler
+//   phrases ("ניסיתי הכל" / "כלום לא עזר" etc.); no product name.
+// - Scene 2 (BEAT 2): short discovery bridge opening with "עד ש..." /
+//   "ואז גיליתי...", naming the product.
+// - Scene 3 (BEAT 3): benefits + emotional payoff; MUST NOT contain any
+//   discovery phrase ("עד שגיליתי" / "ואז גיליתי" / "גיליתי את" / "מצאתי את")
+//   anywhere — not just at the start.
+// Returns [] when the structure is clean.
 const DISCOVERY_OPENERS = /^(עד\s+ש|ואז\s+גיליתי|ואז\s+מצאתי|עד\s+שמצאתי|עד\s+שגיליתי)/u;
-function beatStructureViolation(scenes, productName) {
-  if (!Array.isArray(scenes) || scenes.length < 4) return null;
-  const v1 = (scenes[0]?.subtitle || '').trim();
-  const v2 = (scenes[1]?.subtitle || '').trim();
-  const v3 = (scenes[2]?.subtitle || '').trim();
-  const v4 = (scenes[3]?.subtitle || '').trim();
+const BEAT_1_FORBIDDEN_PHRASES = [
+  'מנסה כל פתרון',
+  'ניסיתי כל פתרון',
+  'שום דבר לא עבד',
+  'שום פתרון לא עבד',
+  'ניסיתי הכל',
+  'חיפשתי פתרון',
+  'לא מצאתי משהו שמתאים',
+  'כלום לא התאים',
+  'כלום לא עזר',
+];
+const BEAT_3_FORBIDDEN_PHRASES = [
+  'עד שגיליתי',
+  'ואז גיליתי',
+  'גיליתי את',
+  'מצאתי את',
+  'עד שמצאתי',
+];
+function beatStructureViolations(scenes, productName) {
+  const violations = [];
+  if (!Array.isArray(scenes) || scenes.length < 4) return violations;
+  const v1 = (scenes[0]?.subtitle || scenes[0]?.voiceover || '').trim();
+  const v2 = (scenes[1]?.subtitle || scenes[1]?.voiceover || '').trim();
+  const v3 = (scenes[2]?.subtitle || scenes[2]?.voiceover || '').trim();
+
+  // BEAT 1: no generic filler phrases — pain must be category-specific.
+  for (const phrase of BEAT_1_FORBIDDEN_PHRASES) {
+    if (v1.includes(phrase)) {
+      violations.push(`Beat 1 contains generic phrase "${phrase}" — pain must be SPECIFIC to the product category (sensory or emotional language tied to the category, not a one-size-fits-all line).`);
+    }
+  }
+  // BEAT 1: must not mention the product name — the product is introduced in Beat 2.
+  if (productName && v1 && v1.toLowerCase().includes(productName.toLowerCase())) {
+    violations.push(`Beat 1 mentions the product name "${productName}" — the product must only be introduced in Beat 2.`);
+  }
 
   // BEAT 2: must open with a discovery phrase.
   if (!DISCOVERY_OPENERS.test(v2)) {
-    return `Scene 2 (BEAT 2) must START with "עד ש..." or "ואז גיליתי..." and name the product. Got: "${v2.slice(0, 60)}"`;
+    violations.push(`Scene 2 (Beat 2) must START with "עד ש..." or "ואז גיליתי..." and name the product. Got: "${v2.slice(0, 60)}"`);
   }
-  // BEAT 2: must be short (≤ 10 words) — it's the discovery bridge, not benefits.
+  // BEAT 2: must be short (≤ 10 words) — discovery bridge only, not benefits.
   const v2Words = v2.split(/\s+/).filter(Boolean).length;
   if (v2Words > 10) {
-    return `Scene 2 (BEAT 2) must be short (4-6 words). Got ${v2Words} words — move benefits to scene 3.`;
+    violations.push(`Scene 2 (Beat 2) must be short (4-6 words). Got ${v2Words} words — move benefits to scene 3.`);
   }
-  // BEAT 3: must NOT open with the discovery phrase — discovery lives in scene 2.
-  if (DISCOVERY_OPENERS.test(v3)) {
-    return `Scene 3 (BEAT 3) must NOT open with "עד שגיליתי" / "ואז גיליתי" — that is BEAT 2. Scene 3 is benefits + emotional payoff.`;
+
+  // BEAT 3: must NOT contain ANY discovery phrase, anywhere in the line.
+  // This catches both "עד שגיליתי ..." at the start AND buried phrases like
+  // "היא נוחה, עד שגיליתי שהיא גם קלה".
+  for (const phrase of BEAT_3_FORBIDDEN_PHRASES) {
+    if (v3.includes(phrase)) {
+      violations.push(`Beat 3 contains discovery phrase "${phrase}" — that belongs in Beat 2 ONLY. Beat 3 must describe benefits and emotional payoff, not re-introduce the product.`);
+    }
   }
-  // BEAT 1: must not mention the product name (pain comes before discovery).
-  if (productName && v1 && v1.includes(productName)) {
-    return `Scene 1 (BEAT 1) must NOT mention the product name "${productName}" — pain is stated before the product is introduced.`;
-  }
-  return null;
+
+  return violations;
 }
 
 function scenesHaveBrokenSentences(scenes) {
@@ -268,12 +304,42 @@ How to use: ${applicationArea}
 
 Every script MUST follow these 4 beats, in this exact order. Each beat = one voiceover_sceneN. DO NOT reorder, DO NOT merge, DO NOT skip a beat. Benefits NEVER come before the product is introduced. "עד שגיליתי" NEVER appears after the benefits — it is the discovery bridge between pain and benefits.
 
-BEAT 1 — SPECIFIC PAIN (voiceover_scene1, ~5 sec, ~12-15 Hebrew words):
-  - The pain must be SPECIFIC to the product's category — name the body part / domain / situation (hair, teeth, kippah, skin, sleep, etc.)
-  - NEVER generic phrasing like "ניסיתי הכל" or "מנסה כל פתרון אפשרי" — the viewer must know exactly what struggle this is from the first sentence
+BEAT 1 — SPECIFIC PAIN (voiceover_scene1, ~5 sec, ~12-15 Hebrew words) — HARD REQUIREMENT:
+  - The pain must be SPECIFIC to the product's category — name the body part / domain / situation (hair, teeth, kippah, skin, sleep, dessert, etc.)
+  - Use sensory or emotional language that ties directly to the product category
+  - Describe a CONCRETE MOMENT or situation the listener can picture
   - Emotional, relatable, first-person; sounds like venting to a friend
   - MUST NOT mention the product name, brand name, or any benefit
-  - Examples:
+
+  ⛔ FORBIDDEN GENERIC PHRASES in Beat 1 (these make the pain interchangeable and kill emotional resonance — Beat 1 must NOT contain ANY of these, literally or paraphrased):
+    - "מנסה כל פתרון"
+    - "ניסיתי כל פתרון"
+    - "שום דבר לא עבד"
+    - "שום פתרון לא עבד"
+    - "ניסיתי הכל"
+    - "חיפשתי פתרון"
+    - "לא מצאתי משהו שמתאים"
+    - "כלום לא התאים"
+    - "כלום לא עזר"
+  If you were about to write any of these, STOP and write a category-specific pain instead.
+
+  📋 PRODUCT-CATEGORY-TO-PAIN CHEATSHEET (draw from the closest match — adapt the exact wording to the specific product):
+    • Religious / spiritual (kippah, tzitzit, mezuzah, head covering): "הרגשתי שאני עובר את היום בלי חיבור רוחני" / "רציתי משהו שיזכיר לי מי אני באמת" / "הכיפות שלי תמיד היו לא נוחות ולא מיוחדות"
+    • Beauty — teeth: "הייתי מתבייש לחייך בתמונות" / "הלכתי עם ביטחון עצמי נמוך בגלל השיניים שלי"
+    • Beauty — skin/face: "העור שלי תמיד היה יבש בבוקר, זה הפריע לי להרגיש יפה" / "הרגשתי מבוכה כל בוקר כשהסתכלתי במראה"
+    • Beauty — hair: "השיער שלי היה נשבר כל בוקר מחדש ולא משנה מה עשיתי"
+    • Food / drink / dessert / ice cream: "כל פעם שרציתי משהו מתוק מצאתי רק ממתקים מלאי סוכר" / "ילדיי ביקשו גלידה אבל רציתי משהו בריא"
+    • Fashion / clothing: "בכל אירוע הרגשתי שאני לא מספיק מיוחד" / "הבגדים שלי תמיד נראו רגילים, בלי ייחוד"
+    • Tech / app / service: "בכל פעם שניסיתי לעשות את זה, זה לקח לי שעות" / "איבדתי שעות כל שבוע על משימה שצריכה לקחת דקות"
+    • Home / kitchen / cleaning: "המטבח שלי היה תמיד מבולגן, לא מצאתי כלום" / "ניקיתי את הבית כל יום ועדיין הרגיש לא נקי"
+    • Cars / automotive: "בכל נסיעה ארוכה התעייפתי מהפרטים הקטנים"
+    • Pets: "הכלב שלי תמיד לכלך את הרכב שלי" / "החתול שלי שרט את הרהיטים כל לילה"
+    • Sleep: "כל לילה הייתי מתהפך במיטה שעות בלי להירדם"
+    • Fitness / weight: "הבגדים שלי לא ישבו טוב, הרגשתי לא נוח עם הגוף שלי"
+
+  If the product category doesn't match the list, describe one of: (a) a specific physical/emotional discomfort, (b) a moment of frustration during a normal day, (c) something the listener can vividly picture happening to them. The test: a stranger reading only Beat 1 should be able to guess the product CATEGORY within 2 seconds.
+
+  Examples (full sentences):
     * Kippah: "הרגשתי שאני עובר את היום בלי חיבור רוחני, שוכח מי שומר עלי"
     * Teeth whitening: "הייתי מתבייש לחייך בתמונות, השיניים שלי היו צהובות וזה הפריע לי כל יום"
     * Ice cream / dessert: "כל פעם שהיה לי חם רציתי גלידה איכותית אבל תמיד מצאתי רק חטיפים מלאים בסוכר"
@@ -289,13 +355,31 @@ BEAT 2 — DISCOVERY OF PRODUCT (voiceover_scene2, ~2-3 sec, ~4-6 Hebrew words, 
     * "ואז גיליתי את ${productName}"
     * "עד שמצאתי את ${productName}"
 
-BEAT 3 — BENEFITS + EMOTIONAL PAYOFF (voiceover_scene3, ~7-8 sec, ~18-22 Hebrew words):
+BEAT 3 — BENEFITS + EMOTIONAL PAYOFF (voiceover_scene3, ~7-8 sec, ~18-22 Hebrew words) — BENEFITS ONLY, HARD REQUIREMENT:
   - State 2-3 specific concrete benefits of ${productName}
   - Then CONNECT the last benefit back to the pain from BEAT 1 with an emotional payoff ("וכל פעם ש... אני מרגיש ש...")
-  - DO NOT start this scene with "עד שגיליתי" — that belongs to BEAT 2, using it here means you skipped the structure
   - Structure inside scene 3: [benefit 1] + [benefit 2] + [emotional line that resolves the pain]
-  - Example (kippah): "היא עשויה מחומרים איכותיים וקלה לחבישה, וכל פעם שאני חובש אותה אני נזכר שיש מי שמעלי"
-  - Example (teeth): "היא מלבינה את השיניים תוך ימים ולא פוגעת באמייל, ולראשונה אני מחייך בתמונות בלי להרגיש לא בנוח"
+  - Beat 3 should flow naturally from Beat 2 (which already introduced the product) — go DIRECTLY into why the product is good, do not re-introduce it
+
+  ⛔ FORBIDDEN DISCOVERY PHRASES in Beat 3 (these belong in Beat 2 ONLY — Beat 3 must NOT contain ANY of these, not even buried mid-sentence):
+    - "עד שגיליתי"
+    - "ואז גיליתי"
+    - "גיליתי את"
+    - "מצאתי את"
+    - "עד שמצאתי"
+  If you find yourself writing one of these in Beat 3, STOP — the discovery was already made in Beat 2. Replace with a direct benefit sentence.
+
+  GOOD example (kippah):
+    Beat 2: "עד שגיליתי את ${productName}"
+    Beat 3: "היא עשויה מחומרים איכותיים וקלה לחבישה, וכל פעם שאני חובש אותה אני נזכר שיש מי שמעלי"
+    ✓ Beat 3 starts with a benefit, closes with an emotional line resolving Beat 1's pain. No discovery phrase.
+
+  BAD example (DO NOT PRODUCE THIS):
+    Beat 2: "עד שגיליתי את ${productName}"
+    Beat 3: "היא נוחה, עד שגיליתי שהיא גם קלה..."
+    ✗ "עד שגיליתי" appears twice — a structural error.
+
+  Example (teeth): "היא מלבינה את השיניים תוך ימים ולא פוגעת באמייל, ולראשונה אני מחייך בתמונות בלי להרגיש לא בנוח"
 
 BEAT 4 — CTA + PERSONAL TESTIMONIAL (voiceover_scene4, ~3-4 sec, ~8-10 Hebrew words):
   - Direct, emotionally weighted call to action
@@ -611,14 +695,15 @@ Return ONLY valid JSON (no markdown):
     const retry = parseResponse(await callClaude(extraInstruction));
     if (retry) parsed = retry;
   }
-  // Validate the strict 4-beat structure. If scene 2 isn't a short discovery
-  // line ("עד ש..." / "ואז גיליתי ..."), or if scene 3 opens with that phrase
-  // instead of listing benefits, regenerate once with a pointed correction.
+  // Validate the strict 4-beat structure. Collect ALL violations so the regen
+  // instruction shows Claude every issue at once (rather than fixing one and
+  // surfacing the next on a second pass). Regenerate once with the full list.
   if (parsed) {
-    const violation = beatStructureViolation(parsed.scenes, productName);
-    if (violation) {
-      console.warn('[generateScript] 4-beat structure violation:', violation);
-      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE: ${violation}\n\nREWRITE so:\n- voiceover_scene1 = BEAT 1 (specific pain, never names the product)\n- voiceover_scene2 = BEAT 2 (SHORT 4-6 words, MUST start with "עד ש" or "ואז גיליתי" and include "${productName}", NO benefits here)\n- voiceover_scene3 = BEAT 3 (2-3 concrete benefits + emotional payoff resolving the pain, DOES NOT start with "עד שגיליתי")\n- voiceover_scene4 = BEAT 4 (CTA + personal testimonial line)`;
+    const violations = beatStructureViolations(parsed.scenes, productName);
+    if (violations.length > 0) {
+      console.warn('[generateScript] 4-beat structure violations:', violations);
+      const bullets = violations.map((v, i) => `  ${i + 1}. ${v}`).join('\n');
+      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules:\n- voiceover_scene1 = BEAT 1 (SPECIFIC pain tied to the product CATEGORY, never a generic "ניסיתי הכל"/"כלום לא עזר" phrase, never names the product)\n- voiceover_scene2 = BEAT 2 (SHORT 4-6 words, MUST start with "עד ש" or "ואז גיליתי" and include "${productName}", NO benefits here)\n- voiceover_scene3 = BEAT 3 (2-3 concrete benefits + emotional payoff resolving the pain, MUST NOT contain ANY of: "עד שגיליתי" / "ואז גיליתי" / "גיליתי את" / "מצאתי את" — anywhere in the line, not just at the start)\n- voiceover_scene4 = BEAT 4 (CTA + personal testimonial line)`;
       const retry = parseResponse(await callClaude(extraInstruction));
       if (retry) parsed = retry;
     }
@@ -1125,31 +1210,34 @@ function toMasculine(text) {
 
 function getHook(productName, productDesc, voiceGender = 'female') {
   const desc = ((productDesc || '') + ' ' + (productName || '')).toLowerCase();
-  // Default fallback — emotional + specific shape. Still generic when no
-  // category matches, but opens with feeling rather than a bare action verb.
-  let raw = 'הרגשתי שאני מנסה כל פתרון אפשרי וכלום פשוט לא התאים לי באמת';
+  // Default fallback — concrete moment of frustration, no forbidden generic
+  // filler phrases ("ניסיתי הכל" / "מנסה כל פתרון" / "כלום לא עזר").
+  let raw = 'הרגשתי שמשהו חסר לי ביומיום, משהו קטן שיעשה הבדל גדול';
 
-  // Head covering / kipah / yarmulke (explicit category — hook hints the domain)
+  // Head covering / kipah / yarmulke (spiritual/emotional pain, not just comfort)
   if (/כיפה|כיפות|יארמולקה|כיסוי ראש|מטפחת|kipah|yarmulke|head cover/.test(desc))
-    raw = 'כל כיפה שקניתי הייתה לא נוחה או לא התאימה לראש שלי';
+    raw = 'הרגשתי שאני עובר את היום בלי חיבור רוחני, שוכח מי שומר עליי';
   // Fashion / clothing
   else if (/שמלה|בגד|חולצה|מכנס|נעל|תיק|אופנה|dress|shirt|clothes|fashion|pants|shoes|bag/.test(desc))
-    raw = 'כל פעם שחיפשתי משהו לאירוע זה היה יקר מדי או לא התאים לי';
+    raw = 'בכל אירוע הרגשתי שאני לא מספיק מיוחדת, הבגדים שלי נראו רגילים';
   // Dental / teeth
   else if (/שינ|דנטל|לבן|משחת|teeth|dental|whiten/.test(desc))
-    raw = 'הייתי מביכה לחייך בתמונות בגלל השיניים שלי והרגשתי נורא';
+    raw = 'הייתי מתביישת לחייך בתמונות, השיניים שלי היו צהובות וזה הפריע לי כל יום';
   // Skincare
   else if (/קרם|פנים|אקנה|עור|סרום|skincare|cream|serum|acne|face/.test(desc))
-    raw = 'ניסיתי כל קרם בשוק ושום דבר לא עזר לי עם העור שלי';
+    raw = 'העור שלי היה יבש בבוקר וזה הפריע לי להרגיש יפה כשיצאתי מהבית';
   // Hair
   else if (/שיער|hair|שמפו/.test(desc))
-    raw = 'השיער שלי היה נושר ונשבר וכלום לא עזר לי באמת';
+    raw = 'השיער שלי היה נשבר כל בוקר מחדש, לא משנה איך סידרתי אותו';
   // Jewelry / accessories
   else if (/שעון|תכשיט|צמיד|שרשרת|watch|jewelry|bracelet|necklace/.test(desc))
     raw = 'האביזרים שלי תמיד נראו זולים ולא הרגשתי בנוח איתם';
   // Sleep
   else if (/שינה|לישון|כרית|מזרון|sleep|pillow|mattress/.test(desc))
     raw = 'כל לילה הייתי מתהפכת במיטה שעות בלי להצליח להירדם';
+  // Ice cream / dessert / sweet (must come BEFORE general food)
+  else if (/גלידה|קינוח|ממתק|שוקולד|מתוק|ice\s*cream|gelato|dessert|sweet|chocolate/.test(desc))
+    raw = 'כל פעם שהיה לי חם רציתי גלידה איכותית, אבל מצאתי רק חטיפים מלאים בסוכר';
   // Food / restaurant / meal kit
   else if (/אוכל|מסעדה|ארוחה|מזון|תזונה|food|meal|restaurant|diet/.test(desc))
     raw = 'הייתי כל כך עייפה מלבשל כל יום ולא ידעתי מה לעשות';
@@ -1158,25 +1246,25 @@ function getHook(productName, productDesc, voiceGender = 'female') {
     raw = 'הרגשתי עייפה כל היום וכלום לא נתן לי באמת אנרגיה';
   // Fitness / workout
   else if (/כושר|אימון|ספורט|הרזיה|דיאטה|fitness|workout|gym|weight|exercise/.test(desc))
-    raw = 'ניסיתי כל שיטה בעולם ופשוט לא ראיתי שום תוצאות';
+    raw = 'הבגדים שלי לא ישבו טוב, הרגשתי לא נוח עם הגוף שלי';
   // Tech / gadget / app
   else if (/אפליקציה|גאדג׳ט|טכנולוגיה|מכשיר|app|tech|gadget|device|software/.test(desc))
     raw = 'בזבזתי שעות כל יום על משהו שהיה אמור להיות פשוט';
   // Cleaning
   else if (/ניקוי|ניקיון|כביסה|cleaning|detergent|clean/.test(desc))
-    raw = 'בזבזתי שעות על ניקיון והבית עדיין נראה לא נקי';
+    raw = 'ניקיתי את הבית כל יום ובכל זאת הרגיש לא נקי באמת';
   // Baby / kids
   else if (/תינוק|ילד|baby|kid|child/.test(desc))
     raw = 'הילדים שלי לא היו מפסיקים להתעצבן ולא ידעתי מה לעשות';
-  // Home / furniture / decor
-  else if (/בית|ריהוט|עיצוב|home|furniture|decor/.test(desc))
-    raw = 'הבית שלי אף פעם לא הרגיש מסודר למרות שניסיתי הכל';
+  // Home / furniture / decor / kitchen
+  else if (/בית|ריהוט|עיצוב|מטבח|home|furniture|decor|kitchen/.test(desc))
+    raw = 'המטבח שלי היה תמיד מבולגן, לא מצאתי כלום כשהייתי צריכה';
   // Pet
   else if (/כלב|חתול|חיית|pet|dog|cat/.test(desc))
-    raw = 'החיה שלי הייתה אומללה וכל מה שניסיתי פשוט לא עבד';
+    raw = 'הכלב שלי תמיד לכלך לי את הרכב, וחזרתי הביתה מותשת';
   // Car accessories
   else if (/רכב|אוטו|מכונית|car|vehicle/.test(desc))
-    raw = 'כל נסיעה הייתה מעצבנת אותי והרגשתי שאני מבזבזת זמן';
+    raw = 'בכל נסיעה ארוכה התעייפתי מהפרטים הקטנים שהפריעו לי';
 
   return voiceGender === 'male' ? toMasculine(raw) : raw;
 }
