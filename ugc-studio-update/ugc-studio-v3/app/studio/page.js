@@ -13,11 +13,11 @@ const SUBTITLE_STYLES = [
 
 // === Background Music Tracks — local 20s drops from public/music/ ===
 const MUSIC_TRACKS = [
-  { id: 'none',   label: 'ללא מוזיקה', emoji: '🔇', url: null },
-  { id: 'track1', label: 'Track 1 🔥',  emoji: '🎵', url: '/music/track1.mp3' },
-  { id: 'track2', label: 'Track 2 🔥',  emoji: '🎵', url: '/music/track2.mp3' },
-  { id: 'track3', label: 'Track 3 🔥',  emoji: '🎵', url: '/music/track3.mp3' },
-  { id: 'track4', label: 'Track 4 🔥',  emoji: '🎵', url: '/music/track4.mp3' },
+  { id: 'none',                 label: 'ללא מוזיקה',           emoji: '🔇', url: null },
+  { id: 'deep-house-energetic', label: '🎵 Deep House אנרגטי', emoji: '🎵', url: '/music/deep-house-energetic.mp3' },
+  { id: 'fashion-beat',         label: '✨ Fashion Beat',       emoji: '✨', url: '/music/fashion-beat.mp3' },
+  { id: 'deep-house-classic',   label: '🏛️ Deep House קלאסי',  emoji: '🏛️', url: '/music/deep-house-classic.mp3' },
+  { id: 'deep-house-lounge',    label: '🍸 Deep House Lounge',  emoji: '🍸', url: '/music/deep-house-lounge.mp3' },
 ]
 
 // === Scene Transitions ===
