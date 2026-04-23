@@ -263,6 +263,39 @@ function scriptHasForeignWords(fullText) {
   return FOREIGN_BORROWED_WORDS.some(re => re.test(fullText));
 }
 
+// Enforce the strict 4-beat UGC structure. Scene 2 MUST be the discovery
+// bridge ("עד ש..." / "ואז גיליתי ...") — short, product-name-bearing. Scene 3
+// MUST be benefits + emotional payoff, and MUST NOT open with "עד שגיליתי"
+// (that would mean the discovery was placed after benefits, the exact failure
+// we're trying to fix). Any violation triggers one regeneration.
+const DISCOVERY_OPENERS = /^(עד\s+ש|ואז\s+גיליתי|ואז\s+מצאתי|עד\s+שמצאתי|עד\s+שגיליתי)/u;
+function beatStructureViolation(scenes, productName) {
+  if (!Array.isArray(scenes) || scenes.length < 4) return null;
+  const v1 = (scenes[0]?.subtitle || '').trim();
+  const v2 = (scenes[1]?.subtitle || '').trim();
+  const v3 = (scenes[2]?.subtitle || '').trim();
+  const v4 = (scenes[3]?.subtitle || '').trim();
+
+  // BEAT 2: must open with a discovery phrase.
+  if (!DISCOVERY_OPENERS.test(v2)) {
+    return `Scene 2 (BEAT 2) must START with "עד ש..." or "ואז גיליתי..." and name the product. Got: "${v2.slice(0, 60)}"`;
+  }
+  // BEAT 2: must be short (≤ 10 words) — it's the discovery bridge, not benefits.
+  const v2Words = v2.split(/\s+/).filter(Boolean).length;
+  if (v2Words > 10) {
+    return `Scene 2 (BEAT 2) must be short (4-6 words). Got ${v2Words} words — move benefits to scene 3.`;
+  }
+  // BEAT 3: must NOT open with the discovery phrase — discovery lives in scene 2.
+  if (DISCOVERY_OPENERS.test(v3)) {
+    return `Scene 3 (BEAT 3) must NOT open with "עד שגיליתי" / "ואז גיליתי" — that is BEAT 2. Scene 3 is benefits + emotional payoff.`;
+  }
+  // BEAT 1: must not mention the product name (pain comes before discovery).
+  if (productName && v1 && v1.includes(productName)) {
+    return `Scene 1 (BEAT 1) must NOT mention the product name "${productName}" — pain is stated before the product is introduced.`;
+  }
+  return null;
+}
+
 function scenesHaveBrokenSentences(scenes) {
   if (!Array.isArray(scenes)) return false;
   const chunks = scenes.map(s => (s?.subtitle || s?.voiceover || '').trim()).filter(Boolean);
@@ -271,8 +304,11 @@ function scenesHaveBrokenSentences(scenes) {
     // Scene must end with sentence terminator (. ! ? …)
     const last = c.replace(/["')\]\s]+$/, '').slice(-1);
     if (!/[.!?…]/.test(last)) return true;
-    // Scene i+1 should not start with a mid-sentence word
-    if (i + 1 < chunks.length) {
+    // Scene i+1 should not start with a mid-sentence word.
+    // EXCEPTION: scene 2 (index 1) is the 4-beat DISCOVERY bridge, which MUST
+    // start with "עד ש..." / "ואז גיליתי..." — don't flag it as a broken
+    // continuation of scene 1.
+    if (i + 1 < chunks.length && i + 1 !== 1) {
       const nextFirstWord = chunks[i + 1].split(/\s+/)[0] || '';
       // Strip leading quotes/punctuation
       const cleaned = nextFirstWord.replace(/^["'(\[]+/, '');
@@ -294,8 +330,57 @@ async function generateScript(productName, productDesc, applicationArea, hook, v
 Description: ${productDesc}
 How to use: ${applicationArea}
 
-NEW SCENE 2 STRUCTURE (IMPORTANT):
-Scene 2 is now a PRODUCT BEAUTY SHOT — NO avatar in frame. The voiceover describes the product visually (features, what makes it special) — NO pain, NO person.
+⚡ STRICT 4-BEAT UGC STRUCTURE — THE SINGLE MOST IMPORTANT RULE ⚡
+
+Every script MUST follow these 4 beats, in this exact order. Each beat = one voiceover_sceneN. DO NOT reorder, DO NOT merge, DO NOT skip a beat. Benefits NEVER come before the product is introduced. "עד שגיליתי" NEVER appears after the benefits — it is the discovery bridge between pain and benefits.
+
+BEAT 1 — SPECIFIC PAIN (voiceover_scene1, ~5 sec, ~12-15 Hebrew words):
+  - The pain must be SPECIFIC to the product's category — name the body part / domain / situation (hair, teeth, kippah, skin, sleep, etc.)
+  - NEVER generic phrasing like "ניסיתי הכל" or "מנסה כל פתרון אפשרי" — the viewer must know exactly what struggle this is from the first sentence
+  - Emotional, relatable, first-person; sounds like venting to a friend
+  - MUST NOT mention the product name, brand name, or any benefit
+  - Examples:
+    * Kippah: "הרגשתי שאני עובר את היום בלי חיבור רוחני, שוכח מי שומר עלי"
+    * Teeth whitening: "הייתי מתבייש לחייך בתמונות, השיניים שלי היו צהובות וזה הפריע לי כל יום"
+    * Ice cream / dessert: "כל פעם שהיה לי חם רציתי גלידה איכותית אבל תמיד מצאתי רק חטיפים מלאים בסוכר"
+
+BEAT 2 — DISCOVERY OF PRODUCT (voiceover_scene2, ~2-3 sec, ~4-6 Hebrew words, SHORT AND PUNCHY):
+  - MUST start with "עד ש" or "ואז גיליתי" — no other opening is allowed
+  - MUST name the product: ${productName}
+  - DO NOT list benefits here — this is a pure discovery bridge, that's all
+  - DO NOT describe the product visually, DO NOT say "this is made of...", DO NOT start listing features
+  - Keep it to one short clause, 4-6 words maximum
+  - Examples:
+    * "עד שגיליתי את ${productName}"
+    * "ואז גיליתי את ${productName}"
+    * "עד שמצאתי את ${productName}"
+
+BEAT 3 — BENEFITS + EMOTIONAL PAYOFF (voiceover_scene3, ~7-8 sec, ~18-22 Hebrew words):
+  - State 2-3 specific concrete benefits of ${productName}
+  - Then CONNECT the last benefit back to the pain from BEAT 1 with an emotional payoff ("וכל פעם ש... אני מרגיש ש...")
+  - DO NOT start this scene with "עד שגיליתי" — that belongs to BEAT 2, using it here means you skipped the structure
+  - Structure inside scene 3: [benefit 1] + [benefit 2] + [emotional line that resolves the pain]
+  - Example (kippah): "היא עשויה מחומרים איכותיים וקלה לחבישה, וכל פעם שאני חובש אותה אני נזכר שיש מי שמעלי"
+  - Example (teeth): "היא מלבינה את השיניים תוך ימים ולא פוגעת באמייל, ולראשונה אני מחייך בתמונות בלי להרגיש לא בנוח"
+
+BEAT 4 — CTA + PERSONAL TESTIMONIAL (voiceover_scene4, ~3-4 sec, ~8-10 Hebrew words):
+  - Direct, emotionally weighted call to action
+  - Include a short personal testimonial that gives the CTA weight — "זה שינה לי את היום", "זה שווה כל שקל", "אי אפשר להתחרט"
+  - DO NOT just say "תנסו את המוצר" — always add the emotional close
+  - Examples:
+    * "אתם חייבים לנסות את זה, זה באמת שינה לי את היום"
+    * "תזמינו עכשיו, אי אפשר להתחרט על זה"
+    * "זה שווה כל שקל, בלי חוכמות"
+
+SANITY CHECK before returning — read the 4 voiceovers in order and confirm:
+  1. Scene 1 is a specific pain and does NOT name the product.
+  2. Scene 2 starts with "עד ש" or "ואז גיליתי" and names ${productName}.
+  3. Scene 3 contains at least 2 concrete benefits AND does NOT start with "עד שגיליתי".
+  4. Scene 4 is a CTA with a personal emotional line.
+If any of these fail, rewrite before returning.
+
+SCENE 2 VISUAL NOTE:
+Scene 2's IMAGE is a product-only beauty shot (no avatar, no person). The voiceover plays over this clean product reveal — the discovery line ("עד שגיליתי את ${productName}") lands right as the product appears on screen. This is intentional.
 
 ${genderInstruction}
 
@@ -333,11 +418,11 @@ Examples of category-based pain hooks (adapt in natural Hebrew):
 
 CRITICAL RULES:
 
-1. UGC HOOK FORMULA — THIS IS THE MOST IMPORTANT RULE:
-- Scene 1 (Hook — כאב): Start with a UNIVERSAL, RELATABLE PROBLEM for the product's category. NEVER mention the product name, brand name, or even the product type/category name directly. Sound like a real friend telling you about a struggle. The viewer must feel "זה בדיוק אני!"
-- Scene 2 (Product beauty shot — מוצר): NO AVATAR, NO PERSON visible. This is a pure product close-up — the product is the hero. Voiceover describes the product visually (what it is, what makes it special, its features). NO pain point, NO person mentioned.
-- Scene 3 (Solution reveal — פתרון): NOW the avatar uses ${productName}. "עד שגיליתי את..." or "ואז מישהי המליצה לי על..." — describe the experience of using it.
-- Scene 4 (CTA — קריאה לפעולה): Call to action with urgency. Emotional push to try it now.
+1. UGC HOOK FORMULA — MIRRORS THE 4-BEAT STRUCTURE ABOVE:
+- Scene 1 (BEAT 1 — כאב / specific pain): Start with a SPECIFIC, CATEGORY-ANCHORED pain. NEVER mention the product name, brand name, or list any benefit. The viewer must know what domain this is from word one ("זה בדיוק אני!").
+- Scene 2 (BEAT 2 — גילוי / discovery): Voiceover is SHORT (4-6 words) and MUST open with "עד ש" or "ואז גיליתי" and name ${productName}. Visually, scene 2 is a clean product-only beauty shot — NO avatar, NO person in frame. NO benefits spoken yet.
+- Scene 3 (BEAT 3 — יתרונות / benefits + emotional payoff): Avatar uses ${productName}. Voiceover states 2-3 concrete benefits and closes with an emotional line that resolves the pain from scene 1. DO NOT open scene 3 with "עד שגיליתי" — the discovery already happened in scene 2.
+- Scene 4 (BEAT 4 — CTA / קריאה לפעולה): Direct call to action WITH a personal testimonial close ("זה שינה לי את היום" / "זה שווה כל שקל" / "אי אפשר להתחרט"). Never a bare "תנסו".
 
 ⚠️ ABSOLUTE RULES FOR SCENE 1:
 - NEVER start scene 1 with the product name "${productName}" or any brand name
@@ -389,14 +474,13 @@ The output will be read by ElevenLabs V3 Hebrew TTS. Prefer everyday high-freque
 - Max 4-5 words per subtitle segment (for on-screen text readability)
 - Use everyday spoken Hebrew, not written/literary Hebrew
 
-3. VOICEOVER TIMING — STRICT:
-- Scene 1: ~12 Hebrew words (fills 5s naturally — elaborate on the pain)
-- Scene 2: ~14 Hebrew words (fills 5s naturally — describe the product visually, its features and what makes it special. NO pain, NO person.)
-- Scene 3: ~20 Hebrew words (fills 5s naturally — reveal the solution, describe the experience)
-- Scene 4: ~12 Hebrew words (fills 5s naturally — strong CTA with urgency and emotion)
-- Write at NATURAL SPEAKING PACE — each scene must feel complete.
-- voiceover MUST fill the full duration naturally — no silence gaps
-- AIM FOR ~20 SECONDS TOTAL of spoken Hebrew
+3. VOICEOVER TIMING — STRICT (matches the 4-BEAT word budgets):
+- Scene 1 / BEAT 1 (pain): ~12-15 Hebrew words, ~5 sec — SPECIFIC category pain
+- Scene 2 / BEAT 2 (discovery): ~4-6 Hebrew words, ~2-3 sec — MUST start with "עד ש" or "ואז גיליתי" + ${productName}. DELIBERATELY SHORT — do not pad with benefits.
+- Scene 3 / BEAT 3 (benefits + emotional payoff): ~18-22 Hebrew words, ~7-8 sec — 2-3 benefits + line resolving the pain
+- Scene 4 / BEAT 4 (CTA + testimonial): ~8-10 Hebrew words, ~3-4 sec — emotional CTA with testimonial close
+- Write at NATURAL SPEAKING PACE — each scene must feel complete for its beat.
+- The 4 beats join into one flowing paragraph for TTS — silence between beats is fine, but the TOTAL should be ~17-20 seconds.
 
 3a. SENTENCE COMPLETENESS (CRITICAL — THE MOST IMPORTANT TIMING RULE):
 כל משפט חייב להסתיים בתוך הסצנה שלו. אסור שמשפט ימשיך לסצנה הבאה. כל סצנה = משפט שלם או שניים שלמים.
@@ -468,10 +552,10 @@ NEVER describe smiles, laughs, or reactions that open the mouth.
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "~12 Hebrew words — UNIVERSAL pain point for this product's category, NEVER the product name, NEVER the brand, sound like a friend venting about a struggle",
-  "voiceover_scene2": "~14 Hebrew words — describe ${productName} visually — its features, texture, what makes it special. NO pain, NO person, pure product focus",
-  "voiceover_scene3": "~20 Hebrew words — reveal ${productName} as the solution, describe the experience in detail",
-  "voiceover_scene4": "~12 Hebrew words — emotional CTA with urgency, tell them to try it now",
+  "voiceover_scene1": "BEAT 1 — SPECIFIC PAIN, ~12-15 Hebrew words. Category-anchored pain (names the body part/domain), never the product name, never a benefit. Sounds like a friend venting.",
+  "voiceover_scene2": "BEAT 2 — DISCOVERY, ~4-6 Hebrew words. MUST start with 'עד ש' or 'ואז גיליתי' and include the product name ${productName}. NO benefits listed. Deliberately short and punchy.",
+  "voiceover_scene3": "BEAT 3 — BENEFITS + EMOTIONAL PAYOFF, ~18-22 Hebrew words. 2-3 concrete benefits of ${productName}, then an emotional line that resolves the BEAT 1 pain. Do NOT open with 'עד שגיליתי' — discovery already happened in BEAT 2.",
+  "voiceover_scene4": "BEAT 4 — CTA + PERSONAL TESTIMONIAL, ~8-10 Hebrew words. Direct CTA combined with a personal emotional line like 'זה שינה לי את היום' / 'זה שווה כל שקל' / 'אי אפשר להתחרט'. Never a bare 'תנסו'.",
   "setting": "one-line description of the setting",
   "scenes": [
     {
@@ -544,6 +628,18 @@ Return ONLY valid JSON (no markdown):
     const extraInstruction = `\n\nPREVIOUS ATTEMPT OPENED SCENE 1 WITH A BARE ACTION VERB (e.g. "ניסיתי ..."/"חיפשתי ..." as the first word). REWRITE voiceover_scene1 to open with an EMOTIONAL STATE or RECURRING SITUATION, using "כל פעם ש..." / "הייתי מרגישה ש..." / "הרגשתי ש..." / "תמיד היה לי ש...". The first word must NOT be ניסיתי/חיפשתי/רציתי. Keep the exact pre-set hook "${hook}" as the voiceover_scene1 text.`;
     const retry = parseResponse(await callClaude(extraInstruction));
     if (retry) parsed = retry;
+  }
+  // Validate the strict 4-beat structure. If scene 2 isn't a short discovery
+  // line ("עד ש..." / "ואז גיליתי ..."), or if scene 3 opens with that phrase
+  // instead of listing benefits, regenerate once with a pointed correction.
+  if (parsed) {
+    const violation = beatStructureViolation(parsed.scenes, productName);
+    if (violation) {
+      console.warn('[generateScript] 4-beat structure violation:', violation);
+      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE: ${violation}\n\nREWRITE so:\n- voiceover_scene1 = BEAT 1 (specific pain, never names the product)\n- voiceover_scene2 = BEAT 2 (SHORT 4-6 words, MUST start with "עד ש" or "ואז גיליתי" and include "${productName}", NO benefits here)\n- voiceover_scene3 = BEAT 3 (2-3 concrete benefits + emotional payoff resolving the pain, DOES NOT start with "עד שגיליתי")\n- voiceover_scene4 = BEAT 4 (CTA + personal testimonial line)`;
+      const retry = parseResponse(await callClaude(extraInstruction));
+      if (retry) parsed = retry;
+    }
   }
   // Validate authentic Hebrew — if Claude used borrowed/transliterated words
   // (סטיילית / טרנדי / קולית / סאפר / אאוטפיט), regen with the explicit
