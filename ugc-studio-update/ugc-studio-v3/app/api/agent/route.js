@@ -11,6 +11,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import { prewarmVideos } from '../../../lib/video-cache.js'
+import { generateNBFrame, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -48,90 +49,10 @@ const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
-const SCENE_DURATIONS = [5, 5, 5, 5];
+const SCENE_DURATIONS = SHARED_SCENE_DURATIONS;
 
-async function generateNBFrame(prompt, imageUrls, maxRetries = 3, opts = {}) {
-  const validUrls = imageUrls.filter(Boolean);
-  const productOnly = opts.productOnly === true;
-  // scene4Context: scene 4 is the aspirational-result shot that breaks out of
-  // the standard window-daylight bedroom/bathroom frame. Drop the default
-  // lighting layer (Claude's prompt supplies the contextual lighting like
-  // candlelight / golden hour / restaurant warmth) and drop the vehicle
-  // negative so car-accessory products can actually show the car.
-  const scene4Context = opts.scene4Context === true;
-  console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, productOnly, scene4Context, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
-
-  let enhancedPrompt;
-  if (productOnly) {
-    // Scene 2 — strict product-only composition. Do NOT include anatomy/person
-    // language that could make NanoBanana insert a model. Push very loudly that
-    // the frame must contain zero humans.
-    const productOnlyRule = 'PRODUCT ONLY SHOT — absolutely no person, no human, no hands holding the product, no face, no body parts, no avatar, no model. The frame contains ONLY the product resting on a surface. Pure product photography, studio-style, no humans in frame whatsoever.';
-    const productNegatives = 'Negative (STRICT): person, human, woman, man, hands, face, body, avatar, model, people, arms, fingers, holding, selfie, skin, hair, limbs, silhouette.';
-    // Match the UGC aesthetic on the product-only scene too — real iPhone
-    // back-camera pickup on a real surface, not a catalog/stock render. Keeps
-    // scene 2 visually consistent with the selfie scenes around it. Arcads
-    // product-showcase specifically names "floating product" and
-    // "unnatural hand pose" as the common product-shot failures; the
-    // phrasing below pins the product to a surface with an explicit
-    // contact shadow.
-    const productRealism = 'shot on iPhone back camera in a real home setting, natural daylight through a nearby window plus ambient room light, slight handheld angle rather than dead-on tripod, subtle lens softness at corners, flat washed-out color grading, low saturation, uncolor-graded, realistic surface with tiny imperfections — faint dust, small fingerprint smudge, organic wood grain or authentic marble veining, mild warm white balance, no studio softbox, no seamless white backdrop, no perfectly clean catalog look, product firmly grounded on the surface with a visible contact shadow, product is NOT floating, NOT levitating, NOT suspended, NOT hovering, edges of the product render cleanly without melted geometry';
-    enhancedPrompt = `${productOnlyRule} ${prompt}, realistic product photography, product clearly resting on a physical surface with contact shadow, ${productRealism}, photorealistic, looks like a real phone photo not a render, no burned-in subtitles or captions or on-screen text or graphic overlays. ${productNegatives}`;
-  } else {
-    const anatomyPrefix = 'CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body.';
-    const negativeConcepts = 'Negative (avoid): extra arms, extra hands, third hand, disembodied limbs, floating hands, phantom limbs, multiple arms, anatomically incorrect, deformed hands, mutant hands, extra fingers, six fingers, hands from outside frame, partial limbs entering from edges.';
-    const singleHandRule = 'If holding a product, hold it with ONE hand only, other hand visible and relaxed at side, never two items at once.';
-    // Selfie-realism stack — push hard against the polished AI aesthetic.
-    // Frame the image as a raw iPhone selfie-VIDEO still (not a photo) to
-    // dodge the "clean portrait" default. Skin cues deliberately avoid
-    // condition-sounding words (acne / pimple / blemish / redness) and
-    // instead describe oil sheen, undereye shadows, and pinkness — these
-    // reliably read as "real person on front camera" without pushing the
-    // model toward skin-problem territory.
-    const frameGrabOpener = 'unedited still frame pulled from a handheld iPhone selfie video, not a photograph, video-still aesthetic';
-    const selfieRealism = 'real unretouched skin with visible pores across cheeks and forehead, subtle uneven skin tone, faint pink flush on the cheeks and nose tip, subtle darker half-moons under the eyes, slight natural oil sheen on the nose and forehead, tiny flyaway hairs catching the light, eyebrow hairs not perfectly groomed, natural facial asymmetry, no makeup smoothing, no beauty filter, no airbrushing, no skin smoothing, zero frequency-separation look';
-    const iPhoneCamera = 'iPhone 15 Pro front camera in selfie mode, native wide lens around 26mm, autofocus hunts gently with focus pulsing in and out, no artificial shallow depth of field, everything deep-focus but softly rendered, mild lens fall-off and subtle barrel distortion near corners, auto white balance with a slight cool cast in shadows, faint luminance grain, occasional chromatic fringe on high-contrast edges, faint rolling-shutter skew on quick motion, flat washed-out color, uncolor-graded, low saturation, no LUT';
-    const naturalLight = 'natural mixed indoor lighting — soft window daylight plus a nearby warm room practical, uneven jaw-line shadow, one side of the face slightly in shadow, mild color-temperature mismatch between window and room lamp, no studio softbox, no rim light, no beauty dish, no ring light';
-    const motionFeel = 'slight handheld one-hand micro-shake, subtle motion blur on hair strands near the cheek, soft focus across the whole frame with nothing tack sharp, one eye marginally more in focus than the other, candid unposed framing slightly off-center and tilted a few degrees, head not dead-level, captured between expressions — eyelid mid-close or mouth in the middle of forming a word, never a finished pose';
-    const antiAI = 'avoid overly polished AI aesthetic, avoid glossy cinematic bokeh, avoid symmetrical studio framing, avoid catalog-model pose, avoid perfectly smooth skin, avoid plastic look, avoid 8k, avoid award-winning photography look, avoid any LUT or color grading, looks like a real person on their front camera not a render';
-    // For scene 4 (aspirational result), drop the default window-daylight
-    // lighting layer so Claude's contextual lighting (candlelight, golden
-    // hour, restaurant warmth, beach light, park daylight) dominates; also
-    // drop the "NEVER in a car / vehicle" negative so car-accessory scene 4
-    // can legitimately show the car. The no-phone rule stays in all scenes.
-    const lightingPart = scene4Context ? '' : `, ${naturalLight}`;
-    const vehicleNegative = scene4Context ? '' : ', NEVER in a car, NEVER in a vehicle';
-    enhancedPrompt = `${frameGrabOpener}. ${anatomyPrefix} ${prompt}, ${selfieRealism}, ${iPhoneCamera}${lightingPart}, ${motionFeel}, ${antiAI}, real avatar not model, ${singleHandRule} exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene${vehicleNegative}, no burned-in subtitles or captions or on-screen text or graphic overlays. ${negativeConcepts}`;
-  }
-
-  const endpointId = validUrls.length === 0
-    ? 'fal-ai/nano-banana-2'
-    : 'fal-ai/nano-banana-2/edit';
-  const input = validUrls.length === 0
-    ? { prompt: enhancedPrompt, image_size: { width: 720, height: 1280 } }
-    : { prompt: enhancedPrompt, image_urls: validUrls, image_size: { width: 720, height: 1280 } };
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const result = await fal.run(endpointId, { input });
-      console.log('NB response:', JSON.stringify(result.data).slice(0, 400));
-      const imageUrl = result.data.images?.[0]?.url || result.data.images?.[0] || null;
-      console.log('NB image URL:', imageUrl?.slice(0, 100));
-      return imageUrl;
-    } catch (err) {
-      const status = err.status || err.statusCode || 'unknown';
-      const body = err.body || err.message || String(err);
-      console.error(`NB frame attempt ${attempt}/${maxRetries} failed — status: ${status}, body:`, JSON.stringify(body).slice(0, 500));
-      if ((status === 403 || status === 429) && attempt < maxRetries) {
-        const delay = attempt * 2000;
-        console.log(`NB retrying in ${delay}ms...`);
-        await new Promise(r => setTimeout(r, delay));
-        continue;
-      }
-      throw err;
-    }
-  }
-}
+// generateNBFrame + pipeline constants now live in lib/agent-pipeline.js so
+// the regenerate-scene endpoint can reuse them without duplication.
 
 // Join 4 scene voiceovers into ONE continuous paragraph for ElevenLabs.
 // We strip trailing sentence terminators on all-but-last chunks and glue with
@@ -1271,14 +1192,9 @@ function getDefaultVoiceover(productName, applicationArea, hook, voiceGender = '
   return applyGender(raw, voiceGender);
 }
 
-const STABLE = 'silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference';
-
-// Product-lock phrase bundle for Kling — injected into every fallback
-// kling_prompt for scenes 2/3/4 to fight Kling's object-drift failure mode
-// (product morphing mid-video). Keep the block inline so it's visible
-// next to the scene templates rather than hidden in a helper.
-const PRODUCT_LOCK = 'PRODUCT LOCK: the product maintains EXACT same appearance throughout the entire video — same shape, same color, same logo, same text, same material, same position, rigid physical object that does not morph, every frame identical in product identity to the reference, no product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no product becoming a different object, no product identity drift, no gradual transformation into a similar-but-different item.';
-const BUSINESS_CRAFT_LOCK = 'PRODUCT/CRAFT LOCK: the signature items (tools, finished dish/garment/styling, branded signage, finished work) maintain EXACT same appearance throughout the entire video — same shape, color, logo, text, materials, position, rigid physical objects that do not morph, every frame identical in product identity to the reference, no tool or product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no dish/garment/finished-work becoming a different object, no identity drift, no gradual transformation into a similar-but-different item.';
+const STABLE = SHARED_STABLE;
+const PRODUCT_LOCK = SHARED_PRODUCT_LOCK;
+const BUSINESS_CRAFT_LOCK = SHARED_BUSINESS_CRAFT_LOCK;
 
 function getDefaultScenes(productName, applicationArea, productDesc) {
   const hook = getHook(productName, productDesc);

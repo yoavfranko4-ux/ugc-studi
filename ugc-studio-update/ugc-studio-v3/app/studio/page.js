@@ -342,6 +342,14 @@ export default function Home() {
   const [videosReady, setVideosReady] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
+  // Scene-regeneration state. jobId + lastGenPayload are captured at the
+  // end of runAgent() so the regenerate-scene endpoint can replay the
+  // same reference-image set for any single scene.
+  const [jobId, setJobId] = useState(null)
+  const [lastGenPayload, setLastGenPayload] = useState(null)
+  const [regenLoading, setRegenLoading] = useState(null) // scene number currently regenerating (1-4) or null
+  const [regenCounts, setRegenCounts] = useState({}) // { "1": 0, ... }
+  const [regenMsg, setRegenMsg] = useState('')
   // Voiceover re-record (one-shot per video session) — works on both fresh
   // generations and saved-edit restores via ?editId=, since both flows
   // populate result.hebrewVoice and audioBlobUrl.
@@ -892,6 +900,17 @@ export default function Home() {
       if (!agentRes.ok) throw new Error('Agent failed')
       const { jobId } = await agentRes.json()
       if (!jobId) throw new Error('No jobId returned')
+      // Persist jobId + the reference URLs we just used so the
+      // regenerate-scene endpoint can replay any one scene without the
+      // user re-entering the form.
+      setJobId(jobId)
+      setLastGenPayload({
+        videoType: mode === 'business' ? 'business' : 'ugc',
+        avatarUrl: finalAvatarUrl,
+        productImageUrl,
+        businessPhotos,
+      })
+      setRegenCounts({})
       addLog(`Job ${jobId.slice(0, 8)}... נוצר, ממתין לתוצאות...`)
 
       const steps = ['script', 'frames', 'videos', 'voice']
@@ -962,6 +981,56 @@ export default function Home() {
     setClipOrder(newOrder); setDragIdx(idx)
   }
   const handleDragEnd = () => setDragIdx(null)
+
+  // Regenerate a single scene (1-4) without remaking the whole video.
+  // Hits POST /api/agent/regenerate-scene with the same reference set used
+  // in the original job, updates result.frames[N] and result.videos[N],
+  // and triggers the video-loading pipeline so the new clip shows up.
+  const regenerateScene = async (sceneNumber) => {
+    if (!jobId || !result || !lastGenPayload) {
+      setRegenMsg('לא ניתן לייצר מחדש — צור סרטון חדש תחילה')
+      return
+    }
+    if (regenLoading !== null) return
+    setRegenLoading(sceneNumber)
+    setRegenMsg(`מייצר מחדש סצנה ${sceneNumber}... (1-2 דקות)`)
+    try {
+      const res = await fetch('/api/agent/regenerate-scene', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, sceneNumber, ...lastGenPayload }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok || !body.success) {
+        const msg = body.error || `שגיאה ${res.status}`
+        setRegenMsg(`סצנה ${sceneNumber} — ${msg}`)
+        // If NB succeeded but Kling failed, body.newFrameUrl may be set.
+        // Update the frame in the result so the user at least sees the
+        // regenerated still.
+        if (body.newFrameUrl && result?.frames) {
+          const framesCopy = [...result.frames]
+          framesCopy[sceneNumber - 1] = body.newFrameUrl
+          setResult({ ...result, frames: framesCopy })
+        }
+        return
+      }
+      // Success: replace the new result, reset blob cache for this scene
+      // so the video-loading effect re-fetches just scene N.
+      setResult(body.result)
+      setRegenCounts(body.regenerations_used || {})
+      setVideoBlobUrls(prev => {
+        const next = [...prev]
+        next[sceneNumber - 1] = null
+        return next
+      })
+      setVideosReady(false)
+      setRegenMsg(`סצנה ${sceneNumber} עודכנה ✓`)
+    } catch (e) {
+      setRegenMsg(`סצנה ${sceneNumber} נכשלה: ${e.message || 'שגיאת רשת'}`)
+    } finally {
+      setRegenLoading(null)
+    }
+  }
 
   // Toggle music preview — real <audio> element playing the track URL
   const toggleMusicPreview = useCallback(() => {
@@ -1810,6 +1879,57 @@ export default function Home() {
               ))}
             </div>
           </div>
+
+          {/* Regenerate single scene — only shown for fresh generations where
+              we have the jobId + reference payload. Hidden in the restore-
+              from-saved-edit path, since regenerating a saved edit doesn't
+              make sense (the user already tweaked it). */}
+          {jobId && lastGenPayload && (
+            <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
+              <div style={{ ...secTitle, marginBottom: 8, fontSize: 12 }}>יצירה מחדש של סצנה בודדת</div>
+              <div style={{ fontSize: 10, color: '#52525b', marginBottom: 8, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
+                אם סצנה אחת יצאה לא טוב (לדוגמה המוצר השתנה באמצע), אפשר לייצר אותה מחדש בלי לפגוע בשאר הסרטון. עד 3 יצירות מחדש לכל סצנה.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                {[1, 2, 3, 4].map(n => {
+                  const used = regenCounts[String(n)] || 0
+                  const atLimit = used >= 3
+                  const isThisLoading = regenLoading === n
+                  const isAnyLoading = regenLoading !== null
+                  return (
+                    <button
+                      key={n}
+                      onClick={() => regenerateScene(n)}
+                      disabled={isAnyLoading || atLimit}
+                      style={{
+                        background: isThisLoading ? 'rgba(255,0,128,0.2)' : 'rgba(255,255,255,0.03)',
+                        border: BORDER,
+                        borderRadius: 6,
+                        padding: '8px 4px',
+                        textAlign: 'center',
+                        fontSize: 10,
+                        color: atLimit ? '#27272a' : (isThisLoading ? '#FF0080' : '#a1a1aa'),
+                        cursor: (isAnyLoading || atLimit) ? 'not-allowed' : 'pointer',
+                        opacity: (isAnyLoading && !isThisLoading) ? 0.4 : 1,
+                        direction: 'rtl',
+                        fontFamily: 'Heebo,sans-serif',
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, marginBottom: 2 }}>סצנה {n}</div>
+                      <div style={{ fontSize: 9 }}>
+                        {isThisLoading ? 'מייצר...' : atLimit ? 'הגעת למקסימום' : `🔄 צור מחדש${used ? ` (${used}/3)` : ''}`}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+              {regenMsg && (
+                <div style={{ marginTop: 8, fontSize: 10, color: regenMsg.includes('✓') ? '#22c55e' : '#ef4444', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
+                  {regenMsg}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Center: Full-width Preview */}
