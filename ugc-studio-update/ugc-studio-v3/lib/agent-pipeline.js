@@ -37,7 +37,6 @@ export async function generateNBFrame(prompt, imageUrls, maxRetries = 3, opts = 
   const validUrls = imageUrls.filter(Boolean);
   const productOnly = opts.productOnly === true;
   const scene4Context = opts.scene4Context === true;
-  console.log('NB input:', { promptLen: prompt?.length, urlCount: validUrls.length, productOnly, scene4Context, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
 
   let enhancedPrompt;
   if (productOnly) {
@@ -46,20 +45,20 @@ export async function generateNBFrame(prompt, imageUrls, maxRetries = 3, opts = 
     const productRealism = 'shot on iPhone back camera in a real home setting, natural daylight through a nearby window plus ambient room light, slight handheld angle rather than dead-on tripod, subtle lens softness at corners, flat washed-out color grading, low saturation, uncolor-graded, realistic surface with tiny imperfections — faint dust, small fingerprint smudge, organic wood grain or authentic marble veining, mild warm white balance, no studio softbox, no seamless white backdrop, no perfectly clean catalog look, product firmly grounded on the surface with a visible contact shadow, product is NOT floating, NOT levitating, NOT suspended, NOT hovering, edges of the product render cleanly without melted geometry';
     enhancedPrompt = `${productOnlyRule} ${prompt}, realistic product photography, product clearly resting on a physical surface with contact shadow, ${productRealism}, photorealistic, looks like a real phone photo not a render, no burned-in subtitles or captions or on-screen text or graphic overlays. ${productNegatives}`;
   } else {
+    const characterRef = 'Use the person from the reference image exactly as the character — preserve their facial features, skin, hair, eye color, and bone structure from the avatar reference. Do not generate a new person; do not alter their skin texture or tone.';
     const anatomyPrefix = 'CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body.';
     const negativeConcepts = 'Negative (avoid): extra arms, extra hands, third hand, disembodied limbs, floating hands, phantom limbs, multiple arms, anatomically incorrect, deformed hands, mutant hands, extra fingers, six fingers, hands from outside frame, partial limbs entering from edges.';
     const singleHandRule = 'If holding a product, hold it with ONE hand only, other hand visible and relaxed at side, never two items at once.';
-    const selfieRealism = 'Natural iPhone selfie photo. Real unfiltered skin with subtle texture, not airbrushed. Authentic casual moment, caught mid-moment with natural expression.';
-    const naturalLight = 'natural ambient lighting from the environment';
-    const antiAI = 'no overly polished skin, no beauty filter, no HDR, no airbrushing, no AI-looking';
-    const lightingPart = scene4Context ? '' : `, ${naturalLight}`;
+    const selfieRealism = 'Natural iPhone selfie captured in the moment. Authentic casual expression. Ambient lighting from the scene.';
+    const antiAI = 'no beauty filter, no airbrushing, no HDR, no AI-looking, no overly polished skin';
     const vehicleNegative = scene4Context ? '' : ', NEVER in a car, NEVER in a vehicle';
-    enhancedPrompt = `${anatomyPrefix} ${prompt}, ${selfieRealism}${lightingPart}, ${antiAI}, real avatar not model, ${singleHandRule} exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene${vehicleNegative}, no burned-in subtitles or captions or on-screen text or graphic overlays. ${negativeConcepts}`;
+    enhancedPrompt = `${characterRef} ${anatomyPrefix} ${prompt}, ${selfieRealism}, ${antiAI}, ${singleHandRule} exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene${vehicleNegative}, no burned-in subtitles or captions or on-screen text or graphic overlays. ${negativeConcepts}`;
   }
 
   const endpointId = validUrls.length === 0
     ? 'fal-ai/nano-banana-2'
     : 'fal-ai/nano-banana-2/edit';
+  console.log('[NB] Model:', endpointId, 'Images:', validUrls.length, { promptLen: enhancedPrompt?.length, productOnly, scene4Context, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
   const input = validUrls.length === 0
     ? { prompt: enhancedPrompt, image_size: { width: 720, height: 1280 } }
     : { prompt: enhancedPrompt, image_urls: validUrls, image_size: { width: 720, height: 1280 } };
