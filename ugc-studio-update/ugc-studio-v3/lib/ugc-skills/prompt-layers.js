@@ -12,6 +12,7 @@
 
 import { CAMERA_PROFILES, getCameraProfile } from './camera-profiles.js';
 import { getAnchorPhrases } from './realism-anchors.js';
+import { getShotType } from './shot-types.js';
 
 // Preserved from the legacy agent-pipeline.js — these rules cover anatomy,
 // "no phone in shot", and Kling mouth-closed stability. They are factored into
@@ -75,9 +76,13 @@ export function buildPrompt({
   // Layer 3 — Environment
   const layer3 = `Environment: ${environment}`;
 
-  // Layer 4 — Camera
+  // Layer 4 — Camera (+ shot-specific additionalMarkers if present)
   const cam = getCameraProfile(camera);
-  const layer4 = `Camera: ${cam.name}. ${cam.description}. Depth: ${cam.depth}. Angle: ${cam.angle}.`;
+  const shot = getShotType(shotType);
+  const markers = Array.isArray(shot.additionalMarkers) && shot.additionalMarkers.length
+    ? ` Shot markers: ${shot.additionalMarkers.join('; ')}.`
+    : '';
+  const layer4 = `Camera: ${cam.name}. ${cam.description}. Depth: ${cam.depth}. Angle: ${cam.angle}.${markers}`;
 
   // Layer 5 — Realism Injection
   const anchors = getAnchorPhrases(shotType);

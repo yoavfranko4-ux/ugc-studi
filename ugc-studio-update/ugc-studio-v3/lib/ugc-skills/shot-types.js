@@ -28,9 +28,20 @@ export const SHOT_TYPES = {
   },
 
   'aspirational-selfie': {
-    description: 'iPhone selfie in a lifestyle / aspirational context',
+    description: 'casual iPhone selfie in a lifestyle / aspirational context',
     camera: 'selfieFront',
-    ideal_for: 'Beat 4 contextual result'
+    ideal_for: 'Beat 4 contextual result',
+    // NanoBanana will otherwise drift toward "travel photography" for outdoor
+    // lifestyle scenes. These markers pin the shot back to a casual iPhone
+    // selfie aesthetic.
+    additionalMarkers: [
+      'arm visible at the frame edge showing the selfie extension',
+      'slight iPhone front-camera wide-angle distortion',
+      'background softly visible, NOT cinematic blur, NOT portrait-mode bokeh',
+      'casual unposed moment, not a planned shot',
+      'captured quickly in the middle of the experience, not a staged photo',
+      'NOT travel photography, NOT a magazine lifestyle spread, NOT a professional portrait'
+    ]
   },
 
   'mirror-selfie': {

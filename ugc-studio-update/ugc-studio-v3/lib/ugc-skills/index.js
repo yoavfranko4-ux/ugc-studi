@@ -30,7 +30,10 @@ import {
   getProductLock,
   STABLE,
   PRODUCT_LOCK,
-  BUSINESS_CRAFT_LOCK
+  BUSINESS_CRAFT_LOCK,
+  PRODUCT_INTEGRATION,
+  PRODUCT_INTEGRATION_BY_PRODUCT,
+  HELD_PRODUCT_INTEGRATION
 } from './consistency-protocol.js';
 
 // Environment dictionaries live here (rather than in their own file) because
@@ -120,6 +123,25 @@ export function generateUGCPrompt({
     ? ''
     : getProductLock(productName, isBusinessCraft);
 
+  // Product Integration — only when a person and product share the frame
+  // (beats 3 and 4 of UGC mode). Scene 2 is product-only; scene 1 has no
+  // product. For the held-product shot, also layer the hand-grip hint.
+  const integrationParts = [];
+  const personPlusProductBeat = !productOnly && productName && (beat === 3 || beat === 4);
+  if (personPlusProductBeat) {
+    integrationParts.push(PRODUCT_INTEGRATION);
+    if (shotType === 'held-product') {
+      integrationParts.push(HELD_PRODUCT_INTEGRATION);
+    }
+    const productKey = String(productName).toLowerCase().trim();
+    const productHint = PRODUCT_INTEGRATION_BY_PRODUCT[productKey];
+    if (productHint) integrationParts.push(productHint);
+  }
+
+  const customNegatives = [productLockPhrase, ...integrationParts]
+    .filter(Boolean)
+    .join(' ');
+
   // Selfie-style shots *must* show the iPhone in the subject's hand, so drop
   // the "no phone in frame" rule only for those cases.
   const selfieLikeShots = new Set(['selfie-close', 'selfie-medium', 'aspirational-selfie', 'mirror-selfie']);
@@ -132,7 +154,7 @@ export function generateUGCPrompt({
     camera,
     shotType,
     skipPhoneNegative,
-    customNegatives: productLockPhrase
+    customNegatives
   });
 }
 
@@ -158,5 +180,8 @@ export {
   getProductLock,
   STABLE,
   PRODUCT_LOCK,
-  BUSINESS_CRAFT_LOCK
+  BUSINESS_CRAFT_LOCK,
+  PRODUCT_INTEGRATION,
+  PRODUCT_INTEGRATION_BY_PRODUCT,
+  HELD_PRODUCT_INTEGRATION
 };

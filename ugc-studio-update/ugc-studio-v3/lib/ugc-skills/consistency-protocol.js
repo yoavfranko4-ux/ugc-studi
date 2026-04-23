@@ -21,6 +21,43 @@ export const PRODUCT_LOCK =
   'no product becoming a different object, no product identity drift, ' +
   'no gradual transformation into a similar-but-different item.';
 
+// PRODUCT_INTEGRATION is appended *after* PRODUCT_LOCK for scenes where a
+// person and product share the frame (beats 3 and 4). PRODUCT_LOCK preserves
+// identity; PRODUCT_INTEGRATION stops the product from looking pasted-on.
+export const PRODUCT_INTEGRATION =
+  'PRODUCT INTEGRATION: the product must be physically INTEGRATED with the scene, not composited. ' +
+  'Product casts natural shadows onto skin / hair / fabric beneath it. ' +
+  'Hair naturally frames or flows around the product edges — no clean hard cut-out line. ' +
+  'Product surface reflects the ambient scene lighting (warm highlights where lights are warm, cool where cool). ' +
+  'Product edges blend naturally into the person, with subtle skin-tone color bounce onto the product edges. ' +
+  'Any fabric drapes realistically with natural folds and creases. ' +
+  'Product has real physical weight and sits naturally in place. ' +
+  'Looks like it belongs in the scene from the moment of capture. ' +
+  'NOT pasted-on, NOT Photoshopped, NOT overlaid, NOT a 2D sticker, NOT a floating decal.';
+
+// Product-specific integration hints. Layered on top of PRODUCT_INTEGRATION
+// for beats 3 and 4 to catch product-specific tells that make NB cheat.
+export const PRODUCT_INTEGRATION_BY_PRODUCT = {
+  kippah:
+    'KIPPAH INTEGRATION: hair flows around the kippah edges with a few strands visible over / around it (never a hard clean line). ' +
+    'The kippah sits with a slight indent pressing into the hair below it. ' +
+    'Natural shadow under the kippah\'s bottom edge on the hair. ' +
+    'Kippah fabric catches the same scene lighting as the surrounding hair.',
+  kipa:
+    'KIPPAH INTEGRATION: hair flows around the kippah edges with a few strands visible over / around it (never a hard clean line). ' +
+    'The kippah sits with a slight indent pressing into the hair below it. ' +
+    'Natural shadow under the kippah\'s bottom edge on the hair. ' +
+    'Kippah fabric catches the same scene lighting as the surrounding hair.'
+};
+
+// Generic hint for "held product" shots (beat 3). Appended whenever the
+// shot type is held-product regardless of product name.
+export const HELD_PRODUCT_INTEGRATION =
+  'HELD PRODUCT INTEGRATION: fingertips press into the product showing real grip pressure. ' +
+  'Product does NOT float in the hand — visible contact between palm, fingers, and product. ' +
+  'Subtle shadow between the product and the palm. ' +
+  'Skin around the grip shows slight tension where fingers curl around the product.';
+
 export const BUSINESS_CRAFT_LOCK =
   'PRODUCT/CRAFT LOCK: the signature items (tools, finished dish/garment/styling, ' +
   'branded signage, finished work) maintain EXACT same appearance throughout the entire ' +
