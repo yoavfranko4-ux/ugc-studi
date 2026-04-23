@@ -129,32 +129,63 @@ export async function POST(req) {
   const nbPrompt = (typeof customPrompt === 'string' && customPrompt.trim()) ? customPrompt.trim() : scenes[sceneIdx].nb_prompt;
   const klingPrompt = scenes[sceneIdx].kling_prompt;
 
+  // Normalize image URLs to absolute form before handing them to fal.ai.
+  // fal rejects anything that isn't http://, https://, or data:, so a
+  // relative path like "/avatars/avatar-5.jpg" (what the studio bundled
+  // avatars look like after the frontend picker) triggers a 422. The main
+  // /api/agent route does this same conversion — mirror it here so the
+  // regenerate flow accepts the same frontend payload.
+  //
+  // Order of preference for the base:
+  //   1. NEXT_PUBLIC_BASE_URL env var (matches what the main route uses)
+  //   2. The incoming request's own protocol + host (works for any deploy
+  //      target, including local dev)
+  //   3. The hardcoded Railway fallback used by the main route
+  const envBase = process.env.NEXT_PUBLIC_BASE_URL;
+  const proto = req.headers.get('x-forwarded-proto') || 'https';
+  const host = req.headers.get('host');
+  const requestBase = host ? `${proto}://${host}` : null;
+  const baseUrl = envBase || requestBase || 'https://ugc-studi-production.up.railway.app';
+  const prepareUrl = (u) => {
+    if (!u || typeof u !== 'string') return null;
+    if (u.startsWith('http://') || u.startsWith('https://') || u.startsWith('data:')) return u;
+    // Relative path — prepend the base. Ensure exactly one slash at the join.
+    return u.startsWith('/') ? `${baseUrl}${u}` : `${baseUrl}/${u}`;
+  };
+
+  const preparedAvatar = prepareUrl(avatarUrl);
+  const preparedProduct = prepareUrl(productImageUrl);
+  const preparedBusinessPhotos = Array.isArray(businessPhotos) ? businessPhotos.map(prepareUrl).filter(Boolean) : [];
+  // result.frames entries come from fal.ai already (absolute https URLs),
+  // but normalize defensively in case an older job stored a relative path.
+  const preparedPrevFrame = prepareUrl(result.frames?.[sceneIdx - 1]);
+  console.log(`[regenerate-scene] job=${jobId} scene=${sceneNumber} baseUrl=${baseUrl} avatar=${preparedAvatar?.slice(0, 80) || '(none)'} product=${preparedProduct?.slice(0, 80) || '(none)'} prevFrame=${preparedPrevFrame?.slice(0, 80) || '(none)'}`);
+
   // Build reference-image list for this scene — mirrors the main /api/agent
   // loop so the regenerated frame uses the same style/identity anchors.
   const isScene2 = sceneIdx === 1;
   const isScene4 = sceneIdx === 3;
   const productOnly = isScene2 && videoType !== 'business';
   const scene4Context = isScene4 && !productOnly;
-  const prevFrame = result.frames?.[sceneIdx - 1] || null;
 
   const imageUrls = [];
   if (videoType === 'business') {
     if (isScene2) {
-      (Array.isArray(businessPhotos) ? businessPhotos : []).slice(0, 3).forEach(u => u && imageUrls.push(u));
+      preparedBusinessPhotos.slice(0, 3).forEach(u => imageUrls.push(u));
     } else {
-      if (avatarUrl) imageUrls.push(avatarUrl);
-      if (prevFrame) imageUrls.push(prevFrame);
-      if (Array.isArray(businessPhotos) && businessPhotos[0] && (sceneIdx === 2 || sceneIdx === 3)) {
-        imageUrls.push(businessPhotos[0]);
+      if (preparedAvatar) imageUrls.push(preparedAvatar);
+      if (preparedPrevFrame) imageUrls.push(preparedPrevFrame);
+      if (preparedBusinessPhotos[0] && (sceneIdx === 2 || sceneIdx === 3)) {
+        imageUrls.push(preparedBusinessPhotos[0]);
       }
     }
   } else {
     if (isScene2) {
-      if (productImageUrl) imageUrls.push(productImageUrl);
+      if (preparedProduct) imageUrls.push(preparedProduct);
     } else {
-      if (avatarUrl) imageUrls.push(avatarUrl);
-      if (prevFrame) imageUrls.push(prevFrame);
-      if (productImageUrl && (sceneIdx === 2 || sceneIdx === 3)) imageUrls.push(productImageUrl);
+      if (preparedAvatar) imageUrls.push(preparedAvatar);
+      if (preparedPrevFrame) imageUrls.push(preparedPrevFrame);
+      if (preparedProduct && (sceneIdx === 2 || sceneIdx === 3)) imageUrls.push(preparedProduct);
     }
   }
 
