@@ -342,6 +342,10 @@ export default function Home() {
   const [videosReady, setVideosReady] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
+  // ID of the currently-loaded saved_edits row (when the editor was opened
+  // via ?editId=). Used by the save handler to UPDATE the existing row
+  // instead of inserting a duplicate every time.
+  const [loadedEditId, setLoadedEditId] = useState(null)
   // Scene-regeneration state. jobId + lastGenPayload are captured at the
   // end of runAgent() so the regenerate-scene endpoint can replay the
   // same reference-image set for any single scene.
@@ -437,6 +441,10 @@ export default function Home() {
           .single()
         if (error || !edit?.edit_data) return
 
+        // Remember which row this is — the save handler updates this row in
+        // place rather than inserting a new one each time.
+        setLoadedEditId(editId)
+
         const d = edit.edit_data
         // Restore all editor state
         if (d.product_name) setProductName(d.product_name)
@@ -475,14 +483,35 @@ export default function Home() {
         }
         setResult(restoredResult)
 
-        // Restore the regenerate-scene state. With these set, the regen
-        // card in the editor unhides itself — the existing UI is gated on
-        // `jobId && lastGenPayload`. Older saved_edits without these
-        // fields keep the prior behavior (regen card stays hidden).
+        // Restore the regenerate-scene state. New saves include job_id +
+        // last_gen_payload directly. For OLDER saved_edits that pre-date
+        // those fields, recover the jobId by asking the server to look it
+        // up by video URL — the matching jobs row also carries the
+        // generation inputs (since 20260425), so the regenerate-scene
+        // route can rebuild the reference set without lastGenPayload.
         if (d.job_id) setJobId(d.job_id)
         if (d.last_gen_payload) setLastGenPayload(d.last_gen_payload)
         if (d.regenerations_used && typeof d.regenerations_used === 'object') {
           setRegenCounts(d.regenerations_used)
+        }
+        if (!d.job_id && d.videos?.[0]) {
+          try {
+            const lookup = await fetch(
+              `/api/jobs/lookup-by-video?url=${encodeURIComponent(d.videos[0])}`
+            )
+            if (lookup.ok) {
+              const { jobId: foundJobId } = await lookup.json()
+              if (foundJobId) {
+                setJobId(foundJobId)
+                // Empty payload is a sentinel for "server, fill from
+                // jobs.inputs". The regenerate-scene route falls back to
+                // persisted inputs when these are absent from the request.
+                setLastGenPayload({})
+              }
+            }
+          } catch (e) {
+            console.warn('[Studio] jobId auto-recovery failed:', e.message)
+          }
         }
 
         // Check for autoExport flag
@@ -1366,12 +1395,33 @@ export default function Home() {
         last_gen_payload: lastGenPayload,
         regenerations_used: regenCounts,
       }
-      const { error } = await supabase.from('saved_edits').insert({
-        user_id: user.id,
-        edit_data: editData,
-      })
-      if (error) {
-        console.warn('Save edit error:', error.message)
+      // Update the existing row when this editor session was opened from
+      // the dashboard via ?editId=, otherwise insert a fresh row. Without
+      // this, every save of a restored edit created a duplicate
+      // saved_edits row, and the user kept opening the original (stale)
+      // row from the dashboard.
+      let saveError
+      if (loadedEditId) {
+        const { error: updateError } = await supabase
+          .from('saved_edits')
+          .update({ edit_data: editData })
+          .eq('id', loadedEditId)
+        saveError = updateError
+      } else {
+        const { data: inserted, error: insertError } = await supabase
+          .from('saved_edits')
+          .insert({ user_id: user.id, edit_data: editData })
+          .select('id')
+          .single()
+        saveError = insertError
+        if (!insertError && inserted?.id) {
+          // Promote this session to "editing the freshly-saved row" so a
+          // subsequent click of שמור updates rather than inserts again.
+          setLoadedEditId(inserted.id)
+        }
+      }
+      if (saveError) {
+        console.warn('Save edit error:', saveError.message)
         // Fallback: save to localStorage
         try {
           const key = `saved_edit_${user.id}_${Date.now()}`
@@ -1896,13 +1946,12 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Regenerate single scene — always rendered in the editor. For
-              fresh generations and freshly-saved edits, jobId + lastGenPayload
-              are populated (state on first run, restored from saved_edits.
-              edit_data on reload) so the buttons are fully active. For OLDER
-              saved edits created before those fields started being persisted,
-              the buttons render disabled with a helpful Hebrew nudge to
-              re-save the edit so regen can be enabled. */}
+          {/* Regenerate single scene — always rendered in the editor.
+              jobId + lastGenPayload come from one of three paths: (a) live
+              state from a fresh generation, (b) restored from saved_edits.
+              edit_data, or (c) auto-recovered via /api/jobs/lookup-by-video
+              for older saved_edits. If all three fail (very stale saved
+              edit, job purged from DB), the buttons stay disabled. */}
           {(() => {
             const canRegen = Boolean(jobId && lastGenPayload)
             return (
@@ -1923,7 +1972,6 @@ export default function Home() {
                         key={n}
                         onClick={() => regenerateScene(n)}
                         disabled={disabled}
-                        title={!canRegen ? 'שמור את העריכה ופתח אותה מחדש כדי להפעיל יצירה מחדש' : ''}
                         style={{
                           background: isThisLoading ? 'rgba(255,0,128,0.2)' : 'rgba(255,255,255,0.03)',
                           border: BORDER,
@@ -1946,11 +1994,6 @@ export default function Home() {
                     )
                   })}
                 </div>
-                {!canRegen && (
-                  <div style={{ marginTop: 8, fontSize: 10, color: '#a1a1aa', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
-                    כדי להפעיל יצירה מחדש בעריכה ישנה — לחץ "שמור עריכה" שוב ופתח את העריכה מהדשבורד.
-                  </div>
-                )}
                 {regenMsg && (
                   <div style={{ marginTop: 8, fontSize: 10, color: regenMsg.includes('✓') ? '#22c55e' : '#ef4444', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
                     {regenMsg}

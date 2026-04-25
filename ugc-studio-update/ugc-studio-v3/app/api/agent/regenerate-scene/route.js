@@ -75,14 +75,14 @@ export async function POST(req) {
   try { body = await req.json(); }
   catch { return Response.json({ error: 'Invalid JSON body' }, { status: 400 }); }
 
-  const {
+  let {
     jobId,
     sceneNumber,
     customPrompt,
-    videoType = 'ugc',
+    videoType,
     avatarUrl,
     productImageUrl,
-    businessPhotos = [],
+    businessPhotos,
   } = body || {};
 
   if (!jobId || typeof jobId !== 'string') {
@@ -108,6 +108,20 @@ export async function POST(req) {
     return Response.json({
       error: `Job status is "${job.status}" — can only regenerate scenes of completed jobs`
     }, { status: 409 });
+  }
+
+  // Fall back to inputs persisted on the jobs row when the client didn't
+  // supply them. Editor sessions restored from older saved_edits don't have
+  // lastGenPayload in scope, so they POST { jobId, sceneNumber } only and
+  // rely on this fallback. Brand-new jobs (since 20260425) always have
+  // jobs.inputs populated; very old jobs may not — those degrade to using
+  // only the previous-scene frame as the reference image.
+  const persistedInputs = (job.inputs && typeof job.inputs === 'object') ? job.inputs : {};
+  if (videoType == null) videoType = persistedInputs.videoType || 'ugc';
+  if (avatarUrl == null) avatarUrl = persistedInputs.avatarUrl || null;
+  if (productImageUrl == null) productImageUrl = persistedInputs.productImageUrl || null;
+  if (!Array.isArray(businessPhotos)) {
+    businessPhotos = Array.isArray(persistedInputs.businessPhotos) ? persistedInputs.businessPhotos : [];
   }
 
   const result = job.result || {};

@@ -738,12 +738,32 @@ export async function POST(req) {
       }
     }
 
-    // Create a pending job
-    const { data: job, error: insertError } = await supabase
+    // Create a pending job. Persist the generation inputs alongside it so
+    // the regenerate-scene route can recover them later — even when the
+    // client has lost lastGenPayload (e.g. an old saved_edit reopened from
+    // the dashboard). Falls back gracefully if the `inputs` column doesn't
+    // exist yet (column added in 20260425_add_jobs_inputs.sql).
+    const jobInputs = {
+      videoType: body?.videoType || 'ugc',
+      avatarUrl: body?.avatarUrl || null,
+      productImageUrl: body?.productImageUrl || null,
+      businessPhotos: Array.isArray(body?.businessPhotos) ? body.businessPhotos : [],
+    };
+    let { data: job, error: insertError } = await supabase
       .from('jobs')
-      .insert({ status: 'pending' })
+      .insert({ status: 'pending', inputs: jobInputs })
       .select('id')
       .single();
+    if (insertError && /inputs/i.test(insertError.message || '')) {
+      console.warn('[Agent] jobs.inputs column missing — inserting without it. Run the migration in supabase/migrations/ to enable jobId auto-recovery.');
+      const retry = await supabase
+        .from('jobs')
+        .insert({ status: 'pending' })
+        .select('id')
+        .single();
+      job = retry.data;
+      insertError = retry.error;
+    }
 
     if (insertError) {
       console.error('Job insert error:', insertError.message);
