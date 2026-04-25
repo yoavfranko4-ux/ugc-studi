@@ -475,6 +475,16 @@ export default function Home() {
         }
         setResult(restoredResult)
 
+        // Restore the regenerate-scene state. With these set, the regen
+        // card in the editor unhides itself — the existing UI is gated on
+        // `jobId && lastGenPayload`. Older saved_edits without these
+        // fields keep the prior behavior (regen card stays hidden).
+        if (d.job_id) setJobId(d.job_id)
+        if (d.last_gen_payload) setLastGenPayload(d.last_gen_payload)
+        if (d.regenerations_used && typeof d.regenerations_used === 'object') {
+          setRegenCounts(d.regenerations_used)
+        }
+
         // Check for autoExport flag
         if (params.get('autoExport') === 'true') {
           autoExportRef.current = true
@@ -1349,6 +1359,12 @@ export default function Home() {
         voice_id: result?.voiceId || voiceId,
         voice_gender: voiceGender,
         thumbnail: thumbnail,
+        // Persist the regenerate-scene payload so the editor (saved-edit
+        // restore path) can re-run any single scene later. Without these,
+        // the regen card stays hidden because jobId/lastGenPayload are null.
+        job_id: jobId,
+        last_gen_payload: lastGenPayload,
+        regenerations_used: regenCounts,
       }
       const { error } = await supabase.from('saved_edits').insert({
         user_id: user.id,
