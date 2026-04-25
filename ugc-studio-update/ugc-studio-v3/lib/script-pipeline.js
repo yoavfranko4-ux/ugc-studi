@@ -141,7 +141,6 @@ export function scenesHaveBrokenSentences(scenes) {
   if (!Array.isArray(scenes)) return false
   const chunks = scenes.map(s => (s?.subtitle || s?.voiceover || '').trim()).filter(Boolean)
   for (let i = 0; i < chunks.length; i++) {
-    if (i === 1) continue // Scene 2 is exempt — Beat 2 must open with "עד ש" / "ואז גיליתי", which the mid-sentence check would otherwise flag.
     const c = chunks[i]
     const last = c.replace(/["')\]\s]+$/, '').slice(-1)
     if (!/[.!?…]/.test(last)) return true
@@ -237,7 +236,7 @@ export function getDefaultScenes(productName, applicationArea, productDesc, voic
   return [
     {
       type: 'כאב',
-      nb_prompt: `ISRAELI STORY TIME SELFIE STYLE. Unedited still frame pulled from a handheld iPhone selfie video — feels like a TikTok "story time" / "haul day", NOT a commercial. Setting: real lived-in Israeli home interior (bedroom, living room, or kitchen), natural daylight from a window, lived-in not staged. Subtle Israeli props in the background: 1-2 shopping bags visible at the frame edges (Shufersal/שופרסל, Half-Hinam/חצי חינם, FOX, Castro), a coffee cup or Cofix-style takeaway cup, phone and keys casually on a surface, houseplants, a Hebrew book or magazine. Pose: selfie angle with the avatar's arm visible at the frame edge holding the iPhone, looking SLIGHTLY OFF-CAMERA as if telling a story to a friend, NOT staring directly into the lens. Casual unposed posture sitting on a bed, couch, or kitchen chair. Avatar showing a specific problem related to ${productDesc}, closed-lip frustrated expression with brow furrow, caught mid-thought / mid-sentence. iPhone 15 Pro front camera, slight wide-angle distortion typical of phone selfies, real unretouched skin with visible pores, flat washed-out color, handheld micro-shake, no airbrushing, no beauty filter, no LUT, no studio look. Correct human anatomy, exactly two arms, NEVER in a car`,
+      nb_prompt: `Unedited still frame pulled from a handheld iPhone selfie video, not a photograph. Avatar showing specific problem related to ${productDesc}, closed-lip frustrated expression with brow furrow, caught mid-thought. iPhone 15 Pro front camera, native wide lens, real unretouched skin with visible pores, soft window daylight, flat washed-out color, handheld micro-shake, framing slightly off-center, no airbrushing, no beauty filter, no LUT, looks like a real person on their front camera not a render, correct human anatomy, exactly two arms, NEVER show a phone, NEVER in a car`,
       subtitle: hook,
     },
     {
@@ -346,15 +345,7 @@ SENTENCE COMPLETENESS (CRITICAL):
 Each voiceover_sceneN must be a SELF-CONTAINED grammatically complete Hebrew sentence ending with . ? or !.
 
 NB_PROMPT INSTRUCTIONS — for each scene's still-frame prompt:
-- Scene 1: ISRAELI STORY TIME SELFIE STYLE — this is the "human moment" where authenticity matters most.
-    * Setting: a real lived-in Israeli home (bedroom, living room, or kitchen) with natural daylight from a window. Lived-in look, NOT staged. Pick ONE casual context: "just got home from haul shopping" / "morning routine in Israeli home" / "sitting on bed casually" / "in kitchen with coffee" / "living room couch story time".
-    * Subtle Israeli props in background (mention 2-3): shopping bags from Shufersal (שופרסל) / Half-Hinam (חצי חינם) / FOX / Castro / Renuar — choose 1-2, plus a coffee cup or Cofix-style takeaway cup, phone and keys casually on a surface, houseplants, a Hebrew book or magazine, Israeli 3-prong electrical outlets if a wall is visible.
-    * Pose: SELFIE angle with the avatar's arm visible at the frame edge, looking SLIGHTLY OFF-CAMERA as if telling a story to a friend — NOT staring directly into the lens. Casual unposed posture sitting on a bed, couch, or kitchen chair. Caught mid-thought / mid-sentence.
-    * Vibe: TikTok "story time" / "haul day" — like a real person sharing news with a close friend, NOT a commercial, NOT a brand video.
-    * Expression: pain-driven (frustrated / sad / tired), not exaggerated. Caught mid-thought.
-    * Camera: iPhone front camera selfie, slight wide-angle distortion, casual handheld feel.
-    * No product visible in scene 1.
-- Scenes 3, 4: include the avatar in a casual selfie style (iPhone front camera, real skin, soft natural light, handheld feel). Scene 4 stays in the SAME indoor location as scene 1.
+- Scenes 1, 3, 4: include the avatar in a casual selfie style (iPhone front camera, real skin, soft natural light, handheld feel). Scene 4 stays in the SAME indoor location as scene 1.
 - Scene 2: PRODUCT ONLY, no person, no hands. Close-up of ${productName} on a real surface with natural contact shadow.
 - Append PRODUCT_LOCK markers when the product is in frame (scenes 2, 3, 4): preserve exact product appearance from reference image, no morphing, no shape changing, no logo transformation.
 
@@ -368,7 +359,7 @@ Return ONLY valid JSON (no markdown):
   "scenes": [
     {
       "type": "כאב",
-      "nb_prompt": "still-frame prompt for scene 1 — ISRAELI STORY TIME SELFIE STYLE. Real lived-in Israeli home (bedroom/living room/kitchen) with natural window daylight. Subtle Israeli props in background (Shufersal/שופרסל, Half-Hinam/חצי חינם, FOX, or Castro shopping bag — pick 1-2; coffee cup; phone/keys; houseplants; Hebrew book). Avatar in SELFIE pose with arm visible at the frame edge, looking SLIGHTLY OFF-CAMERA as if telling a story to a friend (NOT staring into the lens), casual sitting posture on a bed/couch/kitchen chair, caught mid-thought, frustrated/sad expression specific to the pain. iPhone front camera selfie, slight wide-angle distortion, real skin, no airbrushing. NO product visible in scene 1. Vibe: TikTok story time, NOT a commercial. Anatomy correct, no car",
+      "nb_prompt": "still-frame prompt for scene 1 (avatar showing pain, no product visible, casual selfie iPhone style, real skin, soft natural light, anatomy correct, no phone, no car)",
       "subtitle": "same as voiceover_scene1"
     },
     {
@@ -417,20 +408,11 @@ Return ONLY valid JSON (no markdown):
     const retry = parseResponse(await callClaude(extra))
     if (retry) parsed = retry
   }
-  {
-    const MAX_ATTEMPTS = 3
-    let attempts = 0
-    while (parsed && scenesHaveBrokenSentences(parsed.scenes) && attempts < MAX_ATTEMPTS) {
-      attempts++
-      console.warn(`[generateScript] Broken sentences across scenes, regenerating (attempt ${attempts}/${MAX_ATTEMPTS})...`)
-      const extra = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES. REWRITE so each voiceover_sceneN is a SELF-CONTAINED grammatically complete Hebrew sentence ending with . ? or !.`
-      const retry = parseResponse(await callClaude(extra))
-      if (retry) parsed = retry
-      else break
-    }
-    if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
-      console.warn(`[generateScript] Broken sentences could not be fixed after ${MAX_ATTEMPTS} attempts — accepting current version.`)
-    }
+  if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
+    console.warn('[generateScript] Broken sentences across scenes, regenerating...')
+    const extra = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES. REWRITE so each voiceover_sceneN is a SELF-CONTAINED grammatically complete Hebrew sentence ending with . ? or !.`
+    const retry = parseResponse(await callClaude(extra))
+    if (retry) parsed = retry
   }
   if (parsed && sceneOneIsWeakOpener(parsed.voiceover_scene1)) {
     console.warn('[generateScript] Weak scene-1 opener, regenerating...')
@@ -646,20 +628,10 @@ Return ONLY valid JSON (no markdown):
     const retry = parseResponse(await callClaude(extra))
     if (retry) parsed = retry
   }
-  {
-    const MAX_ATTEMPTS = 3
-    let attempts = 0
-    while (parsed && scenesHaveBrokenSentences(parsed.scenes) && attempts < MAX_ATTEMPTS) {
-      attempts++
-      console.warn(`[generateBusinessScript] Broken sentences across scenes, regenerating (attempt ${attempts}/${MAX_ATTEMPTS})...`)
-      const extra = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES. REWRITE so each voiceover_sceneN is a SELF-CONTAINED Hebrew sentence ending with . ? or !.`
-      const retry = parseResponse(await callClaude(extra))
-      if (retry) parsed = retry
-      else break
-    }
-    if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
-      console.warn(`[generateBusinessScript] Broken sentences could not be fixed after ${MAX_ATTEMPTS} attempts — accepting current version.`)
-    }
+  if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
+    const extra = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES. REWRITE so each voiceover_sceneN is a SELF-CONTAINED Hebrew sentence ending with . ? or !.`
+    const retry = parseResponse(await callClaude(extra))
+    if (retry) parsed = retry
   }
   return parsed
 }
