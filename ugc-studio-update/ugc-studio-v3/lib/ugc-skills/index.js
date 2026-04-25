@@ -38,40 +38,33 @@ import {
 
 // Environment dictionaries live here (rather than in their own file) because
 // they're small and only consumed by the orchestrator.
+//
+// Scene 4 stays in the SAME everyday location as scene 1 (or in the car for
+// car products). The intent is "same person, same place, just LATER" — not
+// "now they're at a sunset restaurant". A new fancy scene reads as AI-invented;
+// continuity reads as one real moment.
 const BEAT_ENVIRONMENTS = {
   1: 'cozy, softly-lit personal space (bedroom, kitchen corner, bathroom vanity) — the intimate "problem" moment',
   2: 'clean but lived-in home surface — wooden nightstand, kitchen counter, or bedside table — natural daylight',
   3: 'same home setting as the previous scene, continuity of lighting and surfaces — subject is using or trying the product',
-  4: 'aspirational real-world context where the product\'s benefit plays out — outside or in a lifestyle setting'
+  4: 'same indoor location as before, satisfied expression, everyday natural setting, casual home atmosphere'
 };
 
-// Product-specific context overlays. Keys are lowercase product identifiers.
-// Extend as new hero products join the catalog.
-const PRODUCT_CONTEXTS = {
-  kippah: {
-    beat4: 'at a synagogue, family gathering, or Shabbat dinner — the kippah sits naturally on the back of the head',
-    outfit: 'semi-formal but casual — button-down or smart knit'
-  },
-  kipa: {
-    beat4: 'at a synagogue, family gathering, or Shabbat dinner — the kippah sits naturally on the back of the head',
-    outfit: 'semi-formal but casual — button-down or smart knit'
-  },
-  icecream: {
-    beat4: 'outdoors on a sunny afternoon — park bench or boardwalk, enjoying the treat'
-  },
-  teeth: {
-    beat4: 'brightly-lit bathroom or at a social gathering, showing off a confident white-teeth smile'
+// Scene 4 context — a continuation, not a new scene. Default: stay in the
+// scene-1 location (home/office/kitchen). Car-product override only.
+function getScene4Environment(productName) {
+  const name = String(productName || '').toLowerCase();
+  if (name.includes('רכב') || name.includes('car') || name.includes('אוטו')) {
+    return 'sitting in the driver seat of their car, calm satisfied moment after using the product, natural in-car lighting through the windshield';
   }
-};
+  return BEAT_ENVIRONMENTS[4];
+}
 
 function getEnvironmentForBeat(beat, productName, { scene4Context = false } = {}) {
-  const base = BEAT_ENVIRONMENTS[beat] || BEAT_ENVIRONMENTS[2];
-  const key = productName ? String(productName).toLowerCase().trim() : '';
-  const product = PRODUCT_CONTEXTS[key];
-  if (beat === 4 && product?.beat4 && scene4Context !== false) {
-    return `${base}. Context: ${product.beat4}.`;
+  if (beat === 4 && scene4Context !== false) {
+    return getScene4Environment(productName);
   }
-  return base;
+  return BEAT_ENVIRONMENTS[beat] || BEAT_ENVIRONMENTS[2];
 }
 
 // Orchestrator. Builds a single scene's NanoBanana prompt end-to-end.
