@@ -361,15 +361,6 @@ export default function Home() {
   const [rerecording, setRerecording] = useState(false)
   const [showRerecordPanel, setShowRerecordPanel] = useState(false)
   const [rerecordText, setRerecordText] = useState('')
-  // ===== Script approval flow (new two-phase generation) =====
-  // After "ייצור סרטון" the server returns 4 voiceover lines for review;
-  // the user edits / re-rolls / approves before the heavy media pipeline.
-  const [showScriptApproval, setShowScriptApproval] = useState(false)
-  const [pendingScripts, setPendingScripts] = useState(['', '', '', ''])
-  const [pendingJobId, setPendingJobId] = useState(null)
-  const [scriptRolling, setScriptRolling] = useState(false)  // re-roll in progress
-  const [scriptApproving, setScriptApproving] = useState(false)  // approve in progress
-  const [scriptError, setScriptError] = useState('')
   const videoRef = useRef(null)           // legacy single ref (still used in some places)
   const videoRefs = useRef([])            // one <video> element per clip — enables seamless back-to-back playback
   const audioRef = useRef(null)
@@ -882,58 +873,6 @@ export default function Home() {
     }
   }
 
-  // Build the full payload sent to /api/agent/script-only and (later) used
-  // to recover regenerate-scene context. Uploads avatar / product images
-  // when they're still data: URLs.
-  const buildAgentPayload = async () => {
-    const currentAvatarUrl = customAvatar || selectedAvatar?.url
-    let finalAvatarUrl = currentAvatarUrl
-    if (currentAvatarUrl && currentAvatarUrl.startsWith('data:')) {
-      addLog('מעלה אווטאר ל-fal.ai...')
-      const [header, base64] = currentAvatarUrl.split(',')
-      const mime = header.match(/:(.*?);/)[1]
-      const bc = atob(base64), ba = new Uint8Array(bc.length)
-      for (let i = 0; i < bc.length; i++) ba[i] = bc.charCodeAt(i)
-      const blob = new Blob([ba], { type: mime })
-      const fd = new FormData(); fd.append('file', blob, 'avatar.jpg'); fd.append('falKey', falKey)
-      const up = await fetch('/api/upload', { method: 'POST', body: fd })
-      const upData = await up.json()
-      finalAvatarUrl = upData.url || upData.access_url
-      addLog('אווטאר הועלה', 'ok')
-    }
-    let productImageUrl = null
-    if (mode === 'ugc' && productImage && productImage.startsWith('data:')) {
-      const [ph, pb] = productImage.split(',')
-      const pm = ph.match(/:(.*?);/)[1]
-      const pbc = atob(pb), pba = new Uint8Array(pbc.length)
-      for (let i = 0; i < pbc.length; i++) pba[i] = pbc.charCodeAt(i)
-      const pblob = new Blob([pba], { type: pm })
-      const pfd = new FormData(); pfd.append('file', pblob, 'product.jpg'); pfd.append('falKey', falKey)
-      addLog('מעלה תמונת מוצר...')
-      const pup = await fetch('/api/upload', { method: 'POST', body: pfd })
-      const pupData = await pup.json()
-      productImageUrl = pupData.url || pupData.access_url
-      addLog('מוצר הועלה', 'ok')
-    }
-    const bizPayload = mode === 'business' ? {
-      videoType: 'business',
-      businessName,
-      businessDescription,
-      businessPhotos,
-    } : {
-      videoType: 'ugc',
-      product: productDesc,
-      productName,
-      productDesc,
-      applicationArea,
-      storyDescription,
-      productImageUrl,
-    }
-    return { ...bizPayload, avatarUrl: finalAvatarUrl, falKey, elevenKey, voiceId, userId, productImageUrl }
-  }
-
-  // Phase 1: generate the 4 voiceover scripts only and open the approval
-  // modal. The user edits / re-rolls before kicking off media generation.
   const runAgent = async () => {
     const currentCheck = customAvatar || selectedAvatar?.url
     if (!currentCheck) return alert('בחר דמות')
@@ -943,143 +882,76 @@ export default function Home() {
       if (!businessName || !businessDescription) return alert('הכנס שם ותיאור עסק')
       if (businessPhotos.length === 0) return alert('העלה לפחות תמונה אחת של העסק')
     }
-    setLogs([])
-    setHasRerecorded(false); setShowRerecordPanel(false); setRerecordText('')
-    setScriptError('')
-    setScriptApproving(false)
-    setScriptRolling(true)
-    addLog('יוצר טקסט קריינות לאישור...')
+    setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' });
+    setHasRerecorded(false); setShowRerecordPanel(false); setRerecordText('');
+    addLog('Agent מתחיל לעבוד...')
     try {
-      const payload = await buildAgentPayload()
-      // Stash the payload so we can replay a re-roll without rebuilding.
-      setLastGenPayload({
-        videoType: payload.videoType,
-        avatarUrl: payload.avatarUrl,
-        productImageUrl: payload.productImageUrl,
-        businessPhotos: payload.businessPhotos || businessPhotos,
-        productName: payload.productName,
-        productDesc: payload.productDesc,
-        applicationArea: payload.applicationArea,
-        businessName: payload.businessName,
-        businessDescription: payload.businessDescription,
-        voiceId: payload.voiceId,
-      })
-      const res = await fetch('/api/agent/script-only', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || `script-only failed (${res.status})`)
+      const currentAvatarUrl = customAvatar || selectedAvatar?.url
+      addLog('Avatar: ' + (currentAvatarUrl ? currentAvatarUrl.slice(0,40) : 'NONE'), currentAvatarUrl ? '' : 'err')
+      let finalAvatarUrl = currentAvatarUrl
+      if (currentAvatarUrl && currentAvatarUrl.startsWith('data:')) {
+        addLog('מעלה אווטאר ל-fal.ai...')
+        const [header, base64] = avatarUrl.split(',')
+        const mime = header.match(/:(.*?);/)[1]
+        const bc = atob(base64), ba = new Uint8Array(bc.length)
+        for (let i = 0; i < bc.length; i++) ba[i] = bc.charCodeAt(i)
+        const blob = new Blob([ba], { type: mime })
+        const fd = new FormData(); fd.append('file', blob, 'avatar.jpg'); fd.append('falKey', falKey)
+        const up = await fetch('/api/upload', { method: 'POST', body: fd })
+        const upData = await up.json()
+        finalAvatarUrl = upData.url || upData.access_url
+        addLog('אווטאר הועלה', 'ok')
       }
-      const data = await res.json()
-      if (!data.jobId || !Array.isArray(data.scripts)) throw new Error('שגיאה בקבלת הטקסט מהשרת')
-      setPendingJobId(data.jobId)
-      setPendingScripts([
-        data.scripts[0] || '',
-        data.scripts[1] || '',
-        data.scripts[2] || '',
-        data.scripts[3] || '',
-      ])
-      setShowScriptApproval(true)
-      addLog('טקסט הקריינות מוכן לאישור', 'ok')
-    } catch (e) {
-      setScriptError(e.message || String(e))
-      addLog(e.message, 'err')
-      alert('שגיאה: ' + e.message)
-    } finally {
-      setScriptRolling(false)
-    }
-  }
-
-  // Re-roll: ask the server for a fresh set of 4 scripts using the same
-  // form inputs. Replaces the current modal contents.
-  const rerollScripts = async () => {
-    if (!lastGenPayload) return
-    setScriptError('')
-    setScriptRolling(true)
-    addLog('יוצר טקסט קריינות מחדש...')
-    try {
-      const res = await fetch('/api/agent/script-only', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videoType: lastGenPayload.videoType,
-          avatarUrl: lastGenPayload.avatarUrl,
-          productImageUrl: lastGenPayload.productImageUrl,
-          productName: lastGenPayload.productName,
-          productDesc: lastGenPayload.productDesc,
-          applicationArea: lastGenPayload.applicationArea,
-          businessName: lastGenPayload.businessName,
-          businessDescription: lastGenPayload.businessDescription,
-          businessPhotos: lastGenPayload.businessPhotos,
-          voiceId: lastGenPayload.voiceId,
-          userId,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || `script-only failed (${res.status})`)
+      addLog('שולח בקשה ל-Agent...'); setAgentStatus({ script: 'active' })
+      let productImageUrl = null
+      if (mode === 'ugc' && productImage && productImage.startsWith('data:')) {
+        const [ph, pb] = productImage.split(',')
+        const pm = ph.match(/:(.*?);/)[1]
+        const pbc = atob(pb), pba = new Uint8Array(pbc.length)
+        for (let i = 0; i < pbc.length; i++) pba[i] = pbc.charCodeAt(i)
+        const pblob = new Blob([pba], { type: pm })
+        const pfd = new FormData(); pfd.append('file', pblob, 'product.jpg'); pfd.append('falKey', falKey)
+        addLog('מעלה תמונת מוצר...')
+        const pup = await fetch('/api/upload', { method: 'POST', body: pfd })
+        const pupData = await pup.json()
+        productImageUrl = pupData.url || pupData.access_url
+        addLog('מוצר הועלה', 'ok')
       }
-      const data = await res.json()
-      setPendingJobId(data.jobId)
-      setPendingScripts([
-        data.scripts[0] || '',
-        data.scripts[1] || '',
-        data.scripts[2] || '',
-        data.scripts[3] || '',
-      ])
-      addLog('טקסט קריינות חדש מוכן', 'ok')
-    } catch (e) {
-      setScriptError(e.message || String(e))
-      addLog(e.message, 'err')
-    } finally {
-      setScriptRolling(false)
-    }
-  }
-
-  // Phase 2: user approved the 4 scripts. Hand off to approve-and-generate
-  // and start polling status. Closes the modal and switches to the
-  // generating step.
-  const submitScriptApproval = async () => {
-    if (!pendingJobId) return
-    if (pendingScripts.some(s => !s || !s.trim())) {
-      setScriptError('כל ארבע הסצנות חייבות טקסט')
-      return
-    }
-    setScriptApproving(true)
-    setScriptError('')
-    try {
-      const res = await fetch('/api/agent/approve-and-generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: pendingJobId, approvedScripts: pendingScripts }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || `approve failed (${res.status})`)
+      // In business mode the businessPhotos are already data URLs — send them directly
+      // (the agent route accepts data: URLs via the same prepareUrl path)
+      const bizPayload = mode === 'business' ? {
+        videoType: 'business',
+        businessName,
+        businessDescription,
+        businessPhotos,
+      } : {
+        videoType: 'ugc',
+        product: productDesc,
+        productName,
+        applicationArea,
+        storyDescription,
+        productImageUrl,
       }
-      const data = await res.json()
-      const jobId = data.jobId || pendingJobId
-      setShowScriptApproval(false)
-      setStep('generating')
-      setAgentStatus({ script: 'done', frames: 'active' })
+      const agentRes = await fetch('/api/agent', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, falKey, elevenKey, voiceId, userId })
+      })
+      if (!agentRes.ok) throw new Error('Agent failed')
+      const { jobId } = await agentRes.json()
+      if (!jobId) throw new Error('No jobId returned')
+      // Persist jobId + the reference URLs we just used so the
+      // regenerate-scene endpoint can replay any one scene without the
+      // user re-entering the form.
       setJobId(jobId)
+      setLastGenPayload({
+        videoType: mode === 'business' ? 'business' : 'ugc',
+        avatarUrl: finalAvatarUrl,
+        productImageUrl,
+        businessPhotos,
+      })
       setRegenCounts({})
-      addLog(`טקסט אושר — מתחיל יצירת סרטון (Job ${jobId.slice(0, 8)}...)`, 'ok')
-      await pollAndApply(jobId)
-    } catch (e) {
-      setScriptError(e.message || String(e))
-      addLog(e.message, 'err')
-      alert('שגיאה: ' + e.message)
-    } finally {
-      setScriptApproving(false)
-    }
-  }
+      addLog(`Job ${jobId.slice(0, 8)}... נוצר, ממתין לתוצאות...`)
 
-  // Polls /api/agent/status until the job is done or errored, then mirrors
-  // the legacy onResult logic: writes audio blob URL, subtitles, sets the
-  // editor state. Extracted so submitScriptApproval can reuse it.
-  const pollAndApply = async (jobId) => {
-    try {
       const steps = ['script', 'frames', 'videos', 'voice']
       let stepIdx = 0
       const progressInterval = setInterval(() => {
@@ -2351,74 +2223,6 @@ export default function Home() {
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-
-      {showScriptApproval && (
-        <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20, overflowY: 'auto' }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: 580, width: '100%', background: '#111010', border: '1px solid rgba(255,0,128,0.3)', borderRadius: 16, padding: 28, direction: 'rtl', fontFamily: 'Heebo,sans-serif', boxShadow: '0 30px 80px -20px rgba(255,0,128,0.4)', maxHeight: '92vh', overflowY: 'auto' }}
-          >
-            <div style={{ fontSize: 22, fontWeight: 900, color: '#F5F5F4', marginBottom: 6, letterSpacing: '-0.02em' }}>אישור הטקסט לקריינות</div>
-            <p style={{ color: 'rgba(245,245,244,0.6)', fontSize: 14, lineHeight: 1.55, marginBottom: 4 }}>ערוך אם צריך, ואז אשר ליצירת הסרטון</p>
-            <p style={{ color: 'rgba(245,245,244,0.4)', fontSize: 12, marginBottom: 20 }}>יצירת הסרטון תיקח כ-3 דקות</p>
-
-            {[
-              { label: 'סצנה 1 (כאב)', idx: 0 },
-              { label: 'סצנה 2 (גילוי)', idx: 1 },
-              { label: 'סצנה 3 (יתרונות)', idx: 2 },
-              { label: 'סצנה 4 (CTA)', idx: 3 },
-            ].map(({ label, idx }) => (
-              <div key={idx} style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#FF0080', marginBottom: 6, letterSpacing: 0.5 }}>{label}</div>
-                <textarea
-                  value={pendingScripts[idx] || ''}
-                  onChange={(e) => {
-                    const next = [...pendingScripts]
-                    next[idx] = e.target.value
-                    setPendingScripts(next)
-                  }}
-                  disabled={scriptRolling || scriptApproving}
-                  rows={idx === 2 ? 3 : 2}
-                  style={{
-                    width: '100%', resize: 'vertical', minHeight: 52,
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: 10, padding: '10px 12px',
-                    color: '#F5F5F4', fontSize: 14, lineHeight: 1.5,
-                    direction: 'rtl', fontFamily: 'Heebo,sans-serif',
-                    outline: 'none',
-                  }}
-                />
-              </div>
-            ))}
-
-            {scriptError && (
-              <div style={{ marginBottom: 14, padding: '10px 12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 10, color: '#fca5a5', fontSize: 13 }}>
-                {scriptError}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
-              <button
-                onClick={rerollScripts}
-                disabled={scriptRolling || scriptApproving}
-                style={{ padding: '12px 18px', borderRadius: 8, background: 'transparent', border: '1px solid rgba(245,245,244,0.18)', color: '#F5F5F4', fontSize: 14, fontWeight: 600, cursor: (scriptRolling || scriptApproving) ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: (scriptRolling || scriptApproving) ? 0.55 : 1 }}
-              >
-                {scriptRolling ? 'יוצר...' : '✏️ צור טקסט מחדש'}
-              </button>
-              <button
-                onClick={submitScriptApproval}
-                disabled={scriptRolling || scriptApproving}
-                style={{ padding: '12px 22px', borderRadius: 8, background: '#FF0080', border: 'none', color: '#0A0908', fontSize: 14, fontWeight: 800, cursor: (scriptRolling || scriptApproving) ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: (scriptRolling || scriptApproving) ? 0.55 : 1 }}
-              >
-                {scriptApproving ? 'שולח...' : '✅ אשר ויצור סרטון'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {upgradeOpen && (
         <div
