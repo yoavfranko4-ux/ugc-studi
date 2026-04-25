@@ -2,6 +2,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 
+// Build marker — bumped each commit. If you don't see this exact string in
+// your browser console at /studio load, the deployed bundle is stale.
+const STUDIO_BUILD_MARKER = 'STUDIO_BUILD_MARKER_2026-04-26_v6'
+if (typeof window !== 'undefined') {
+  console.log('%c[' + STUDIO_BUILD_MARKER + ']', 'background:#a855f7;color:#fff;padding:2px 6px;border-radius:3px;font-weight:bold')
+}
+
 // === Subtitle Styles ===
 const SUBTITLE_STYLES = [
   { id: 'classic', label: 'Classic', desc: 'לבן עם צל שחור' },
