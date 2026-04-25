@@ -417,21 +417,8 @@ Return ONLY valid JSON (no markdown):
     const retry = parseResponse(await callClaude(extra))
     if (retry) parsed = retry
   }
-  {
-    const MAX_ATTEMPTS = 3
-    let attempts = 0
-    while (parsed && scenesHaveBrokenSentences(parsed.scenes) && attempts < MAX_ATTEMPTS) {
-      attempts++
-      console.warn(`[generateScript] Broken sentences across scenes, regenerating (attempt ${attempts}/${MAX_ATTEMPTS})...`)
-      const extra = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES. REWRITE so each voiceover_sceneN is a SELF-CONTAINED grammatically complete Hebrew sentence ending with . ? or !.`
-      const retry = parseResponse(await callClaude(extra))
-      if (retry) parsed = retry
-      else break
-    }
-    if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
-      console.warn(`[generateScript] Broken sentences could not be fixed after ${MAX_ATTEMPTS} attempts — accepting current version.`)
-    }
-  }
+  // Broken-sentences validator disabled — too aggressive, was burning Anthropic
+  // tokens and rate-limiting the pipeline. Re-enable later with smarter logic.
   if (parsed && sceneOneIsWeakOpener(parsed.voiceover_scene1)) {
     console.warn('[generateScript] Weak scene-1 opener, regenerating...')
     const extra = `\n\nPREVIOUS ATTEMPT OPENED SCENE 1 WITH A BARE ACTION VERB. REWRITE voiceover_scene1 to open with an EMOTIONAL STATE or RECURRING SITUATION. The first word must NOT be ניסיתי/חיפשתי/רציתי. Keep the exact pre-set hook "${hook}".`
@@ -646,20 +633,7 @@ Return ONLY valid JSON (no markdown):
     const retry = parseResponse(await callClaude(extra))
     if (retry) parsed = retry
   }
-  {
-    const MAX_ATTEMPTS = 3
-    let attempts = 0
-    while (parsed && scenesHaveBrokenSentences(parsed.scenes) && attempts < MAX_ATTEMPTS) {
-      attempts++
-      console.warn(`[generateBusinessScript] Broken sentences across scenes, regenerating (attempt ${attempts}/${MAX_ATTEMPTS})...`)
-      const extra = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES. REWRITE so each voiceover_sceneN is a SELF-CONTAINED Hebrew sentence ending with . ? or !.`
-      const retry = parseResponse(await callClaude(extra))
-      if (retry) parsed = retry
-      else break
-    }
-    if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
-      console.warn(`[generateBusinessScript] Broken sentences could not be fixed after ${MAX_ATTEMPTS} attempts — accepting current version.`)
-    }
-  }
+  // Broken-sentences validator disabled — too aggressive, was burning Anthropic
+  // tokens and rate-limiting the pipeline. Re-enable later with smarter logic.
   return parsed
 }
