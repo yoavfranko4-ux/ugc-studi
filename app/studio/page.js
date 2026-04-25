@@ -196,8 +196,13 @@ export default function Home() {
   useEffect(() => {
     const checkUser = async () => {
       if (!supabase) return
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) window.location.replace('/login')
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (error) { console.warn('[studio] supabase.auth.getUser error — staying on page', error); return }
+        if (!data?.user) window.location.replace('/login')
+      } catch (e) {
+        console.warn('[studio] supabase.auth.getUser threw — staying on page', e)
+      }
     }
     checkUser()
   }, [])
