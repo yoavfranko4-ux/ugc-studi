@@ -1896,56 +1896,69 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Regenerate single scene — only shown for fresh generations where
-              we have the jobId + reference payload. Hidden in the restore-
-              from-saved-edit path, since regenerating a saved edit doesn't
-              make sense (the user already tweaked it). */}
-          {jobId && lastGenPayload && (
-            <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
-              <div style={{ ...secTitle, marginBottom: 8, fontSize: 12 }}>יצירה מחדש של סצנה בודדת</div>
-              <div style={{ fontSize: 10, color: '#52525b', marginBottom: 8, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
-                אם סצנה אחת יצאה לא טוב (לדוגמה המוצר השתנה באמצע), אפשר לייצר אותה מחדש בלי לפגוע בשאר הסרטון. עד 3 יצירות מחדש לכל סצנה.
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-                {[1, 2, 3, 4].map(n => {
-                  const used = regenCounts[String(n)] || 0
-                  const atLimit = used >= 3
-                  const isThisLoading = regenLoading === n
-                  const isAnyLoading = regenLoading !== null
-                  return (
-                    <button
-                      key={n}
-                      onClick={() => regenerateScene(n)}
-                      disabled={isAnyLoading || atLimit}
-                      style={{
-                        background: isThisLoading ? 'rgba(255,0,128,0.2)' : 'rgba(255,255,255,0.03)',
-                        border: BORDER,
-                        borderRadius: 6,
-                        padding: '8px 4px',
-                        textAlign: 'center',
-                        fontSize: 10,
-                        color: atLimit ? '#27272a' : (isThisLoading ? '#FF0080' : '#a1a1aa'),
-                        cursor: (isAnyLoading || atLimit) ? 'not-allowed' : 'pointer',
-                        opacity: (isAnyLoading && !isThisLoading) ? 0.4 : 1,
-                        direction: 'rtl',
-                        fontFamily: 'Heebo,sans-serif',
-                      }}
-                    >
-                      <div style={{ fontWeight: 600, marginBottom: 2 }}>סצנה {n}</div>
-                      <div style={{ fontSize: 9 }}>
-                        {isThisLoading ? 'מייצר...' : atLimit ? 'הגעת למקסימום' : `🔄 צור מחדש${used ? ` (${used}/3)` : ''}`}
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-              {regenMsg && (
-                <div style={{ marginTop: 8, fontSize: 10, color: regenMsg.includes('✓') ? '#22c55e' : '#ef4444', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
-                  {regenMsg}
+          {/* Regenerate single scene — always rendered in the editor. For
+              fresh generations and freshly-saved edits, jobId + lastGenPayload
+              are populated (state on first run, restored from saved_edits.
+              edit_data on reload) so the buttons are fully active. For OLDER
+              saved edits created before those fields started being persisted,
+              the buttons render disabled with a helpful Hebrew nudge to
+              re-save the edit so regen can be enabled. */}
+          {(() => {
+            const canRegen = Boolean(jobId && lastGenPayload)
+            return (
+              <div style={{ ...cardS, marginBottom: 0, padding: 16 }}>
+                <div style={{ ...secTitle, marginBottom: 8, fontSize: 12 }}>🔄 יצירה מחדש של סצנה</div>
+                <div style={{ fontSize: 10, color: '#52525b', marginBottom: 8, direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
+                  אם סצנה אחת יצאה לא טוב, אפשר לייצר אותה מחדש בלי לפגוע בשאר הסרטון. עד 3 יצירות מחדש לכל סצנה.
                 </div>
-              )}
-            </div>
-          )}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                  {[1, 2, 3, 4].map(n => {
+                    const used = regenCounts[String(n)] || 0
+                    const atLimit = used >= 3
+                    const isThisLoading = regenLoading === n
+                    const isAnyLoading = regenLoading !== null
+                    const disabled = !canRegen || isAnyLoading || atLimit
+                    return (
+                      <button
+                        key={n}
+                        onClick={() => regenerateScene(n)}
+                        disabled={disabled}
+                        title={!canRegen ? 'שמור את העריכה ופתח אותה מחדש כדי להפעיל יצירה מחדש' : ''}
+                        style={{
+                          background: isThisLoading ? 'rgba(255,0,128,0.2)' : 'rgba(255,255,255,0.03)',
+                          border: BORDER,
+                          borderRadius: 6,
+                          padding: '8px 4px',
+                          textAlign: 'center',
+                          fontSize: 10,
+                          color: (atLimit || !canRegen) ? '#27272a' : (isThisLoading ? '#FF0080' : '#a1a1aa'),
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          opacity: (isAnyLoading && !isThisLoading) ? 0.4 : 1,
+                          direction: 'rtl',
+                          fontFamily: 'Heebo,sans-serif',
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, marginBottom: 2 }}>סצנה {n}</div>
+                        <div style={{ fontSize: 9 }}>
+                          {isThisLoading ? 'מייצר...' : atLimit ? 'הגעת למקסימום' : `🔄 צור מחדש${used ? ` (${used}/3)` : ''}`}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                {!canRegen && (
+                  <div style={{ marginTop: 8, fontSize: 10, color: '#a1a1aa', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
+                    כדי להפעיל יצירה מחדש בעריכה ישנה — לחץ "שמור עריכה" שוב ופתח את העריכה מהדשבורד.
+                  </div>
+                )}
+                {regenMsg && (
+                  <div style={{ marginTop: 8, fontSize: 10, color: regenMsg.includes('✓') ? '#22c55e' : '#ef4444', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
+                    {regenMsg}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
 
         {/* Center: Full-width Preview */}
