@@ -298,9 +298,20 @@ export default function Home() {
   }
 
   const runAgent = async () => {
+    console.log('[runAgent] CLICKED', {
+      customAvatar: !!customAvatar,
+      selectedAvatar: selectedAvatar?.url || null,
+      productName,
+      productDesc,
+      applicationArea,
+      productImage: !!productImage,
+      businessType,
+      step,
+    })
     const currentCheck = customAvatar || selectedAvatar?.url
-    if (!currentCheck) return alert('בחר דמות')
-    if (!productName || !productDesc) return alert('הכנס שם ותיאור מוצר')
+    if (!currentCheck) { console.warn('[runAgent] EARLY RETURN: no avatar'); return alert('בחר דמות') }
+    if (!productName || !productDesc) { console.warn('[runAgent] EARLY RETURN: missing productName/productDesc', { productName, productDesc }); return alert('הכנס שם ותיאור מוצר') }
+    console.log('[runAgent] passed guards, entering generating step')
     setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' }); setHasRerecorded(false); setEditingSceneIdx(null); setEditBuffer(''); setShowRerecordPanel(false); setRerecordText(''); addLog('Agent מתחיל לעבוד...')
     try {
       const currentAvatarUrl = customAvatar || selectedAvatar?.url
