@@ -44,11 +44,33 @@ import {
 // "now they're at a sunset restaurant". A new fancy scene reads as AI-invented;
 // continuity reads as one real moment.
 const BEAT_ENVIRONMENTS = {
-  1: 'cozy, softly-lit personal space (bedroom, kitchen corner, bathroom vanity) — the intimate "problem" moment',
+  1: 'real lived-in Israeli home interior, casual personal space (bedroom, living room, or kitchen) — the intimate "problem" moment captured as an Israeli Story Time selfie',
   2: 'clean but lived-in home surface — wooden nightstand, kitchen counter, or bedside table — natural daylight',
   3: 'same home setting as the previous scene, continuity of lighting and surfaces — subject is using or trying the product',
   4: 'same indoor location as before, satisfied expression, everyday natural setting, casual home atmosphere'
 };
+
+// Scene 1 "moods" — variations on the Israeli Story Time selfie setting so
+// repeated generations for the same product don't feel identical. The
+// orchestrator picks one at random whenever beat 1 is rendered.
+export const SCENE_1_MOODS = [
+  'just got home from shopping (Israeli haul) — Israeli grocery and fashion bags casually placed near the avatar (Shufersal/שופרסל, Half-Hinam/חצי חינם, FOX, Castro), unwinding on the bed or couch',
+  'morning routine in Israeli home — bedroom or bathroom corner, soft morning daylight, hair slightly unkempt, mid-routine moment',
+  'sitting on the bed casually — slightly messy bed with a couple of pillows behind the avatar, soft daylight through a bedroom window, phone and keys on the nightstand',
+  'in the kitchen with coffee — coffee mug or Cofix-style takeaway cup on the counter, kitchen cabinets and a Hebrew book or magazine in the background, mid-morning light',
+  'living room couch story time — sitting on a casual fabric couch with houseplants, a Hebrew book and Israeli 3-prong outlets on the wall behind, daylight from a window'
+];
+
+export function getRandomScene1Mood() {
+  return SCENE_1_MOODS[Math.floor(Math.random() * SCENE_1_MOODS.length)];
+}
+
+// Scene 1 — Israeli Story Time selfie. Built fresh on every call so the
+// random mood changes between generations.
+function getScene1Environment() {
+  const mood = getRandomScene1Mood();
+  return `Israeli Story Time selfie — ${mood}. Real lived-in Israeli home interior, natural daylight from a window, lived-in look (NOT staged). Subtle Israeli realism props in background: 1-2 shopping bags visible at the frame edges (Shufersal/שופרסל, Half-Hinam/חצי חינם, Rami Levy/רמי לוי, FOX, Castro, or Renuar — pick 1-2 only), a coffee cup or Cofix-style takeaway cup, phone and keys casually placed on a surface, houseplants, a Hebrew book or magazine, Israeli 3-prong electrical outlets where a wall is visible. Pose: SELFIE angle with the avatar's arm visible at the frame edge holding the iPhone, looking SLIGHTLY OFF-CAMERA as if telling a story to a friend (NOT staring directly into the lens). Casual unposed posture sitting on a bed, couch, or kitchen chair, caught mid-thought / mid-sentence. Vibe: TikTok "story time" / "haul day" — feels like a real person sharing news with a close friend, NOT a commercial, NOT a brand video.`;
+}
 
 // Scene 4 context — a continuation, not a new scene. Default: stay in the
 // scene-1 location (home/office/kitchen). Car-product override only.
@@ -61,6 +83,7 @@ function getScene4Environment(productName) {
 }
 
 function getEnvironmentForBeat(beat, productName, { scene4Context = false } = {}) {
+  if (beat === 1) return getScene1Environment();
   if (beat === 4 && scene4Context !== false) {
     return getScene4Environment(productName);
   }
