@@ -1,1642 +1,263 @@
-import Anthropic from '@anthropic-ai/sdk'
+// POST /api/agent — legacy one-shot endpoint.
+//
+// The new client flow uses /api/agent/script-only + /api/agent/approve-and-
+// generate so the user can review the Hebrew script before media generation.
+// This legacy endpoint is kept for backwards compatibility with any external
+// caller / automation that POSTed the old single-shot body. It auto-approves
+// Claude's output (no user gate) and chains the same media pipeline.
+
 import { fal } from '@fal-ai/client'
 import { supabase } from '../../../lib/supabase'
 import { remainingVideos } from '../../../lib/subscription-limits.js'
-import { prepareHebrewForTTS, remapWordTimestamps } from '../../../lib/hebrew-tts.js'
-import { execFile, execSync } from 'child_process'
-import { promisify } from 'util'
-import { writeFile, readFile, mkdir, rm } from 'fs/promises'
-import fs from 'fs'
-import path from 'path'
-import { randomUUID } from 'crypto'
-import { createRequire } from 'module'
 import { prewarmVideos } from '../../../lib/video-cache.js'
-import { generateNBFrame, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
-
-const require = createRequire(import.meta.url)
-let ffmpegStaticPath = null
-try { ffmpegStaticPath = require('ffmpeg-static') } catch {}
-const execFileAsync = promisify(execFile)
-
-// Resolve the system ffprobe binary (sibling to ffmpeg on Railway/nixpacks).
-// Used to decode-test Kling outputs before handing them to the editor.
-function resolveFfprobePath() {
-  try {
-    const w = execSync('which ffprobe', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
-    if (w && fs.existsSync(w)) return w
-  } catch {}
-  for (const p of ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe', '/run/current-system/sw/bin/ffprobe', '/root/.nix-profile/bin/ffprobe']) {
-    if (fs.existsSync(p)) return p
-  }
-  try {
-    const found = execSync("find /nix/store -maxdepth 4 -type f -name ffprobe 2>/dev/null | head -1", { encoding: 'utf8', shell: '/bin/sh' }).trim()
-    if (found && fs.existsSync(found)) return found
-  } catch {}
-  return null
-}
-const ffprobePath = resolveFfprobePath()
-console.log('[Agent] ffprobe binary:', ffprobePath || '(none — Kling output validation will skip ffprobe step)')
-
-export const maxDuration = 300;
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
-const FAL_KEY = process.env.FAL_API_KEY;
-if (!FAL_KEY) console.warn('⚠ FAL_API_KEY is not set — NanoBanana frames will fail');
-else console.log('FAL_API_KEY loaded:', FAL_KEY.slice(0, 8) + '...');
-fal.config({ credentials: FAL_KEY });
-const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
-const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW';
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-
-const SCENE_DURATIONS = SHARED_SCENE_DURATIONS;
-
-// generateNBFrame + pipeline constants now live in lib/agent-pipeline.js so
-// the regenerate-scene endpoint can reuse them without duplication.
-
-// Join 4 scene voiceovers into ONE continuous paragraph for ElevenLabs.
-// We strip trailing sentence terminators on all-but-last chunks and glue with
-// a single space, so ElevenLabs reads the entire script as one flowing
-// paragraph rather than inserting long pauses at each scene boundary.
-function joinVoiceoverChunks(chunks) {
-  const cleaned = chunks
-    .map(c => (c || '').trim())
-    .filter(Boolean);
-  if (cleaned.length === 0) return '';
-  const last = cleaned.length - 1;
-  const stripped = cleaned.map((c, i) => {
-    if (i === last) return c;
-    // Strip trailing . ! ? … and whitespace so the next chunk flows on naturally.
-    return c.replace(/[.!?…\s]+$/u, '');
-  });
-  let joined = stripped.join(' ').replace(/\s+/g, ' ').trim();
-  // Guarantee exactly one terminal period.
-  joined = joined.replace(/[.!?…\s]+$/u, '');
-  if (joined) joined += '.';
-  return joined;
-}
-
-async function generateVoice(text, voiceId) {
-  if (!ELEVEN_KEY || !text) return null;
-  const voice = voiceId || ELEVEN_VOICE;
-  // Hebrew preprocessing — produce TWO versions of the text:
-  //   ttsText: Latin-transliterated form sent to ElevenLabs (so stubborn
-  //     words like כיפה come out pronounced correctly as "kipa").
-  //   subtitleText: original Hebrew form, used for subtitles and for the
-  //     `word` field of the returned wordTimestamps.
-  const { ttsText, subtitleText } = prepareHebrewForTTS(text);
-  try {
-    // Use with-timestamps endpoint for word-level alignment data.
-    // stability 0.7 / style 0.0 — higher stability gives more consistent
-    // Hebrew consonant pronunciation; style 0 removes the expressive drift
-    // that was softening hard פ/כ/ב consonants (e.g. "כִּיפָּה" read as "kifa").
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}/with-timestamps?output_format=mp3_44100_128`, {
-      method: 'POST',
-      headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: ttsText, model_id: 'eleven_v3', voice_settings: { stability: 0.7, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true } })
-    });
-    if (!res.ok) { console.error('ElevenLabs failed:', await res.text()); return null; }
-    const json = await res.json();
-    const audioBuffer = Buffer.from(json.audio_base64, 'base64');
-    const base64 = json.audio_base64;
-    const durationSec = (audioBuffer.length * 8) / (128 * 1000);
-    console.log(`[Voice] Audio size: ${(audioBuffer.length / 1024).toFixed(0)}KB, est duration: ${durationSec.toFixed(1)}s`);
-
-    // Build word-level timestamps from character alignment. The `word`
-    // values built here come from the TTS text (so they may contain Latin
-    // like "kipa"); we remap them back to the Hebrew subtitle form below.
-    let wordTimestamps = null;
-    if (json.alignment) {
-      const { characters, character_start_times_seconds, character_end_times_seconds } = json.alignment;
-      wordTimestamps = [];
-      let wordStart = null;
-      let wordChars = '';
-      for (let i = 0; i < characters.length; i++) {
-        const ch = characters[i];
-        if (ch === ' ' || ch === '\n' || ch === '\t') {
-          if (wordChars.trim()) {
-            wordTimestamps.push({ word: wordChars.trim(), start: wordStart, end: character_end_times_seconds[i - 1] });
-          }
-          wordChars = '';
-          wordStart = null;
-        } else {
-          if (wordStart === null) wordStart = character_start_times_seconds[i];
-          wordChars += ch;
-        }
-      }
-      if (wordChars.trim()) {
-        wordTimestamps.push({ word: wordChars.trim(), start: wordStart, end: character_end_times_seconds[characters.length - 1] });
-      }
-      // Remap the Latin TTS tokens back to the original Hebrew subtitle
-      // words (1:1 by index — prepareHebrewForTTS guarantees the same
-      // whitespace-token count between the two forms).
-      wordTimestamps = remapWordTimestamps(wordTimestamps, subtitleText);
-      console.log(`[Voice] Word timestamps: ${wordTimestamps.length} words, first:`, wordTimestamps[0], 'last:', wordTimestamps[wordTimestamps.length - 1]);
-    }
-
-    return { base64, duration: Math.round(durationSec * 100) / 100, wordTimestamps };
-  } catch (e) { console.error('Voice error:', e.message); return null; }
-}
-
-// Detect feminine markers in text for a male voice, or masculine markers for a female voice.
-// Used to flag gender-mismatched scripts from Claude so we can regenerate.
-const FEMALE_ONLY_PATTERNS = [
-  /\bמביכה\b/, /\bמובכת\b/, /\bבטוחה\b/, /\bחייבת\b/, /\bמחפשת\b/,
-  /\bמוכנה\b/, /\bמשתמשת\b/, /\bהייתי מובכת\b/, /\bהייתי מביכה\b/,
-  /\bמרוצה\s+אני\b/, /\bעייפה\b/, /\bשמחה\b/, /\bעצובה\b/, /\bכועסת\b/
-];
-const MALE_ONLY_PATTERNS = [
-  /\bמובך\b/, /\bבטוח\b/, /\bחייב\b/, /\bמחפש\b/,
-  /\bמוכן\b/, /\bמשתמש\b/, /\bהייתי מובך\b/,
-  /\bעייף\b/, /\bשמח\b/, /\bעצוב\b/, /\bכועס\b/
-];
-function scriptGenderMismatch(text, voiceGender) {
-  if (!text) return false;
-  if (voiceGender === 'male') return FEMALE_ONLY_PATTERNS.some(re => re.test(text));
-  if (voiceGender === 'female') return MALE_ONLY_PATTERNS.some(re => re.test(text));
-  return false;
-}
-
-// Words that indicate a scene voiceover is a mid-sentence continuation rather
-// than a complete, self-contained clause. If scene N starts with one of these
-// it grammatically depends on scene N-1, which produces the "לא יכולתי השיניים
-// / שלי" broken-subtitle effect.
-const MID_SENTENCE_STARTERS = new Set([
-  'שלי', 'שלך', 'שלו', 'שלה', 'שלנו', 'שלכם', 'שלהם',
-  'ואז', 'אבל', 'כי', 'אז', 'עד', 'וגם', 'גם',
-  'ו', 'ב', 'ל', 'מ', 'כ',
-  'אותי', 'אותך', 'אותו', 'אותה', 'אותנו', 'אותם',
-  'הזה', 'הזו', 'האלה', 'ההוא', 'ההיא'
-]);
-// Detect a weak, ad-speak scene-1 opener: a bare action verb (ניסיתי / חיפשתי /
-// רציתי) as the FIRST word with no emotional or situational framing. Also flags
-// the specific generic phrase we used to fall back to when no category matched.
-// We allow those verbs anywhere else — the restriction is only "first word".
-const BAD_SCENE1_FIRST_WORDS = new Set(['ניסיתי', 'חיפשתי', 'רציתי']);
-function sceneOneIsWeakOpener(sceneOneText) {
-  if (!sceneOneText) return false;
-  const trimmed = sceneOneText.trim().replace(/^["'״'(\[]+/, '');
-  const firstWord = trimmed.split(/\s+/)[0] || '';
-  if (BAD_SCENE1_FIRST_WORDS.has(firstWord)) return true;
-  // The generic legacy hook phrase — reject outright if Claude echoed it.
-  if (/ניסיתי המון דברים/.test(trimmed)) return true;
-  return false;
-}
-
-// Detect borrowed/transliterated English words that sound robotic in Hebrew TTS
-// and that the Claude prompt explicitly forbids. Any match forces a regen.
-const FOREIGN_BORROWED_WORDS = [
-  /\bסטיילית\b/u, /\bסטיילי\b/u,
-  /\bטרנדי\b/u, /\bטרנדית\b/u,
-  /\bקולית\b/u, /\bקולי\b/u,
-  /\bסאפר\b/u,
-  /\bאאוטפיט\b/u,
-];
-function scriptHasForeignWords(fullText) {
-  if (!fullText) return false;
-  return FOREIGN_BORROWED_WORDS.some(re => re.test(fullText));
-}
-
-// Enforce the strict 4-beat UGC structure and return ALL violations found, so
-// the regeneration step can show Claude the complete list of what to fix.
-// - Scene 1 (BEAT 1): specific category-anchored pain; no generic filler
-//   phrases ("ניסיתי הכל" / "כלום לא עזר" etc.); no product name.
-// - Scene 2 (BEAT 2): short discovery bridge opening with "עד ש..." /
-//   "ואז גיליתי...", naming the product.
-// - Scene 3 (BEAT 3): benefits + emotional payoff; MUST NOT contain any
-//   discovery phrase ("עד שגיליתי" / "ואז גיליתי" / "גיליתי את" / "מצאתי את")
-//   anywhere — not just at the start.
-// Returns [] when the structure is clean.
-const DISCOVERY_OPENERS = /^(עד\s+ש|ואז\s+גיליתי|ואז\s+מצאתי|עד\s+שמצאתי|עד\s+שגיליתי)/u;
-const BEAT_1_FORBIDDEN_PHRASES = [
-  'מנסה כל פתרון',
-  'ניסיתי כל פתרון',
-  'שום דבר לא עבד',
-  'שום פתרון לא עבד',
-  'ניסיתי הכל',
-  'חיפשתי פתרון',
-  'לא מצאתי משהו שמתאים',
-  'כלום לא התאים',
-  'כלום לא עזר',
-];
-const BEAT_3_FORBIDDEN_PHRASES = [
-  'עד שגיליתי',
-  'ואז גיליתי',
-  'גיליתי את',
-  'מצאתי את',
-  'עד שמצאתי',
-];
-function beatStructureViolations(scenes, productName) {
-  const violations = [];
-  if (!Array.isArray(scenes) || scenes.length < 4) return violations;
-  const v1 = (scenes[0]?.subtitle || scenes[0]?.voiceover || '').trim();
-  const v2 = (scenes[1]?.subtitle || scenes[1]?.voiceover || '').trim();
-  const v3 = (scenes[2]?.subtitle || scenes[2]?.voiceover || '').trim();
-
-  // BEAT 1: no generic filler phrases — pain must be category-specific.
-  for (const phrase of BEAT_1_FORBIDDEN_PHRASES) {
-    if (v1.includes(phrase)) {
-      violations.push(`Beat 1 contains generic phrase "${phrase}" — pain must be SPECIFIC to the product category (sensory or emotional language tied to the category, not a one-size-fits-all line).`);
-    }
-  }
-  // BEAT 1: must not mention the product name — the product is introduced in Beat 2.
-  if (productName && v1 && v1.toLowerCase().includes(productName.toLowerCase())) {
-    violations.push(`Beat 1 mentions the product name "${productName}" — the product must only be introduced in Beat 2.`);
-  }
-
-  // BEAT 2: must open with a discovery phrase.
-  if (!DISCOVERY_OPENERS.test(v2)) {
-    violations.push(`Scene 2 (Beat 2) must START with "עד ש..." or "ואז גיליתי..." and name the product. Got: "${v2.slice(0, 60)}"`);
-  }
-  // BEAT 2: must be short (≤ 10 words) — discovery bridge only, not benefits.
-  const v2Words = v2.split(/\s+/).filter(Boolean).length;
-  if (v2Words > 10) {
-    violations.push(`Scene 2 (Beat 2) must be short (4-6 words). Got ${v2Words} words — move benefits to scene 3.`);
-  }
-
-  // BEAT 3: must NOT contain ANY discovery phrase, anywhere in the line.
-  // This catches both "עד שגיליתי ..." at the start AND buried phrases like
-  // "היא נוחה, עד שגיליתי שהיא גם קלה".
-  for (const phrase of BEAT_3_FORBIDDEN_PHRASES) {
-    if (v3.includes(phrase)) {
-      violations.push(`Beat 3 contains discovery phrase "${phrase}" — that belongs in Beat 2 ONLY. Beat 3 must describe benefits and emotional payoff, not re-introduce the product.`);
-    }
-  }
-
-  return violations;
-}
-
-function scenesHaveBrokenSentences(scenes) {
-  if (!Array.isArray(scenes)) return false;
-  const chunks = scenes.map(s => (s?.subtitle || s?.voiceover || '').trim()).filter(Boolean);
-  for (let i = 0; i < chunks.length; i++) {
-    const c = chunks[i];
-    // Scene must end with sentence terminator (. ! ? …)
-    const last = c.replace(/["')\]\s]+$/, '').slice(-1);
-    if (!/[.!?…]/.test(last)) return true;
-    // Scene i+1 should not start with a mid-sentence word.
-    // EXCEPTION: scene 2 (index 1) is the 4-beat DISCOVERY bridge, which MUST
-    // start with "עד ש..." / "ואז גיליתי..." — don't flag it as a broken
-    // continuation of scene 1.
-    if (i + 1 < chunks.length && i + 1 !== 1) {
-      const nextFirstWord = chunks[i + 1].split(/\s+/)[0] || '';
-      // Strip leading quotes/punctuation
-      const cleaned = nextFirstWord.replace(/^["'(\[]+/, '');
-      if (MID_SENTENCE_STARTERS.has(cleaned)) return true;
-    }
-  }
-  return false;
-}
-
-async function generateScript(productName, productDesc, applicationArea, hook, voiceGender) {
-  if (!ANTHROPIC_KEY) return null;
-  const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
-  const genderInstruction = voiceGender === 'male'
-    ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'/'מובכת'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר. אל תערבב לשון נקבה.`
-    : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה. אל תערבב לשון זכר.`;
-  const callClaude = async (extra = '') => anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514', max_tokens: 2500,
-    messages: [{ role: 'user', content: `You are a UGC ad expert writing scripts in Hebrew. Create a viral 4-scene ad for: "${productName}".
-Description: ${productDesc}
-How to use: ${applicationArea}
-
-⚡ STRICT 4-BEAT UGC STRUCTURE — THE SINGLE MOST IMPORTANT RULE ⚡
-
-Every script MUST follow these 4 beats, in this exact order. Each beat = one voiceover_sceneN. DO NOT reorder, DO NOT merge, DO NOT skip a beat. Benefits NEVER come before the product is introduced. "עד שגיליתי" NEVER appears after the benefits — it is the discovery bridge between pain and benefits.
-
-BEAT 1 — SPECIFIC PAIN (voiceover_scene1, ~5 sec, ~12-15 Hebrew words) — HARD REQUIREMENT:
-  - The pain must be SPECIFIC to the product's category — name the body part / domain / situation (hair, teeth, kippah, skin, sleep, dessert, etc.)
-  - Use sensory or emotional language that ties directly to the product category
-  - Describe a CONCRETE MOMENT or situation the listener can picture
-  - Emotional, relatable, first-person; sounds like venting to a friend
-  - MUST NOT mention the product name, brand name, or any benefit
-
-  ⛔ FORBIDDEN GENERIC PHRASES in Beat 1 (these make the pain interchangeable and kill emotional resonance — Beat 1 must NOT contain ANY of these, literally or paraphrased):
-    - "מנסה כל פתרון"
-    - "ניסיתי כל פתרון"
-    - "שום דבר לא עבד"
-    - "שום פתרון לא עבד"
-    - "ניסיתי הכל"
-    - "חיפשתי פתרון"
-    - "לא מצאתי משהו שמתאים"
-    - "כלום לא התאים"
-    - "כלום לא עזר"
-  If you were about to write any of these, STOP and write a category-specific pain instead.
-
-  📋 PRODUCT-CATEGORY-TO-PAIN CHEATSHEET (draw from the closest match — adapt the exact wording to the specific product):
-    • Religious / spiritual (kippah, tzitzit, mezuzah, head covering): "הרגשתי שאני עובר את היום בלי חיבור רוחני" / "רציתי משהו שיזכיר לי מי אני באמת" / "הכיפות שלי תמיד היו לא נוחות ולא מיוחדות"
-    • Beauty — teeth: "הייתי מתבייש לחייך בתמונות" / "הלכתי עם ביטחון עצמי נמוך בגלל השיניים שלי"
-    • Beauty — skin/face: "העור שלי תמיד היה יבש בבוקר, זה הפריע לי להרגיש יפה" / "הרגשתי מבוכה כל בוקר כשהסתכלתי במראה"
-    • Beauty — hair: "השיער שלי היה נשבר כל בוקר מחדש ולא משנה מה עשיתי"
-    • Food / drink / dessert / ice cream: "כל פעם שרציתי משהו מתוק מצאתי רק ממתקים מלאי סוכר" / "ילדיי ביקשו גלידה אבל רציתי משהו בריא"
-    • Fashion / clothing: "בכל אירוע הרגשתי שאני לא מספיק מיוחד" / "הבגדים שלי תמיד נראו רגילים, בלי ייחוד"
-    • Tech / app / service: "בכל פעם שניסיתי לעשות את זה, זה לקח לי שעות" / "איבדתי שעות כל שבוע על משימה שצריכה לקחת דקות"
-    • Home / kitchen / cleaning: "המטבח שלי היה תמיד מבולגן, לא מצאתי כלום" / "ניקיתי את הבית כל יום ועדיין הרגיש לא נקי"
-    • Cars / automotive: "בכל נסיעה ארוכה התעייפתי מהפרטים הקטנים"
-    • Pets: "הכלב שלי תמיד לכלך את הרכב שלי" / "החתול שלי שרט את הרהיטים כל לילה"
-    • Sleep: "כל לילה הייתי מתהפך במיטה שעות בלי להירדם"
-    • Fitness / weight: "הבגדים שלי לא ישבו טוב, הרגשתי לא נוח עם הגוף שלי"
-
-  If the product category doesn't match the list, describe one of: (a) a specific physical/emotional discomfort, (b) a moment of frustration during a normal day, (c) something the listener can vividly picture happening to them. The test: a stranger reading only Beat 1 should be able to guess the product CATEGORY within 2 seconds.
-
-  Examples (full sentences):
-    * Kippah: "הרגשתי שאני עובר את היום בלי חיבור רוחני, שוכח מי שומר עלי"
-    * Teeth whitening: "הייתי מתבייש לחייך בתמונות, השיניים שלי היו צהובות וזה הפריע לי כל יום"
-    * Ice cream / dessert: "כל פעם שהיה לי חם רציתי גלידה איכותית אבל תמיד מצאתי רק חטיפים מלאים בסוכר"
-
-BEAT 2 — DISCOVERY OF PRODUCT (voiceover_scene2, ~2-3 sec, ~4-6 Hebrew words, SHORT AND PUNCHY):
-  - MUST start with "עד ש" or "ואז גיליתי" — no other opening is allowed
-  - MUST name the product: ${productName}
-  - DO NOT list benefits here — this is a pure discovery bridge, that's all
-  - DO NOT describe the product visually, DO NOT say "this is made of...", DO NOT start listing features
-  - Keep it to one short clause, 4-6 words maximum
-  - Examples:
-    * "עד שגיליתי את ${productName}"
-    * "ואז גיליתי את ${productName}"
-    * "עד שמצאתי את ${productName}"
-
-BEAT 3 — BENEFITS + EMOTIONAL PAYOFF (voiceover_scene3, ~7-8 sec, ~18-22 Hebrew words) — BENEFITS ONLY, HARD REQUIREMENT:
-  - State 2-3 specific concrete benefits of ${productName}
-  - Then CONNECT the last benefit back to the pain from BEAT 1 with an emotional payoff ("וכל פעם ש... אני מרגיש ש...")
-  - Structure inside scene 3: [benefit 1] + [benefit 2] + [emotional line that resolves the pain]
-  - Beat 3 should flow naturally from Beat 2 (which already introduced the product) — go DIRECTLY into why the product is good, do not re-introduce it
-
-  ⛔ FORBIDDEN DISCOVERY PHRASES in Beat 3 (these belong in Beat 2 ONLY — Beat 3 must NOT contain ANY of these, not even buried mid-sentence):
-    - "עד שגיליתי"
-    - "ואז גיליתי"
-    - "גיליתי את"
-    - "מצאתי את"
-    - "עד שמצאתי"
-  If you find yourself writing one of these in Beat 3, STOP — the discovery was already made in Beat 2. Replace with a direct benefit sentence.
-
-  GOOD example (kippah):
-    Beat 2: "עד שגיליתי את ${productName}"
-    Beat 3: "היא עשויה מחומרים איכותיים וקלה לחבישה, וכל פעם שאני חובש אותה אני נזכר שיש מי שמעלי"
-    ✓ Beat 3 starts with a benefit, closes with an emotional line resolving Beat 1's pain. No discovery phrase.
-
-  BAD example (DO NOT PRODUCE THIS):
-    Beat 2: "עד שגיליתי את ${productName}"
-    Beat 3: "היא נוחה, עד שגיליתי שהיא גם קלה..."
-    ✗ "עד שגיליתי" appears twice — a structural error.
-
-  Example (teeth): "היא מלבינה את השיניים תוך ימים ולא פוגעת באמייל, ולראשונה אני מחייך בתמונות בלי להרגיש לא בנוח"
-
-BEAT 4 — CTA + PERSONAL TESTIMONIAL (voiceover_scene4, ~3-4 sec, ~8-10 Hebrew words):
-  - Direct, emotionally weighted call to action
-  - Include a short personal testimonial that gives the CTA weight — "זה שינה לי את היום", "זה שווה כל שקל", "אי אפשר להתחרט"
-  - DO NOT just say "תנסו את המוצר" — always add the emotional close
-  - Examples:
-    * "אתם חייבים לנסות את זה, זה באמת שינה לי את היום"
-    * "תזמינו עכשיו, אי אפשר להתחרט על זה"
-    * "זה שווה כל שקל, בלי חוכמות"
-
-SANITY CHECK before returning — read the 4 voiceovers in order and confirm:
-  1. Scene 1 is a specific pain and does NOT name the product.
-  2. Scene 2 starts with "עד ש" or "ואז גיליתי" and names ${productName}.
-  3. Scene 3 contains at least 2 concrete benefits AND does NOT start with "עד שגיליתי".
-  4. Scene 4 is a CTA with a personal emotional line.
-If any of these fail, rewrite before returning.
-
-SCENE 2 VISUAL NOTE:
-Scene 2's IMAGE is a product-only beauty shot (no avatar, no person). The voiceover plays over this clean product reveal — the discovery line ("עד שגיליתי את ${productName}") lands right as the product appears on screen. This is intentional.
-
-${genderInstruction}
-
-STEP 0 — PRODUCT CATEGORY ANALYSIS (do this silently before writing):
-Read the product name and description and classify the product into one of these categories:
-- Fashion/clothing (dresses, shirts, pants, shoes, bags)
-- Skincare/beauty (creams, serums, makeup, acne treatments)
-- Hair products (shampoo, treatments, styling tools)
-- Dental/teeth (whitening strips, toothpaste, oral care)
-- Jewelry/accessories (watches, bracelets, necklaces)
-- Food/restaurant/meal kits/supplements/vitamins
-- Tech/gadgets/apps/software
-- Fitness/sport/workout/weight loss
-- Sleep/pillow/mattress/bedding
-- Baby/kids products
-- Cleaning/household products
-- Home decor/furniture
-- Pet products
-- Car accessories
-- Other (analyze the description to find the closest match)
-
-Then identify the CORE PROBLEM this product solves — the universal pain point that a real person in the target audience feels before discovering this product. This pain must be RELATABLE and UNIVERSAL for anyone in that category, not specific to this brand.
-
-Examples of category-based pain hooks (adapt in natural Hebrew):
-- Fashion/clothing → "כל פעם שחיפשתי משהו לאירוע זה היה יקר מדי או לא התאים לי"
-- Skincare → "ניסיתי כל קרם בשוק ושום דבר לא עזר לי עם..."
-- Food/restaurant → "הייתי כל כך עייפה מלבשל כל יום ולא ידעתי מה לעשות"
-- Tech/gadget → "בזבזתי שעות כל יום על משהו שהיה אמור להיות פשוט"
-- Fitness → "ניסיתי כל שיטה ופשוט לא ראיתי תוצאות"
-- Sleep → "כל לילה הייתי מתהפכת במיטה שעות בלי להצליח להירדם"
-- Dental → "הייתי מביכה לחייך בתמונות בגלל השיניים שלי"
-- Hair → "שיער שלי היה נושר ונשבר וכלום לא עזר"
-- Cleaning → "בזבזתי שעות על ניקיון והבית עדיין נראה לא נקי"
-- Baby/kids → "ילדים שלי לא היו מפסיקים להתעצבן ולא ידעתי מה לעשות"
-
-CRITICAL RULES:
-
-1. UGC HOOK FORMULA — MIRRORS THE 4-BEAT STRUCTURE ABOVE:
-- Scene 1 (BEAT 1 — כאב / specific pain): Start with a SPECIFIC, CATEGORY-ANCHORED pain. NEVER mention the product name, brand name, or list any benefit. The viewer must know what domain this is from word one ("זה בדיוק אני!").
-- Scene 2 (BEAT 2 — גילוי / discovery): Voiceover is SHORT (4-6 words) and MUST open with "עד ש" or "ואז גיליתי" and name ${productName}. Visually, scene 2 is a clean product-only beauty shot — NO avatar, NO person in frame. NO benefits spoken yet.
-- Scene 3 (BEAT 3 — יתרונות / benefits + emotional payoff): Avatar uses ${productName}. Voiceover states 2-3 concrete benefits and closes with an emotional line that resolves the pain from scene 1. DO NOT open scene 3 with "עד שגיליתי" — the discovery already happened in scene 2.
-- Scene 4 (BEAT 4 — CTA / קריאה לפעולה): Direct call to action WITH a personal testimonial close ("זה שינה לי את היום" / "זה שווה כל שקל" / "אי אפשר להתחרט"). Never a bare "תנסו".
-
-⚠️ ABSOLUTE RULES FOR SCENE 1:
-- NEVER start scene 1 with the product name "${productName}" or any brand name
-- NEVER mention the product or brand in scene 1 AT ALL
-- Scene 1 MUST start with a UNIVERSAL pain point for the product's category — a feeling/problem anyone in that audience can relate to
-- Scene 1 must sound like a real person talking to a friend, not like an ad
-- Be EMOTIONAL and AUTHENTIC — use everyday spoken Hebrew
-- Think: "what frustration does the TARGET CUSTOMER feel every day?" and START there
-
-1a. HOOK MUST HINT AT THE SPECIFIC CATEGORY (critical):
-ההוק חייב לרמוז באופן ברור על קטגוריית הבעיה — לא רק "ניסיתי הכל". הצופה חייב להבין מהמילה הראשונה על איזה תחום אנחנו מדברים (שיער, עור, בגדים, שיניים, כיסוי ראש וכו').
-- BAD (too generic): "ניסיתי המון דברים ושום דבר לא עבד" — viewer has NO idea what problem is being solved.
-- GOOD (category is clear from the first sentence):
-  * Kipah/head covering: "כל כיפה שקניתי הייתה לא נוחה או לא התאימה לראש שלי"
-  * Teeth whitening: "כל פעם שחייכתי בתמונות הרגשתי לא בנוח עם השיניים שלי"
-  * Skincare: "העור שלי היה יבש ומודלק וכלום לא עזר לי"
-  * Fashion: "כל פעם שהייתי צריכה שמלה לאירוע זה היה יקר מדי"
-- The hook must name the BODY PART, GARMENT, or DOMAIN that's affected — without naming the product/brand itself. The viewer should read it and instantly know "this is about X".
-
-1b. EMOTIONAL, NON-ACTION-VERB OPENING (critical):
-Scene 1 voiceover should open with an emotional state, a recurring situation, or a concrete scene — NOT with a bare action verb.
-- BAD openings (never start a scene with these as the first word, without emotional context): "ניסיתי", "חיפשתי", "רציתי" standing alone. These feel disconnected and ad-like.
-- GOOD openings (lead with feeling / recurring situation):
-  * "כל פעם ש..." (every time that...)
-  * "הייתי מרגישה ש..." (I used to feel that...)
-  * "הרגשתי ש..." (I felt that...)
-  * "תמיד היה לי ש..." (I always had that...)
-  * "כל ... היה ..." (every X was Y)
-- The opening must feel like a real person sharing a relatable story, not an ad intro.
-
-1b2. TTS-FRIENDLY WORD CHOICE (critical for voiceover quality):
-The output will be read by ElevenLabs V3 Hebrew TTS. Prefer everyday high-frequency Hebrew words over literary / archaic synonyms — the TTS pronounces common words correctly and trips on rare ones. Favour SHORT sentences (7–12 words) with a comma or period giving the TTS a clear pause point every 5–8 words. Long unbroken sentences cause the TTS to drop nikud and guess vowels.
-- Prefer: "זה פשוט ולא עובד", "ניסיתי הכל וזה לא עזר לי".
-- Avoid uncommon literary synonyms when a simple word will do.
-- Each voiceover_sceneN should contain at least ONE internal comma to give the TTS a breath point, unless the scene is a single short clause under 8 words.
-
-1c. AUTHENTIC HEBREW — AVOID BORROWED FOREIGN WORDS (critical):
-השתמש במילים עבריות אותנטיות. הימנע מלועזית מתורגמת ישירות (סטיילית, טרנדי, קולית). השתמש ב'עם סטייל', 'אלגנטית', 'מעוצבת' במקום.
-- AVOID: "סטיילית", "טרנדי", "קולית", "סאפר", "אאוטפיט" — these sound robotic in TTS and feel like ad-speak.
-- USE instead (native Hebrew alternatives):
-  * Instead of "סטיילית" → "עם סטייל", "אלגנטית", "מעוצבת"
-  * Instead of "טרנדי" → "עכשווי", "באופנה"
-  * Instead of "קולית" → "מגניבה"
-  * Instead of "אאוטפיט" → "לוק", "בגדים"
-- This rule applies to ALL 4 scenes, not just the hook.
-
-2. HEBREW STYLE — MANDATORY:
-- Write conversational Hebrew, like a real person talking to a friend — NOT formal, NOT salesy
-- Max 4-5 words per subtitle segment (for on-screen text readability)
-- Use everyday spoken Hebrew, not written/literary Hebrew
-
-3. VOICEOVER TIMING — STRICT (matches the 4-BEAT word budgets):
-- Scene 1 / BEAT 1 (pain): ~12-15 Hebrew words, ~5 sec — SPECIFIC category pain
-- Scene 2 / BEAT 2 (discovery): ~4-6 Hebrew words, ~2-3 sec — MUST start with "עד ש" or "ואז גיליתי" + ${productName}. DELIBERATELY SHORT — do not pad with benefits.
-- Scene 3 / BEAT 3 (benefits + emotional payoff): ~18-22 Hebrew words, ~7-8 sec — 2-3 benefits + line resolving the pain
-- Scene 4 / BEAT 4 (CTA + testimonial): ~8-10 Hebrew words, ~3-4 sec — emotional CTA with testimonial close
-- Write at NATURAL SPEAKING PACE — each scene must feel complete for its beat.
-- The 4 beats join into one flowing paragraph for TTS — silence between beats is fine, but the TOTAL should be ~17-20 seconds.
-
-3a. SENTENCE COMPLETENESS (CRITICAL — THE MOST IMPORTANT TIMING RULE):
-כל משפט חייב להסתיים בתוך הסצנה שלו. אסור שמשפט ימשיך לסצנה הבאה. כל סצנה = משפט שלם או שניים שלמים.
-- Each voiceover_sceneN must be a SELF-CONTAINED complete sentence (or two complete sentences) that ends with a period / question mark / exclamation mark.
-- NEVER end a scene mid-phrase (e.g. ending scene 1 with "השיניים" and continuing scene 2 with "שלי" — FORBIDDEN).
-- NEVER start a scene with a word that only makes sense as a continuation of the previous scene (e.g. starting scene 2 with "שלי", "אבל", "ואז רציתי שוב" that grammatically needs a previous clause).
-- The combined script must flow naturally when read end-to-end, AND each chunk must stand on its own when read in isolation.
-- Test: if you deleted any single scene's voiceover, the remaining 3 scenes should still each be grammatically complete Hebrew sentences.
-
-4. HOOK (voiceover_scene1) — PRE-SET, DO NOT CHANGE:
-voiceover_scene1 is already set to: "${hook}"
-You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
-
-5. SETTING — HARD RULES, no exceptions:
-- Clothing/dress/fashion → ALWAYS: "bedroom with full-length mirror and open closet/wardrobe in background"
-- Watch/bracelet/jewelry → ALWAYS: "dressing table with mirror, jewellery and accessories visible"
-- Teeth/dental/strips/whitening → ALWAYS: "bathroom, standing close to mirror, sink visible"
-- Skincare/face cream/serum/acne → ALWAYS: "bathroom vanity with mirror, skincare products on counter"
-- Hair products → ALWAYS: "bathroom with mirror, hair tools visible"
-- Food/supplement/vitamin/protein → ALWAYS: "kitchen or dining table"
-- Fitness/sport/gym → ALWAYS: "gym with equipment visible or outdoor"
-- Tech/gadget/device → ALWAYS: "desk or living room couch"
-- Car accessories → ALWAYS: "inside car, steering wheel visible"
-- Sleep/pillow/mattress → ALWAYS: "bedroom, bed visible"
-- Baby/kids products → ALWAYS: "living room or nursery"
-- Cleaning products → ALWAYS: "kitchen or bathroom"
-- NEVER put clothing/fashion scenes in a car. NEVER put dental scenes in a bedroom.
-- NEVER put ANY product in a car scene UNLESS it is explicitly a car accessory. Cars are ONLY for car accessories.
-- THE SETTING MAP ABOVE APPLIES TO SCENES 1, 2, 3 ONLY. Scene 4 follows the simpler continuity rule in 5a.
-
-5a. SCENE 4 — CONTINUATION, NOT A NEW SCENE (OVERRIDES rule 5 for scene 4):
-Scene 4 should feel like the SAME person in the SAME place, just LATER — one continuous moment, not a fresh aspirational location. Inventing a new scene (sunset restaurant, beach, fancy dinner) reads as AI-generated; staying put reads as a real lived moment.
-
-Scene-4 setting rules:
-- DEFAULT: same indoor location as scene 1 (home / kitchen / bathroom / bedroom / office — wherever the pain happened). Same lighting, same room, same casual everyday vibe. The avatar simply has a satisfied expression now.
-- CAR PRODUCTS ONLY: if ${productName} is a car product (רכב / אוטו / car accessory), scene 4 may show the avatar sitting in the driver's seat with natural in-car lighting through the windshield. This is the ONE category-specific override.
-- DO NOT invent restaurants, beaches, golden-hour terraces, Shabbat dinners, parties, or other "lifestyle" locations the avatar wasn't already in.
-- The product is still naturally visible on/with the avatar (worn / held / used) OR its EFFECT is visible (confident smile for whitening, styled outfit for fashion, glowing skin for skincare).
-- Lighting matches scene 1 — same window daylight + warm room practical. No candlelight, no golden hour, no restaurant warmth UNLESS scene 1 was already in that lighting.
-
-Scene-4 TONE: satisfied, quietly confident, content in the moment — NOT a frozen posed grin. A closed-lip warm smile in the same room reads more authentic than a big forced smile in a fancy new location.
-
-6. EVERY nb_prompt for scenes 1/3 MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". SCENE 4 follows the same anatomy rule BUT its ending must OMIT "NEVER in a car, NEVER in a vehicle" — scene 4 may legitimately show the car for car-accessory products (see rule 5a). The no-phone rule stays for scene 4. If the avatar holds a product, say "holding the product with ONE hand only, other hand visible and relaxed at side". Avoid describing multiple items held at once or hands doing multiple simultaneous actions.
-
-7. SCENE STRUCTURE (follows the hook formula):
-- Scene 1 (כאב — Hook): Avatar ALONE showing the specific problem — NO product visible, NO product mentioned
-- Scene 2 (מוצר — Product beauty shot): CLOSE-UP OF THE PRODUCT ONLY. NO avatar, NO person visible. Clean background, beautiful natural lighting. Product is the hero of the shot. Unboxing / reveal style. Product details clearly visible. PRESERVE EXACT PRODUCT APPEARANCE FROM REFERENCE IMAGE.
-- Scene 3 (פתרון — Solution): Avatar actively USING the product — product ON the avatar not just held. This is the reveal!
-- Scene 4 (תוצאה — CTA): Avatar genuinely happy with the RESULT — product naturally visible, emotional CTA
-
-8. SCENE 3 (פתרון) — product must be ON the avatar:
-- Clothing/dress → "avatar WEARING the [exact item], item ON body, admiring the fit"
-- Watch/jewelry → "avatar WEARING the watch/jewelry on wrist/neck, holding arm up to admire"
-- Teeth/dental → "avatar applying the strip/gel directly ON teeth, dental product ON teeth visible"
-- Skincare → "avatar applying cream/serum directly ON face with fingertips, product ON skin"
-- Hair → "avatar applying product directly INTO hair, running fingers through hair"
-- Supplement → "avatar at kitchen table actually taking/drinking/eating the supplement"
-
-9. END every Kling prompt with exactly this phrase (no more, no less):
-"silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference"
-
-9a. PRODUCT LOCK — CRITICAL (MANDATORY FOR SCENES 2, 3, 4):
-Kling has a known "object drift" failure mode where the product slowly morphs into a different object over the 5–8s video (a branded kippah becomes a generic baseball cap; a labelled serum becomes a blank bottle; a unique mug turns into a travel cup). EVERY kling_prompt for scenes 2, 3, 4 (the product-containing scenes) MUST include an explicit product-lock block, BEFORE the rule-9 ending phrase.
-
-(i) POSITIVE LOCK — include verbatim in every product-containing kling_prompt:
-"The product maintains EXACT same appearance throughout the entire video — same shape, same color, same logo, same text, same material, same position. It is a rigid physical object that does not morph. Every frame of the video shows the identical product from the reference frame — the product at second 5 is visually identical to the product at second 0."
-
-(ii) NEGATIVE LOCK — include verbatim:
-"no product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no product becoming a different object, no product identity drift, no gradual transformation into a similar-but-different item, product does not turn into a generic version of itself"
-
-(iii) FORM-SPECIFIC LOCK — pick ONE based on how the product is used in the scene (determined by STEP 0 category):
-- WEARABLE (kippah, hat, tzitzit, tallit, jewellery, watch, dress, shirt, shoes, glasses, earrings, bracelet, necklace): "Product stays firmly in place on the head/body/wrist throughout the shot. It does not rotate, slide, translate, or change position. Fabric texture, weave, stitching, and any embroidery or printed design remain consistent frame-to-frame."
-- HELD / HANDHELD (bottle, jar, tube, box, device, tool, gadget, card, phone-case-like items): "Product stays firmly held in the same hand with the same grip. Fingers wrap around it with consistent contact points across every frame. Product dimensions, label, branding, and cap/closure remain identical throughout the shot — no label rewriting, no cap changing, no container reshaping."
-- APPLIED / CONSUMED (cream, serum, lotion, supplement pill, food item, drink): "The product container remains identical frame-to-frame with its exact label and branding intact. The small amount dispensed onto skin / into hand / into mouth stays consistent in color and texture and does not morph mid-motion."
-- ENVIRONMENTAL (home decor, candle, pillow, mattress, small appliance sitting in a room): "Product remains in the same position in the scene, with identical shape, color, and surface details. Surrounding lighting may shift naturally but the product itself is rigid and unchanging."
-
-(iv) For SCENE 2 (product-only beauty shot), where the camera moves but the product is stationary, add: "the product is the anchor of the shot — if anything in frame changes, it is the camera, the light, or the dust in the air, but NEVER the product itself."
-
-Do NOT skip this block. It is the single most common Kling failure for Yotzr, and the voiceover-level resolve (scene 3/4) dies instantly if the product has morphed by the time the CTA plays.
-
-10. SELFIE REALISM — EVERY nb_prompt with a person (scenes 1/3/4) MUST include these markers to avoid the polished AI-generated aesthetic:
-- Frame the image as a VIDEO STILL, not a photo: open with "unedited still frame pulled from a handheld iPhone selfie video, not a photograph" — this fights the model's tendency toward clean portrait defaults.
-- Skin cues (pick 3-4, AVOID skin-condition language): "visible pores across cheeks and forehead", "subtle uneven skin tone", "faint pink flush on cheeks and nose tip", "subtle darker half-moons under the eyes", "slight natural oil sheen on nose and forehead", "tiny flyaway hairs catching the light", "eyebrow hairs not perfectly groomed", "natural facial asymmetry". Do NOT use the words "blemish", "acne", "pimple", "breakout", "spot", or "redness" — they read as skin conditions and bias the model toward unhealthy skin, which is the opposite of what we want.
-- iPhone front-camera character: "iPhone 15 Pro front camera in selfie mode", "native wide lens around 26mm", "autofocus hunts gently, focus pulsing in and out", "deep focus but softly rendered, no artificial shallow DOF", "subtle barrel distortion and lens fall-off at corners", "faint luminance grain and occasional chromatic fringe on high-contrast edges", "faint rolling-shutter skew on quick motion", "flat washed-out color, uncolor-graded, low saturation, no LUT".
-- Natural lighting: "soft window daylight mixed with a warm room practical", "uneven jaw-line shadow", "one side of the face slightly in shadow", "mild color-temperature mismatch between window and lamp", "no studio softbox, no ring light, no beauty dish, no rim light".
-- Capture-moment cue: "captured between expressions — eyelid mid-close or mouth in the middle of forming a word, never a finished pose" — this is the single strongest anti-AI framing signal; always include it.
-- Motion + framing: "handheld one-hand micro-shake", "subtle motion blur on hair strands", "soft focus across the whole frame, nothing tack sharp", "framing slightly off-center and tilted a few degrees", "head not dead-level".
-- Hard negatives (always append): "no airbrushing, no beauty filter, no skin smoothing, no glossy cinematic bokeh, no catalog-model pose, no perfectly clean render, no 8k, no award-winning look, no LUT, no color grading, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays, looks like a real person on their front camera not a render".
-For scene 2 (product-only), use the iPhone BACK-camera equivalent: "shot on iPhone back camera in a real home, soft window daylight plus ambient room light, slight handheld angle not dead-on tripod, real surface with tiny dust or fingerprint smudge, organic wood grain or authentic marble veining, mild warm white balance, flat washed-out color, product firmly grounded with a visible contact shadow, NOT floating, NOT levitating, NOT hovering, clean product edges no melted geometry, no studio softbox, no seamless backdrop, no catalog look".
-
-11. NATURAL GESTURE LIBRARY + KLING PHYSICS — EVERY kling_prompt with a person (scenes 1/3/4) MUST:
-(a) Pick ONE eye-gesture, ONE head/body gesture, and ONE closed-lip micro-expression from this library, matched to the scene's emotional beat. These sell authenticity without violating "mouth closed, no lip movement" (rule 9):
-- Eye-gestures: "briefly breaks eye contact, glances down then back to camera" / "eyes drift sideways then refocus on lens" / "slow natural blink mid-beat" / "brief off-screen look then returns to camera" / "looks at the product in their hand then back to camera" (scene 3/4 only)
-- Head/body gestures: "subtle head tilt to one side" / "small reactive nod as if processing an internal thought" / "chin lifts slightly then relaxes" / "weight shift from one leg to the other" / "small shoulder shrug" / "slight lean toward camera then pulls back" / "adjusts grip on the product with fingertips" (scene 3/4) / "turns the product slightly to show another angle" (scene 3 only) / "fidgets with hair or touches face briefly"
-- Closed-lip micro-expressions: "authentic closed-lip half-smile forming gradually" / "genuine eyebrow raise of quiet surprise" / "brief brow furrow of concentration" / "eye squint of mild skepticism" / "softening around the eyes of quiet relief" / "caught mid-thought, slight hesitation"
-NEVER describe smiles, laughs, or reactions that open the mouth.
-(b) Describe the PHYSICS of each motion, not just the action — Kling treats prompts as a physics engine. Instead of "turns her head", write "turns her head slowly to the side, hair follows just behind the motion and catches the light, slight tension visible in the neck". Instead of "holds the product", write "fingers wrap firmly around the product with natural fingertip contact, visible grip tension". Instead of "leans toward camera", write "leans forward from the hips, hair sways with the motion, weight transfers to the front foot".
-(c) For scenes 3 and 4 (product present), ANCHOR hands to the product — "fingers firmly wrapped around the product", "natural fingertip contact", "visible grip tension" — this prevents Kling's hand-morphing failure mode where fingers melt into or through the object.
-(d) Scene-to-gesture mapping: scene 1 (pain) leans on brow furrow + weight shift + eye drift + mid-thought hesitation; scene 3 (solution) leans on eyebrow raise + chin lift + glance down to product + grip adjustment; scene 4 (result) leans on eye-softening + subtle nod + closed-lip half-smile + brief off-screen glance.
-(e) END every kling_prompt with the phrase from rule 9 AND append: "no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays" — Kling sometimes bakes captions into output if not explicitly excluded.
-
-Return ONLY valid JSON (no markdown):
-{
-  "voiceover_scene1": "BEAT 1 — SPECIFIC PAIN, ~12-15 Hebrew words. Category-anchored pain (names the body part/domain), never the product name, never a benefit. Sounds like a friend venting.",
-  "voiceover_scene2": "BEAT 2 — DISCOVERY, ~4-6 Hebrew words. MUST start with 'עד ש' or 'ואז גיליתי' and include the product name ${productName}. NO benefits listed. Deliberately short and punchy.",
-  "voiceover_scene3": "BEAT 3 — BENEFITS + EMOTIONAL PAYOFF, ~18-22 Hebrew words. 2-3 concrete benefits of ${productName}, then an emotional line that resolves the BEAT 1 pain. Do NOT open with 'עד שגיליתי' — discovery already happened in BEAT 2.",
-  "voiceover_scene4": "BEAT 4 — CTA + PERSONAL TESTIMONIAL, ~8-10 Hebrew words. Direct CTA combined with a personal emotional line like 'זה שינה לי את היום' / 'זה שווה כל שקל' / 'אי אפשר להתחרט'. Never a bare 'תנסו'.",
-  "setting": "one-line description of the setting",
-  "scenes": [
-    {
-      "type": "כאב",
-      "nb_prompt": "Unedited still frame pulled from a handheld iPhone selfie video, not a photograph. Avatar showing specific problem related to ${productDesc}, closed-lip frustrated expression with brow furrow, caught mid-thought with slight hesitation, eyelid mid-close or mouth in the middle of forming a word — never a finished pose. No product visible yet. Shot on iPhone 15 Pro front camera, native wide lens around 26mm, autofocus hunts gently with focus pulsing, real unretouched skin with visible pores across cheeks and forehead, subtle uneven skin tone, subtle darker half-moons under the eyes, slight natural oil sheen on nose and forehead, faint pink flush on cheeks, natural facial asymmetry, tiny flyaway hairs catching the light, soft window daylight mixed with warm room practical, uneven jaw shadow, one side of face slightly in shadow, subtle barrel distortion at corners, auto white balance, faint luminance grain, faint rolling-shutter skew, flat washed-out color, uncolor-graded, low saturation, handheld one-hand micro-shake with subtle motion blur on hair, soft focus across the whole frame, framing slightly off-center and tilted a few degrees, head not dead-level, no airbrushing, no beauty filter, no studio lighting, no 8k, no LUT, looks like a real person on their front camera not a render, correct human anatomy, exactly two arms, no extra limbs, no burned-in subtitles or captions or on-screen text or graphic overlays, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar in [setting] visibly frustrated with [specific problem], no product visible. Physics of motion: brow furrows gradually in frustration, weight transfers from one leg to the other and the hips settle into the new stance, hair shifts slightly with the body weight change, eyes drift down and off-screen then pull back to the lens, one slow natural blink mid-beat, closed-lip sigh with shoulders sagging and visible chest expansion, small hesitation like a caught mid-thought. Handheld iPhone front-camera feel with mild one-hand wobble, autofocus pulses gently, silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
-      "subtitle": "same as voiceover_scene1"
-    },
-    {
-      "type": "מוצר",
-      "nb_prompt": "PRODUCT ONLY SHOT — absolutely no person, no human, no hands, no face, no body parts, no avatar, no model. Close-up beauty shot of ${productName} resting naturally on a realistic home surface — on a wooden table, marble counter, or bathroom sink with authentic veining/grain. Product must have clear physical support and cast a realistic contact shadow underneath. Shot on iPhone back camera in a real home, soft window daylight mixed with ambient room light, slight handheld angle not dead-on tripod, mild warm white balance, subtle lens softness at corners, faint grain, surface shows tiny real-world imperfections like a small dust speck or faint fingerprint smudge, no seamless white backdrop, no studio softbox, no catalog look, looks like a real phone photo not a render. Product is the hero of the shot and the ONLY subject in frame, product details clearly visible, preserve exact product appearance from reference image, product shape and colors unchanged from reference. Negative: person, human, woman, man, hands, face, body, arms, fingers, holding, selfie, hair, skin, limbs, silhouette. Also: product NOT floating, NOT levitating, NOT suspended in air, NOT hovering.",
-      "kling_prompt": "Handheld iPhone back-camera style shot of ${productName} resting on a stable real-home surface, subtle handheld micro-shake as if a real hand is filming, camera drifts slightly closer with a gentle parallax rather than a perfect mechanical orbit, soft focus breathing as the camera shifts, product stays stationary and grounded with clear contact shadow, ambient dust motes drift through the window light, soft natural window light with ambient room spill, flat washed-out color and low saturation, authentic surface texture visible, no person in frame, no hands. PRODUCT LOCK: The product maintains EXACT same appearance throughout the entire video — same shape, same color, same logo, same text, same material, same position. It is a rigid physical object that does not morph. Every frame shows the identical product from the reference frame. The product is the anchor of the shot — if anything in frame changes, it is the camera, the light, or the dust in the air, but NEVER the product itself. no product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no product becoming a different object, no product identity drift. Silent, smooth natural motion only, no floating, no levitating, no hovering, no perfect mechanical camera move, no studio softbox look, no catalog look, looks like a real phone clip not a render, product edges render cleanly with no melted geometry, product shape and colors unchanged from reference, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
-      "subtitle": "same as voiceover_scene2"
-    },
-    {
-      "type": "פתרון",
-      "nb_prompt": "Unedited still frame pulled from a handheld iPhone selfie video, not a photograph. Avatar actively using ${productName} — wearing/applying/consuming based on product type, product ON the avatar not just held, fingers firmly wrapped around the product with natural fingertip contact and visible grip tension, anatomically correct hand with five fingers. Closed-lip expression of pleasant surprise with genuine eyebrow raise, chin slightly lifted, caught mid-blink or eyes in mid-pulse of autofocus. Shot on iPhone 15 Pro front camera, native wide lens around 26mm, autofocus hunts gently with focus pulsing, real unretouched skin with visible pores across cheeks and forehead, subtle uneven skin tone, slight natural oil sheen on nose and forehead, faint pink flush on cheeks, natural facial asymmetry, tiny flyaway hairs catching the light, soft window daylight mixed with warm room practical, uneven jaw shadow, subtle barrel distortion at corners, auto white balance, faint luminance grain, faint rolling-shutter skew, flat washed-out color, uncolor-graded, low saturation, handheld one-hand micro-shake with subtle motion blur on hair strands, soft focus across the whole frame with nothing tack sharp, one eye marginally more in focus, framing slightly off-center and tilted a few degrees, head not dead-level, no airbrushing, no beauty filter, no studio lighting, no 8k, no LUT, looks like a real person on their front camera not a render, correct human anatomy, exactly two arms, no burned-in subtitles or captions or on-screen text or graphic overlays, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar using ${productName} on themselves for the first time — product ON the avatar. Physics of motion: fingers firmly wrap around the product with natural fingertip contact and visible grip tension, hand anchored to the product throughout (no morphing, no melted fingers), the action of applying/wearing/using unfolds with realistic hand-object interaction, hair follows the head movement and catches the light, eyebrows lift in genuine quiet surprise, chin rises slightly then relaxes, eyes glance down at the product then refocus on the camera, small satisfied nod, closed-lip hint of a smile with mouth relaxed, avatar may turn the product slightly to show another angle, adjusts grip with fingertips. PRODUCT LOCK: The product maintains EXACT same appearance throughout the entire video — same shape, same color, same logo, same text, same material, same position. It is a rigid physical object that does not morph. Every frame shows the identical product from the reference frame — the product at second 5 is visually identical to the product at second 0. [FORM-SPECIFIC LOCK — pick based on product type, wearable OR held OR applied: (WEARABLE) product stays firmly in place on the head/body/wrist throughout, does not rotate, slide or translate, fabric texture, weave, stitching and any embroidery or printed design remain consistent frame-to-frame / (HELD) product stays firmly held in the same hand with the same grip, fingers wrap around it with consistent contact points across every frame, product dimensions, label, branding, and cap/closure remain identical, no label rewriting, no cap changing, no container reshaping / (APPLIED) product container remains identical frame-to-frame with its exact label and branding intact, the small amount dispensed stays consistent in color and texture]. no product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no product becoming a different object, no product identity drift, no gradual transformation into a similar-but-different item. Handheld iPhone front-camera feel with mild one-hand wobble, autofocus pulses gently, silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
-      "subtitle": "same as voiceover_scene3"
-    },
-    {
-      "type": "תוצאה",
-      "nb_prompt": "Unedited still frame pulled from a handheld iPhone selfie video, not a photograph. SAME LOCATION AS SCENE 1 — the avatar is in the same indoor everyday setting (home / kitchen / bathroom / bedroom / office, whichever scene 1 used) with the same casual home atmosphere. This is one continuous moment, not a new scene. Avatar wears a natural closed-lip warm smile (mouth stays closed, corners of mouth lifted, eyes soften and crinkle at the outer corners), caught between expressions not a finished pose, satisfied and quietly confident. Product is naturally visible — either still worn/held/used from scene 3, or its EFFECT is visible (confident smile for whitening, styled outfit on body, glowing skin). Same window daylight + warm room practical lighting as scene 1 — NO candlelight, NO golden hour, NO restaurant warmth, NO new fancy location (UNLESS ${productName} is a car product, in which case the avatar may be sitting in the driver's seat with natural in-car lighting through the windshield). Shot on iPhone 15 Pro front camera, native wide lens around 26mm, autofocus hunts gently with focus pulsing, real unretouched skin with visible pores, subtle uneven skin tone, slight natural oil sheen on nose and forehead, faint pink flush on cheeks, subtle darker half-moons under the eyes, tiny flyaway hairs catching the light, natural facial asymmetry, subtle barrel distortion at corners, auto white balance, faint luminance grain, faint rolling-shutter skew, flat washed-out color, uncolor-graded, low saturation, handheld one-hand micro-shake with subtle motion blur on hair strands, soft focus across the whole frame, framing slightly off-center and tilted a few degrees, head not dead-level, no airbrushing, no beauty filter, no 8k, no LUT, looks like a real person on their front camera not a render, correct human anatomy, no burned-in subtitles or captions or on-screen text or graphic overlays, NEVER show a phone or mobile device in any scene",
-      "kling_prompt": "Avatar in the SAME indoor location as scene 1 (or the driver's seat of their car if ${productName} is a car product), satisfied and quietly confident moment. Physics of motion: closed-lip warm smile forms gradually with corners of mouth lifting and skin softening around the outer eyes in genuine quiet confidence, small subtle nod with hair following the head movement and catching the light, eyes briefly break contact with the lens then refocus on the camera, optional small hand-on-heart gesture or relaxed gesture toward camera. Same room ambience as scene 1 — soft window daylight, warm room practical, occasional ambient micro-motion in the home setting. Product naturally visible in frame; if held, fingers remain firmly anchored with visible grip tension (no hand morphing, no melted fingers). PRODUCT LOCK: The product maintains EXACT same appearance throughout the entire video — same shape, same color, same logo, same text, same material, same position. It is a rigid physical object that does not morph. Every frame shows the identical product from the reference frame. [FORM-SPECIFIC LOCK — pick based on product type: (WEARABLE) product stays firmly in place on the head/body/wrist throughout, does not rotate, slide, or translate, fabric texture and any printed/embroidered design stay identical / (HELD) product stays firmly held with consistent grip, label, branding, and dimensions identical across every frame / (APPLIED / CONSUMED) product container and any dispensed amount stay identical, no label rewriting / (ENVIRONMENTAL) product remains in exactly the same position in the scene with identical shape, color, and surface details, only the light or surrounding motion may change]. no product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no product becoming a different object, no product identity drift, no gradual transformation into a similar-but-different item. Handheld iPhone front-camera feel with mild one-hand wobble, autofocus pulses gently. Silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
-      "subtitle": "same as voiceover_scene4"
-    }
-  ]
-}${extra}` }]
-  });
-  const parseResponse = (message) => {
-    const text = message.content?.[0]?.text || '';
-    try {
-      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-      const v1 = parsed.voiceover_scene1 || '';
-      const v2 = parsed.voiceover_scene2 || '';
-      const v3 = parsed.voiceover_scene3 || '';
-      const v4 = parsed.voiceover_scene4 || '';
-      parsed.voiceover = joinVoiceoverChunks([v1, v2, v3, v4]);
-      if (parsed.scenes) {
-        parsed.scenes[0].subtitle = v1;
-        parsed.scenes[1].subtitle = v2;
-        parsed.scenes[2].subtitle = v3;
-        parsed.scenes[3].subtitle = v4;
-      }
-      return parsed;
-    } catch { return null; }
-  };
-
-  // First attempt
-  let parsed = parseResponse(await callClaude());
-  // Validate gender — regenerate once if Claude mixed male/female forms
-  if (parsed && scriptGenderMismatch(parsed.voiceover, voiceGender)) {
-    console.warn(`[generateScript] Gender mismatch (wanted ${voiceGender}), regenerating...`);
-    const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD WRONG GENDER. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${voiceGender}). Do NOT mix genders. Verify every single word.`;
-    const retry = parseResponse(await callClaude(extraInstruction));
-    if (retry) parsed = retry;
-  }
-  // Validate sentence completeness — regenerate once if any scene ends mid-sentence
-  if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
-    console.warn('[generateScript] Broken sentences across scenes, regenerating...');
-    const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES (e.g. scene N ended with "השיניים" and scene N+1 started with "שלי"). REWRITE so each voiceover_sceneN is a SELF-CONTAINED grammatically complete Hebrew sentence ending with . ? or ! — and no scene starts with a word like שלי / שלו / אותי / הזה that depends on the previous scene.`;
-    const retry = parseResponse(await callClaude(extraInstruction));
-    if (retry) parsed = retry;
-  }
-  // Validate scene-1 opener quality — if Claude dropped the pre-set hook and
-  // fell back to a bare "ניסיתי ..." style opener, force a regen with an
-  // explicit rule about emotional framing.
-  if (parsed && sceneOneIsWeakOpener(parsed.voiceover_scene1)) {
-    console.warn('[generateScript] Weak scene-1 opener, regenerating...', parsed.voiceover_scene1?.slice(0, 40));
-    const extraInstruction = `\n\nPREVIOUS ATTEMPT OPENED SCENE 1 WITH A BARE ACTION VERB (e.g. "ניסיתי ..."/"חיפשתי ..." as the first word). REWRITE voiceover_scene1 to open with an EMOTIONAL STATE or RECURRING SITUATION, using "כל פעם ש..." / "הייתי מרגישה ש..." / "הרגשתי ש..." / "תמיד היה לי ש...". The first word must NOT be ניסיתי/חיפשתי/רציתי. Keep the exact pre-set hook "${hook}" as the voiceover_scene1 text.`;
-    const retry = parseResponse(await callClaude(extraInstruction));
-    if (retry) parsed = retry;
-  }
-  // Validate the strict 4-beat structure. Collect ALL violations so the regen
-  // instruction shows Claude every issue at once (rather than fixing one and
-  // surfacing the next on a second pass). Regenerate once with the full list.
-  if (parsed) {
-    const violations = beatStructureViolations(parsed.scenes, productName);
-    if (violations.length > 0) {
-      console.warn('[generateScript] 4-beat structure violations:', violations);
-      const bullets = violations.map((v, i) => `  ${i + 1}. ${v}`).join('\n');
-      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules:\n- voiceover_scene1 = BEAT 1 (SPECIFIC pain tied to the product CATEGORY, never a generic "ניסיתי הכל"/"כלום לא עזר" phrase, never names the product)\n- voiceover_scene2 = BEAT 2 (SHORT 4-6 words, MUST start with "עד ש" or "ואז גיליתי" and include "${productName}", NO benefits here)\n- voiceover_scene3 = BEAT 3 (2-3 concrete benefits + emotional payoff resolving the pain, MUST NOT contain ANY of: "עד שגיליתי" / "ואז גיליתי" / "גיליתי את" / "מצאתי את" — anywhere in the line, not just at the start)\n- voiceover_scene4 = BEAT 4 (CTA + personal testimonial line)`;
-      const retry = parseResponse(await callClaude(extraInstruction));
-      if (retry) parsed = retry;
-    }
-  }
-  // Validate authentic Hebrew — if Claude used borrowed/transliterated words
-  // (סטיילית / טרנדי / קולית / סאפר / אאוטפיט), regen with the explicit
-  // substitution rule.
-  if (parsed && scriptHasForeignWords(parsed.voiceover)) {
-    console.warn('[generateScript] Foreign borrowed words detected, regenerating...');
-    const extraInstruction = `\n\nPREVIOUS ATTEMPT USED LOUSY TRANSLITERATED ENGLISH WORDS (סטיילית / טרנדי / קולית / סאפר / אאוטפיט). REWRITE using authentic Hebrew: "סטיילית" → "עם סטייל" / "אלגנטית" / "מעוצבת"; "טרנדי" → "עכשווי" / "באופנה"; "קולית" → "מגניבה"; "אאוטפיט" → "לוק" / "בגדים". These banned words must appear ZERO times in any voiceover scene.`;
-    const retry = parseResponse(await callClaude(extraInstruction));
-    if (retry) parsed = retry;
-  }
-  return parsed;
-}
+import { generateNBFrame } from '../../../lib/agent-pipeline.js'
+import {
+  generateScript,
+  generateBusinessScript,
+  getHook,
+  getBusinessHook,
+  getDefaultScenes,
+  getBusinessDefaultScenes,
+  getDefaultVoiceover,
+  getBusinessDefaultVoiceover,
+  joinVoiceoverChunks,
+  mapAvatarToActorId,
+} from '../../../lib/script-pipeline.js'
+import {
+  generateScenesVoice,
+  stitchSceneVoices,
+} from '../../../lib/voice-pipeline.js'
+import {
+  buildSeedancePrompt,
+  generateSeedanceVideo,
+} from '../../../lib/seedance-pipeline.js'
+
+export const maxDuration = 300
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+const FAL_KEY = process.env.FAL_API_KEY
+fal.config({ credentials: FAL_KEY })
+const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW'
 
 export async function POST(req) {
-  console.log('[Memory:agent]', JSON.stringify(process.memoryUsage()));
+  console.log('[Memory:agent-legacy]', JSON.stringify(process.memoryUsage()))
   try {
-    const body = await req.json();
+    const body = await req.json()
+    if (!supabase) return Response.json({ error: 'Supabase not configured' }, { status: 500 })
 
-    if (!supabase) {
-      return Response.json({ error: 'Supabase not configured' }, { status: 500 });
-    }
-
-    // Soft subscription-quota gate. If the client passes userId and the users
-    // table has subscription_tier populated, enforce remainingVideos. When
-    // data/schema isn't ready we silently pass through — payments aren't wired
-    // yet (see Yotzr migration plan).
     if (body?.userId) {
       try {
         const { data: u } = await supabase
           .from('users')
           .select('subscription_tier, videos_used_this_period')
           .eq('id', body.userId)
-          .maybeSingle();
+          .maybeSingle()
         if (u?.subscription_tier) {
-          const left = remainingVideos(u);
+          const left = remainingVideos(u)
           if (left <= 0) {
             return Response.json(
               { error: 'נגמרו לך הסרטונים החודש. שדרג לפרו לעוד 8 סרטונים.' },
-              { status: 403 }
-            );
+              { status: 403 },
+            )
           }
         }
       } catch (err) {
-        console.warn('[Agent] quota check skipped:', err?.message || err);
+        console.warn('[Agent] quota check skipped:', err?.message || err)
       }
     }
 
-    // Create a pending job. Persist the generation inputs alongside it so
-    // the regenerate-scene route can recover them later — even when the
-    // client has lost lastGenPayload (e.g. an old saved_edit reopened from
-    // the dashboard). Falls back gracefully if the `inputs` column doesn't
-    // exist yet (column added in 20260425_add_jobs_inputs.sql).
     const jobInputs = {
       videoType: body?.videoType || 'ugc',
       avatarUrl: body?.avatarUrl || null,
       productImageUrl: body?.productImageUrl || null,
+      productName: body?.productName || body?.product || null,
+      productDesc: body?.productDesc || body?.product || null,
+      applicationArea: body?.applicationArea || null,
+      businessName: body?.businessName || null,
+      businessDescription: body?.businessDescription || null,
       businessPhotos: Array.isArray(body?.businessPhotos) ? body.businessPhotos : [],
-    };
+      voiceId: body?.voiceId || null,
+    }
+
     let { data: job, error: insertError } = await supabase
       .from('jobs')
       .insert({ status: 'pending', inputs: jobInputs })
       .select('id')
-      .single();
+      .single()
     if (insertError && /inputs/i.test(insertError.message || '')) {
-      console.warn('[Agent] jobs.inputs column missing — inserting without it. Run the migration in supabase/migrations/ to enable jobId auto-recovery.');
-      const retry = await supabase
-        .from('jobs')
-        .insert({ status: 'pending' })
-        .select('id')
-        .single();
-      job = retry.data;
-      insertError = retry.error;
+      const retry = await supabase.from('jobs').insert({ status: 'pending' }).select('id').single()
+      job = retry.data
+      insertError = retry.error
     }
-
     if (insertError) {
-      console.error('Job insert error:', insertError.message);
-      return Response.json({ error: 'Failed to create job' }, { status: 500 });
+      console.error('[Agent] job insert error:', insertError.message)
+      return Response.json({ error: 'Failed to create job' }, { status: 500 })
     }
 
-    // Fire and forget — do NOT await
-    runJob(job.id, body).catch(err => console.error('Background job crashed:', err.message));
+    runLegacyJob(job.id, body).catch(err => {
+      console.error(`[Job ${job.id}] crashed:`, err.message)
+      supabase.from('jobs').update({ status: 'error', error: err.message }).eq('id', job.id)
+        .then(() => {}, () => {})
+    })
 
-    return Response.json({ jobId: job.id });
+    return Response.json({ jobId: job.id })
   } catch (e) {
-    console.error('Agent error:', e.message);
-    return Response.json({ error: e.message }, { status: 500 });
+    console.error('[Agent] error:', e.message)
+    return Response.json({ error: e.message }, { status: 500 })
   }
 }
 
-// Validate a Kling video URL end-to-end before we hand it to the editor.
-// Previous "verifyVideoUrl" only checked the first 64KB for MP4 magic — that
-// missed cases where fal.ai returns a mostly-intact MP4 that the browser
-// can't actually decode (readyState stays at 0, videoWidth=0). This version
-// adds an ffprobe decode test, which is what actually catches broken outputs.
-//
-// Returns { valid: boolean, reason?: string, width?, height?, duration? }.
-async function validateKlingVideo(url) {
-  if (!url || typeof url !== 'string') return { valid: false, reason: 'no url' };
-  try {
-    // --- Stage 1: Range GET first 64KB, check MP4 magic bytes ---------------
-    const res = await fetch(url, {
-      headers: { Range: 'bytes=0-65535' },
-      signal: AbortSignal.timeout(10000),
-    }).catch(err => ({ _fetchErr: err }));
+async function runLegacyJob(jobId, body) {
+  const {
+    videoType = 'ugc',
+    productName, productDesc, applicationArea,
+    avatarUrl, productImageUrl, voiceId,
+    businessName, businessDescription, businessPhotos,
+  } = body
 
-    if (res?._fetchErr) {
-      return { valid: false, reason: `fetch error: ${res._fetchErr.message}` };
-    }
-    if (!res.ok && res.status !== 206) {
-      return { valid: false, reason: `status ${res.status}` };
-    }
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app'
+  const prepareUrl = (u) => u
+    ? (u.startsWith('http') || u.startsWith('data:') ? u : `${baseUrl}${u}`)
+    : null
+  const preparedAvatar = prepareUrl(avatarUrl)
+  const preparedProduct = prepareUrl(productImageUrl)
+  const preparedBusinessPhotos = Array.isArray(businessPhotos)
+    ? businessPhotos.map(prepareUrl).filter(Boolean)
+    : []
 
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length < 12) {
-      return { valid: false, reason: `file too small (${buffer.length}B)` };
-    }
-    const ftyp = buffer.slice(4, 8).toString('ascii');
-    if (ftyp !== 'ftyp') {
-      const preview = buffer.slice(0, 200).toString('latin1').replace(/[^\x20-\x7e]/g, '.');
-      console.error('[Kling] Not valid MP4 — first 200 bytes:', preview);
-      return { valid: false, reason: `not MP4 (got "${ftyp}")` };
-    }
+  const voiceGender = voiceId === 'nBiC8Jexp2XGyIxATg9S' ? 'male' : 'female'
 
-    // Confirm total content size. Kling 5s clips are always > 500KB; anything
-    // smaller is a truncated/broken output.
-    const contentRange = res.headers.get('content-range') || '';
-    const totalFromRange = Number((contentRange.match(/\/(\d+)$/) || [])[1] || 0);
-    let totalSize = totalFromRange;
-    if (!totalSize) {
-      const head = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) }).catch(() => null);
-      totalSize = Number(head?.headers?.get?.('content-length') || 0);
+  // Script
+  let script, scenes, voiceover, hook
+  if (videoType === 'business') {
+    hook = getBusinessHook(businessDescription || '', businessName || '', voiceGender)
+    script = await generateBusinessScript(businessName || '', businessDescription || '', hook, voiceGender)
+    scenes = script?.scenes || getBusinessDefaultScenes(businessName || '', businessDescription || '')
+    if (script) {
+      script.voiceover_scene1 = hook
+      if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook
+      script.voiceover = joinVoiceoverChunks([hook, script.voiceover_scene2, script.voiceover_scene3, script.voiceover_scene4])
     }
-    if (totalSize > 0 && totalSize < 500 * 1024) {
-      return { valid: false, reason: `size too small (${totalSize}B, < 500KB)` };
+    if (scenes[0]) scenes[0].subtitle = hook
+    voiceover = script?.voiceover || getBusinessDefaultVoiceover(businessName || '', businessDescription || '', hook)
+  } else {
+    hook = getHook(productName, productDesc, voiceGender)
+    script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender)
+    scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc, voiceGender)
+    if (script) {
+      script.voiceover_scene1 = hook
+      if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook
+      script.voiceover = joinVoiceoverChunks([hook, script.voiceover_scene2, script.voiceover_scene3, script.voiceover_scene4])
     }
-
-    // --- Stage 2: ffprobe decode test ---------------------------------------
-    // ffprobe can read HTTP URLs directly — no need to download the whole file.
-    // If it can't find a video stream with valid dimensions, the browser's
-    // decoder won't be able to either.
-    if (!ffprobePath) {
-      // Missing ffprobe on this environment — fall back to the magic-byte
-      // check we just passed. Better than rejecting every video.
-      return { valid: true, reason: 'magic-bytes only (no ffprobe)', size: totalSize };
-    }
-    try {
-      const { stdout } = await execFileAsync(ffprobePath, [
-        '-v', 'error',
-        '-show_entries', 'stream=codec_type,codec_name,width,height,duration:format=duration',
-        '-of', 'json',
-        url,
-      ], { timeout: 15000, maxBuffer: 1024 * 1024 });
-      const data = JSON.parse(stdout);
-      const videoStream = data.streams?.find(s => s.codec_type === 'video');
-      if (!videoStream) return { valid: false, reason: 'no video stream' };
-      const w = Number(videoStream.width || 0);
-      const h = Number(videoStream.height || 0);
-      if (w < 100 || h < 100) return { valid: false, reason: `invalid dimensions ${w}x${h}` };
-      const dur = Number(videoStream.duration || data.format?.duration || 0);
-      if (dur > 0 && dur < 1) return { valid: false, reason: `duration too short (${dur}s)` };
-      return { valid: true, width: w, height: h, duration: dur, codec: videoStream.codec_name, size: totalSize };
-    } catch (e) {
-      const stderr = e.stderr ? String(e.stderr).slice(-300) : '';
-      return { valid: false, reason: `ffprobe failed: ${e.message} ${stderr}` };
-    }
-  } catch (e) {
-    return { valid: false, reason: `validator crashed: ${e.message}` };
+    if (scenes[0]) scenes[0].subtitle = hook
+    voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook, voiceGender)
   }
-}
 
-// Fallback: turn a NanoBanana still frame into a 5-second 720x1280 MP4 via FFmpeg,
-// then upload to fal.storage so it can flow through the rest of the pipeline like
-// any other Kling output (downloadable URL the export route can fetch).
-async function frameToStaticVideo(frameUrl, durationSec = 5) {
-  if (!frameUrl) return null;
-  if (!ffmpegStaticPath || !fs.existsSync(ffmpegStaticPath)) {
-    console.warn('[frameToStaticVideo] ffmpeg-static not available — cannot build fallback video');
-    return null;
-  }
-  const tmpDir = path.join('/tmp', `frame2vid-${randomUUID()}`);
-  await mkdir(tmpDir, { recursive: true });
-  const inPath = path.join(tmpDir, 'frame.png');
-  const outPath = path.join(tmpDir, 'scene2.mp4');
-  try {
-    // Download the frame
-    let frameBuf;
-    if (frameUrl.startsWith('data:')) {
-      const b64 = frameUrl.split(',')[1] || '';
-      frameBuf = Buffer.from(b64, 'base64');
-    } else {
-      const resp = await fetch(frameUrl);
-      if (!resp.ok) throw new Error(`frame fetch HTTP ${resp.status}`);
-      frameBuf = Buffer.from(await resp.arrayBuffer());
-    }
-    await writeFile(inPath, frameBuf);
-    console.log(`[frameToStaticVideo] frame.png written: ${frameBuf.length} bytes`);
+  const approvedScripts = scenes.map(s => s.subtitle || '')
 
-    // ffmpeg -loop 1 -i frame.png -t 5 -vf "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280" -r 24 -c:v libx264 -pix_fmt yuv420p scene2.mp4
-    const args = [
-      '-y', '-loop', '1', '-i', inPath,
-      '-t', String(durationSec),
-      '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1',
-      '-r', '24',
-      '-c:v', 'libx264',
-      '-preset', 'fast',
-      '-crf', '23',
-      '-pix_fmt', 'yuv420p',
-      '-movflags', '+faststart',
-      outPath
-    ];
-    console.log('[frameToStaticVideo] ffmpeg args:', JSON.stringify(args));
-    await execFileAsync(ffmpegStaticPath, args, { timeout: 60000, maxBuffer: 20 * 1024 * 1024 });
-    const stats = fs.statSync(outPath);
-    console.log(`[frameToStaticVideo] scene2.mp4 generated: ${stats.size} bytes`);
-    if (stats.size < 10 * 1024) throw new Error('generated mp4 too small');
-
-    const mp4Buf = await readFile(outPath);
-    // Upload to fal.storage so we get a CDN URL like normal Kling outputs
-    let uploadedUrl = null;
-    try {
-      const blob = new Blob([mp4Buf], { type: 'video/mp4' });
-      uploadedUrl = await fal.storage.upload(blob);
-      console.log('[frameToStaticVideo] uploaded to fal.storage:', uploadedUrl?.slice(0, 80));
-    } catch (upErr) {
-      console.warn('[frameToStaticVideo] fal.storage upload failed:', upErr.message);
-      // Fallback: return a data URL — clients that fetch() it still work, though it's bigger.
-      const b64 = mp4Buf.toString('base64');
-      uploadedUrl = `data:video/mp4;base64,${b64}`;
-      console.log('[frameToStaticVideo] returning data URL fallback, size:', mp4Buf.length, 'bytes');
-    }
-    return uploadedUrl;
-  } catch (e) {
-    console.error('[frameToStaticVideo] failed:', e.message);
-    return null;
-  } finally {
-    rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
-// Map an avatar URL / filename to the actor id used by lib/ugc-skills. The
-// skill's Layer-1 identity lock needs this to pick the right actor card.
-// Returns null for unknown / user-uploaded avatars so the caller can fall
-// back to the legacy (non-skill) prompt path safely.
-function mapAvatarToActorId(avatarUrl) {
-  if (!avatarUrl) return null;
-  const url = String(avatarUrl).toLowerCase();
-  if (url.includes('noa')) return 'noa';
-  if (url.includes('daniel')) return 'daniel';
-  if (url.includes('maya')) return 'maya';
-  return null;
-}
-
-async function runJob(jobId, body) {
-  try {
-    const {
-      videoType = 'ugc',
-      productName, productDesc, applicationArea,
-      avatarUrl, productImageUrl, voiceId,
-      businessName, businessDescription, businessPhotos,
-    } = body;
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
-    const prepareUrl = (u) => u
-      ? (u.startsWith('http') || u.startsWith('data:') ? u : `${baseUrl}${u}`)
-      : null;
-    const preparedAvatar = prepareUrl(avatarUrl);
-    const preparedProduct = prepareUrl(productImageUrl);
-    const preparedBusinessPhotos = Array.isArray(businessPhotos)
-      ? businessPhotos.map(prepareUrl).filter(Boolean)
-      : [];
-    console.log(`[Job ${jobId}] videoType=${videoType} Prepared URLs:`, { avatar: preparedAvatar?.slice(0, 80), product: preparedProduct?.slice(0, 80), businessPhotos: preparedBusinessPhotos.length });
-
-    const voiceGender = voiceId === 'nBiC8Jexp2XGyIxATg9S' ? 'male' : 'female';
-
-    // Script — branch by mode
-    let script, scenes, voiceover, hook;
-    if (videoType === 'business') {
-      hook = getBusinessHook(businessDescription || '', businessName || '', voiceGender);
-      script = await generateBusinessScript(businessName || '', businessDescription || '', hook, voiceGender);
-      scenes = script?.scenes || getBusinessDefaultScenes(businessName || '', businessDescription || '');
-      if (script) {
-        script.voiceover_scene1 = hook;
-        if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook;
-        script.voiceover = joinVoiceoverChunks([hook, script.voiceover_scene2, script.voiceover_scene3, script.voiceover_scene4]);
-      }
-      if (scenes[0]) scenes[0].subtitle = hook;
-      voiceover = script?.voiceover || getBusinessDefaultVoiceover(businessName || '', businessDescription || '', hook, voiceGender);
-    } else {
-      hook = getHook(productName, productDesc, voiceGender);
-      script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender);
-      scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
-      if (script) {
-        script.voiceover_scene1 = hook;
-        if (script.scenes && script.scenes[0]) script.scenes[0].subtitle = hook;
-        script.voiceover = joinVoiceoverChunks([hook, script.voiceover_scene2, script.voiceover_scene3, script.voiceover_scene4]);
-      }
-      if (scenes[0]) scenes[0].subtitle = hook;
-      voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook, voiceGender);
-    }
-
-    // Voice + Frames in parallel (voice doesn't depend on frames)
-    const generateAllFrames = async () => {
-      const frames = [];
-      let prevFrame = null;
-      for (let i = 0; i < 4; i++) {
-        try {
-          const imageUrls = [];
-          // Scene 2 is "product only" in both modes — strictly NO avatar reference.
-          const isScene2 = i === 1;
-          const productOnly = isScene2 && videoType !== 'business';
-          if (videoType === 'business') {
-            // Business mode frame references
-            if (isScene2) {
-              // Scene 2 — showcase business using the business photos, NO avatar
-              preparedBusinessPhotos.slice(0, 3).forEach(u => imageUrls.push(u));
-            } else {
-              if (preparedAvatar) imageUrls.push(preparedAvatar);
-              if (prevFrame) imageUrls.push(prevFrame);
-              // Include a business photo for context in solution/CTA scenes
-              if (preparedBusinessPhotos.length > 0 && (i === 2 || i === 3)) {
-                imageUrls.push(preparedBusinessPhotos[0]);
-              }
-            }
-          } else {
-            // UGC mode frame references
-            if (isScene2) {
-              // Scene 2 — PURE product beauty shot. ONLY the product image; NO
-              // avatar, NO prev frame, nothing that could leak a person into the
-              // frame.
-              if (preparedProduct) imageUrls.push(preparedProduct);
-            } else {
-              if (preparedAvatar) imageUrls.push(preparedAvatar);
-              if (prevFrame) imageUrls.push(prevFrame);
-              if (preparedProduct && (i === 2 || i === 3)) imageUrls.push(preparedProduct);
-            }
-          }
-          // Scene 4 is the aspirational-result shot — tell generateNBFrame to
-          // drop the default lighting and vehicle-negative overlays so the
-          // contextual setting (candlelight / golden hour / car / beach) isn't
-          // fought by baked-in defaults.
-          const scene4Context = i === 3 && !productOnly;
-          const baseOpts = { productOnly, scene4Context };
-          const actorId = mapAvatarToActorId(avatarUrl);
-          const beat = i + 1;
-          const isBusinessCraft = videoType === 'business';
-
-          // Skill-first with legacy fallback. If the skill path throws (bad
-          // input, NanoBanana rejects the longer prompt, etc.) we retry with
-          // the legacy wrap so the job still ships a frame.
-          let frameUrl = null;
-          const useSkill = Boolean(actorId && !productOnly);
-          console.log('[NB] path decision', {
-            scene: i + 1,
-            path: useSkill ? 'skill-driven' : 'legacy',
-            actorId,
-            beat,
-            productOnly,
-            avatarUrl: avatarUrl?.slice(0, 80)
-          });
-          if (useSkill) {
-            try {
-              frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, {
-                ...baseOpts,
-                actorId,
-                beat,
-                productName,
-                isBusinessCraft
-              });
-            } catch (err) {
-              console.warn(`[NB] Skill path failed on scene ${i + 1}, falling back to legacy:`, err.message);
-              frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, baseOpts);
-            }
-          } else {
-            frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, baseOpts);
-          }
-          frames.push(frameUrl);
-          if (frameUrl) prevFrame = frameUrl;
-        } catch (e) {
-          console.error(`[Job ${jobId}] Frame ${i+1} failed:`, e.message);
-          frames.push(null);
-        }
-      }
-      return frames;
-    };
-
-    const [voiceResult, frames] = await Promise.all([
-      generateVoice(voiceover, voiceId),
-      generateAllFrames()
-    ]);
-    const audioBase64 = voiceResult?.base64 || null;
-    const wordTimestamps = voiceResult?.wordTimestamps || null;
-
-    // Kling videos — run all 4 in parallel with per-scene retry + static fallback
-    console.log(`[Job ${jobId}] Starting all 4 Kling videos in parallel...`);
-    const videoMeta = new Array(4).fill('none'); // 'kling' | 'static' | 'none'
-    const runKlingOnce = async (i, frameUrl) => {
-      const klingInput = {
-        prompt: scenes[i].kling_prompt,
-        image_url: frameUrl,
-        duration: '5',
-        aspect_ratio: '9:16',
-        cfg_scale: 0.45,
-        negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
-      };
-      // Scene 1 is the "hook" — if it keeps failing we want the full request
-      // dumped so we can see whether the frame URL or prompt is what's making
-      // Kling unhappy.
-      if (i === 0) {
-        console.log(`[Kling] Scene 1 REQUEST:`, JSON.stringify({
-          prompt: klingInput.prompt?.slice(0, 300),
-          image_url: frameUrl?.slice(0, 120),
-          duration: klingInput.duration,
-          aspect_ratio: klingInput.aspect_ratio,
-          cfg_scale: klingInput.cfg_scale,
-        }));
-      }
-
-      const result = await fal.subscribe('fal-ai/kling-video/v3/pro/image-to-video', {
-        input: klingInput,
-        pollInterval: 5000
-      });
-      const videoUrl = result.data.video?.url || null;
-      const videoMeta = result.data.video || null;
-
-      // Log the full Kling response shape so we can compare working vs broken
-      // outputs. `video.file_size`, `video.content_type`, `video.duration`
-      // are the fields that matter; `url` is what we hand back.
-      console.log(`[Agent] Scene ${i+1} Kling response:`, JSON.stringify({
-        url: videoUrl ? videoUrl.slice(0, 100) : null,
-        content_type: videoMeta?.content_type,
-        file_size: videoMeta?.file_size,
-        file_name: videoMeta?.file_name,
-        duration: videoMeta?.duration,
-        width: videoMeta?.width,
-        height: videoMeta?.height,
-        seed: result.data?.seed,
-      }));
-      if (i === 0) {
-        console.log(`[Kling] Scene 1 RAW RESPONSE (first 500):`, JSON.stringify(result.data).slice(0, 500));
-      }
-
-      if (!videoUrl) return { videoUrl: null, valid: false, reason: 'no url returned by fal.ai' };
-
-      // End-to-end validation — MP4 magic, size, AND ffprobe decode test.
-      const v = await validateKlingVideo(videoUrl);
-      if (!v.valid) {
-        console.error(`[Kling] Scene ${i+1} FAILED validation: ${v.reason}  url=${videoUrl.slice(0, 100)}`);
-      } else {
-        console.log(`[Kling] Scene ${i+1} validated OK: ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s, size=${v.size}B`);
-      }
-      return { videoUrl, valid: v.valid, reason: v.reason };
-    };
-
-    const videos = await Promise.all(frames.map(async (frameUrl, i) => {
-      if (!frameUrl) { videoMeta[i] = 'none'; return null; }
-      // Try Kling up to 3 times with 3s delay between retries. Log the full
-      // error response (status + body) each time so we can debug why scene N
-      // keeps producing empty videos.
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          console.log(`[Job ${jobId}] Kling scene ${i+1}: attempt ${attempt}/3...`);
-          const { videoUrl, valid, reason } = await runKlingOnce(i, frameUrl);
-          console.log(`[Kling] Scene ${i+1} attempt ${attempt} validation: valid=${valid}${reason ? `, reason=${reason}` : ''}`);
-          if (videoUrl && valid) {
-            console.log(`[Job ${jobId}] Kling scene ${i+1}: OK on attempt ${attempt}`);
-            videoMeta[i] = 'kling';
-            return videoUrl;
-          }
-          console.error(`[Kling] Scene ${i+1} attempt ${attempt} REJECTED — url=${videoUrl ? videoUrl.slice(0, 100) : '(null)'}, reason=${reason || 'unknown'}`);
-        } catch (e) {
-          const status = e.status || e.statusCode || 'unknown';
-          const body = e.body || e.message || String(e);
-          console.error(`[Kling] Scene ${i+1} attempt ${attempt} ERROR — status: ${status}, body:`, JSON.stringify(body).slice(0, 600));
-        }
-        if (attempt < 3) {
-          await new Promise(r => setTimeout(r, 3000));
-        }
-      }
-      // All 3 Kling attempts failed → static video fallback from NB frame.
-      console.warn(`[Job ${jobId}] Kling scene ${i+1} failed after 3 attempts — falling back to static frame video`);
+  // Per-scene voice (upload scenes 1 & 4 for Seedance lipsync)
+  const generateAllFrames = async () => {
+    const frames = []
+    let prevFrame = null
+    for (let i = 0; i < 4; i++) {
       try {
-        const staticUrl = await frameToStaticVideo(frameUrl, 5);
-        console.log(`[Job ${jobId}] Static fallback for scene ${i+1}:`, staticUrl ? 'OK' : 'failed');
-        if (staticUrl) { videoMeta[i] = 'static'; return staticUrl; }
+        const isScene2 = i === 1
+        const productOnly = isScene2 && videoType !== 'business'
+        const imageUrls = []
+        if (videoType === 'business') {
+          if (isScene2) preparedBusinessPhotos.slice(0, 3).forEach(u => imageUrls.push(u))
+          else {
+            if (preparedAvatar) imageUrls.push(preparedAvatar)
+            if (prevFrame) imageUrls.push(prevFrame)
+            if (preparedBusinessPhotos.length > 0 && (i === 2 || i === 3)) imageUrls.push(preparedBusinessPhotos[0])
+          }
+        } else {
+          if (isScene2) {
+            if (preparedProduct) imageUrls.push(preparedProduct)
+          } else {
+            if (preparedAvatar) imageUrls.push(preparedAvatar)
+            if (prevFrame) imageUrls.push(prevFrame)
+            if (preparedProduct && (i === 2 || i === 3)) imageUrls.push(preparedProduct)
+          }
+        }
+        const scene4Context = i === 3 && !productOnly
+        const baseOpts = { productOnly, scene4Context }
+        const actorId = mapAvatarToActorId(avatarUrl)
+        const beat = i + 1
+        const isBusinessCraft = videoType === 'business'
+        const useSkill = Boolean(actorId && !productOnly)
+        let frameUrl = null
+        if (useSkill) {
+          try {
+            frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, {
+              ...baseOpts, actorId, beat, productName, isBusinessCraft,
+            })
+          } catch (err) {
+            frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, baseOpts)
+          }
+        } else {
+          frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, baseOpts)
+        }
+        frames.push(frameUrl)
+        if (frameUrl) prevFrame = frameUrl
       } catch (e) {
-        console.error(`[Job ${jobId}] Static fallback scene ${i+1} crashed:`, e.message);
+        console.error(`[Job ${jobId}] Frame ${i + 1} failed:`, e.message)
+        frames.push(null)
       }
-      videoMeta[i] = 'none';
-      return null;
-    }));
-
-    console.log(`[Job ${jobId}] Video sources:`, videoMeta.map((m, i) => `scene${i+1}=${m}`).join(', '));
-
-    const result = {
-      story: { scenes, hebrew_voice: voiceover },
-      frames,
-      videos,
-      audioBase64,
-      wordTimestamps,
-      hebrewVoice: voiceover,
-      // Expose the voiceId the job ran with so the client can re-record
-      // using the SAME voice and avoid gender drift on re-record.
-      voiceId: voiceId || ELEVEN_VOICE
-    };
-
-    await supabase
-      .from('jobs')
-      .update({ status: 'done', result })
-      .eq('id', jobId);
-
-    console.log(`[Job ${jobId}] Completed successfully`);
-
-    // Fire-and-forget: pre-warm the Railway video cache so that when the
-    // client opens the editor the videos are already resident in memory
-    // and the proxy serves them instantly. This is the fix for fal.ai's
-    // inconsistent geographic CDN latency — Railway's link to fal.ai is
-    // fast and consistent, so we pay the slow fetch once here instead of
-    // in the browser on every page load.
-    try {
-      prewarmVideos(videos.filter(Boolean));
-    } catch (e) {
-      console.warn(`[Job ${jobId}] prewarm invocation failed:`, e.message);
     }
-  } catch (e) {
-    console.error(`[Job ${jobId}] Failed:`, e.message);
-    await supabase
-      .from('jobs')
-      .update({ status: 'error', error: e.message })
-      .eq('id', jobId);
+    return frames
   }
-}
 
-// Map feminine Hebrew verb/adjective forms → masculine equivalents.
-// Used by getHook / getDefaultVoiceover to produce gender-correct fallback text
-// when the voice is male (Daniel) and Claude was unavailable.
-const FEMININE_TO_MASCULINE = [
-  ['חיפשתי', 'חיפשתי'], // same
-  ['התאים לי', 'התאים לי'], // same
-  ['מביכה', 'מובך'],
-  ['מובכת', 'מובך'],
-  ['הרגשתי נורא', 'הרגשתי נורא'],
-  ['ניסיתי', 'ניסיתי'],
-  ['עזר לי', 'עזר לי'],
-  ['נראו זולים', 'נראו זולים'],
-  ['הרגשתי בנוח', 'הרגשתי בנוח'],
-  ['מתהפכת', 'מתהפך'],
-  ['מתהפכ', 'מתהפכ'],
-  ['הייתי כל כך עייפה', 'הייתי כל כך עייף'],
-  ['עייפה', 'עייף'],
-  ['ידעתי', 'ידעתי'],
-  ['ראיתי', 'ראיתי'],
-  ['בזבזתי', 'בזבזתי'],
-  ['מבזבזת', 'מבזבז'],
-  ['מבזבז זמן', 'מבזבז זמן'],
-  ['הייתה אומללה', 'הייתה אומללה'],
-  ['לא עבד לי', 'לא עבד לי'],
-  ['לא עבד', 'לא עבד']
-];
-function toMasculine(text) {
-  if (!text) return text;
-  let out = text;
-  for (const [fem, mas] of FEMININE_TO_MASCULINE) {
-    if (fem === mas) continue;
-    out = out.split(fem).join(mas);
+  const [sceneVoices, frames] = await Promise.all([
+    generateScenesVoice(approvedScripts, voiceId || ELEVEN_VOICE, { uploadFor: [0, 3] }),
+    generateAllFrames(),
+  ])
+  const stitched = stitchSceneVoices(sceneVoices)
+  const audioBase64 = stitched.base64
+  const wordTimestamps = stitched.wordTimestamps
+
+  // Seedance — 4 scenes parallel
+  const actorId = mapAvatarToActorId(avatarUrl)
+  const videos = await Promise.all(frames.map(async (frameUrl, i) => {
+    const isSpeakingScene = i === 0 || i === 3
+    const audioUrl = isSpeakingScene ? sceneVoices[i]?.audioUrl : null
+    const seedancePrompt = buildSeedancePrompt({
+      sceneIdx: i,
+      actorId,
+      productName: productName || '',
+      hebrewLine: approvedScripts[i] || '',
+      videoType,
+      businessName: businessName || '',
+    })
+    const { videoUrl, source } = await generateSeedanceVideo({
+      sceneIdx: i,
+      prompt: seedancePrompt,
+      imageUrl: frameUrl,
+      audioUrl,
+      label: `Job ${jobId} scene ${i + 1}`,
+    })
+    scenes[i] = { ...scenes[i], seedance_prompt: seedancePrompt, video_source: source }
+    return videoUrl
+  }))
+
+  const result = {
+    story: { scenes, hebrew_voice: voiceover },
+    frames,
+    videos,
+    audioBase64,
+    wordTimestamps,
+    hebrewVoice: voiceover,
+    voiceId: voiceId || ELEVEN_VOICE,
+    sceneAudioUrls: sceneVoices.map(v => v?.audioUrl || null),
+    sceneDurations: sceneVoices.map(v => v?.duration || 0),
+    scripts: approvedScripts,
   }
-  return out;
-}
 
-function getHook(productName, productDesc, voiceGender = 'female') {
-  const desc = ((productDesc || '') + ' ' + (productName || '')).toLowerCase();
-  // Default fallback — concrete moment of frustration, no forbidden generic
-  // filler phrases ("ניסיתי הכל" / "מנסה כל פתרון" / "כלום לא עזר").
-  let raw = 'הרגשתי שמשהו חסר לי ביומיום, משהו קטן שיעשה הבדל גדול';
+  await supabase.from('jobs').update({ status: 'done', result }).eq('id', jobId)
+  console.log(`[Job ${jobId}] (legacy) completed successfully`)
 
-  // Head covering / kipah / yarmulke (spiritual/emotional pain, not just comfort)
-  if (/כיפה|כיפות|יארמולקה|כיסוי ראש|מטפחת|kipah|yarmulke|head cover/.test(desc))
-    raw = 'הרגשתי שאני עובר את היום בלי חיבור רוחני, שוכח מי שומר עליי';
-  // Fashion / clothing
-  else if (/שמלה|בגד|חולצה|מכנס|נעל|תיק|אופנה|dress|shirt|clothes|fashion|pants|shoes|bag/.test(desc))
-    raw = 'בכל אירוע הרגשתי שאני לא מספיק מיוחדת, הבגדים שלי נראו רגילים';
-  // Dental / teeth
-  else if (/שינ|דנטל|לבן|משחת|teeth|dental|whiten/.test(desc))
-    raw = 'הייתי מתביישת לחייך בתמונות, השיניים שלי היו צהובות וזה הפריע לי כל יום';
-  // Skincare
-  else if (/קרם|פנים|אקנה|עור|סרום|skincare|cream|serum|acne|face/.test(desc))
-    raw = 'העור שלי היה יבש בבוקר וזה הפריע לי להרגיש יפה כשיצאתי מהבית';
-  // Hair
-  else if (/שיער|hair|שמפו/.test(desc))
-    raw = 'השיער שלי היה נשבר כל בוקר מחדש, לא משנה איך סידרתי אותו';
-  // Jewelry / accessories
-  else if (/שעון|תכשיט|צמיד|שרשרת|watch|jewelry|bracelet|necklace/.test(desc))
-    raw = 'האביזרים שלי תמיד נראו זולים ולא הרגשתי בנוח איתם';
-  // Sleep
-  else if (/שינה|לישון|כרית|מזרון|sleep|pillow|mattress/.test(desc))
-    raw = 'כל לילה הייתי מתהפכת במיטה שעות בלי להצליח להירדם';
-  // Ice cream / dessert / sweet (must come BEFORE general food)
-  else if (/גלידה|קינוח|ממתק|שוקולד|מתוק|ice\s*cream|gelato|dessert|sweet|chocolate/.test(desc))
-    raw = 'כל פעם שהיה לי חם רציתי גלידה איכותית, אבל מצאתי רק חטיפים מלאים בסוכר';
-  // Food / restaurant / meal kit
-  else if (/אוכל|מסעדה|ארוחה|מזון|תזונה|food|meal|restaurant|diet/.test(desc))
-    raw = 'הייתי כל כך עייפה מלבשל כל יום ולא ידעתי מה לעשות';
-  // Supplement / vitamin
-  else if (/ויטמין|תוסף|חלבון|supplement|vitamin|protein/.test(desc))
-    raw = 'הרגשתי עייפה כל היום וכלום לא נתן לי באמת אנרגיה';
-  // Fitness / workout
-  else if (/כושר|אימון|ספורט|הרזיה|דיאטה|fitness|workout|gym|weight|exercise/.test(desc))
-    raw = 'הבגדים שלי לא ישבו טוב, הרגשתי לא נוח עם הגוף שלי';
-  // Tech / gadget / app
-  else if (/אפליקציה|גאדג׳ט|טכנולוגיה|מכשיר|app|tech|gadget|device|software/.test(desc))
-    raw = 'בזבזתי שעות כל יום על משהו שהיה אמור להיות פשוט';
-  // Cleaning
-  else if (/ניקוי|ניקיון|כביסה|cleaning|detergent|clean/.test(desc))
-    raw = 'ניקיתי את הבית כל יום ובכל זאת הרגיש לא נקי באמת';
-  // Baby / kids
-  else if (/תינוק|ילד|baby|kid|child/.test(desc))
-    raw = 'הילדים שלי לא היו מפסיקים להתעצבן ולא ידעתי מה לעשות';
-  // Home / furniture / decor / kitchen
-  else if (/בית|ריהוט|עיצוב|מטבח|home|furniture|decor|kitchen/.test(desc))
-    raw = 'המטבח שלי היה תמיד מבולגן, לא מצאתי כלום כשהייתי צריכה';
-  // Pet
-  else if (/כלב|חתול|חיית|pet|dog|cat/.test(desc))
-    raw = 'הכלב שלי תמיד לכלך לי את הרכב, וחזרתי הביתה מותשת';
-  // Car accessories
-  else if (/רכב|אוטו|מכונית|car|vehicle/.test(desc))
-    raw = 'בכל נסיעה ארוכה התעייפתי מהפרטים הקטנים שהפריעו לי';
-
-  return voiceGender === 'male' ? toMasculine(raw) : raw;
-}
-
-// Helper: apply masculine conversion if voice gender is male
-function applyGender(text, voiceGender) {
-  return voiceGender === 'male' ? toMasculine(text) : text;
-}
-
-function getDefaultVoiceover(productName, applicationArea, hook, voiceGender = 'female') {
-  const h = hook || getHook(productName, '', voiceGender);
-  const raw = `${h}. זה ${productName} — פתרון חכם שכולם מדברים עליו. עד שגיליתי את ${productName} ואז הכל השתנה, ${applicationArea} והתוצאות מטורפות. תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`;
-  return applyGender(raw, voiceGender);
-}
-
-const STABLE = SHARED_STABLE;
-const PRODUCT_LOCK = SHARED_PRODUCT_LOCK;
-const BUSINESS_CRAFT_LOCK = SHARED_BUSINESS_CRAFT_LOCK;
-
-function getDefaultScenes(productName, applicationArea, productDesc) {
-  const hook = getHook(productName, productDesc);
-  return [
-    {
-      type: 'כאב',
-      nb_prompt: `avatar showing specific problem related to ${productDesc}, frustrated expression, no product visible yet, correct human anatomy, exactly two arms, no extra limbs, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar visibly frustrated with specific problem related to ${productDesc}, no product visible, ${STABLE}`,
-      subtitle: hook
-    },
-    {
-      type: 'מוצר',
-      nb_prompt: `PRODUCT ONLY SHOT — absolutely no person, no human, no hands, no face, no body parts, no avatar, no model. Close-up beauty shot of ${productName} resting naturally on a realistic surface — on a wooden table, marble counter, or bathroom sink. Product must have clear physical support and cast a realistic contact shadow underneath. Clean background, beautiful soft natural lighting, product is the hero of the shot and the ONLY subject in frame, product details clearly visible, preserve exact product appearance from reference image, product shape and colors unchanged from reference. Negative: person, human, woman, man, hands, face, body, arms, fingers, holding, selfie, hair, skin, limbs, silhouette. Also: product NOT floating, NOT levitating, NOT suspended in air, NOT hovering.`,
-      kling_prompt: `Camera slowly orbits around ${productName} resting on a stable surface, product stays stationary and grounded with clear contact shadow, subtle zoom-in, cinematic product shot, soft natural light, no person in frame, no hands. ${PRODUCT_LOCK} silent, smooth natural motion only, no floating, no levitating, no hovering, product shape and colors unchanged from reference`,
-      subtitle: `זה ${productName} — ${productDesc}.`
-    },
-    {
-      type: 'פתרון',
-      nb_prompt: `avatar actively using ${productName} — wearing/applying/consuming based on product type, product ON the avatar not just held, excited expression, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar excitedly using ${productName} on themselves during ${applicationArea}, product ON the avatar, hands clearly visible, expression of pleasant surprise. ${PRODUCT_LOCK} ${STABLE}`,
-      subtitle: `עד שגיליתי את ${productName} ואז הכל השתנה, ${applicationArea} והתוצאות מטורפות.`
-    },
-    {
-      type: 'תוצאה',
-      // Continuation fallback: avatar in the SAME everyday location as scene
-      // 1, just satisfied now. Reads as one continuous moment rather than a
-      // new "lifestyle" scene. Claude's live script overrides this.
-      nb_prompt: `avatar in the same indoor everyday location as scene 1 (home / kitchen / bathroom / office) with a closed-lip confident satisfied smile, product naturally visible or its effect visible, same window daylight as scene 1, casual home atmosphere, correct human anatomy, NEVER show a phone or mobile device in any scene`,
-      kling_prompt: `Avatar in the same indoor location as scene 1 with a quietly satisfied moment after using ${productName}, closed-lip warm smile forms gradually with eyes softening, small subtle nod, same window daylight and warm room practical, product naturally visible. ${PRODUCT_LOCK} ${STABLE}`,
-      subtitle: `תנסו את ${productName} — יש אחריות מלאה אין מה להפסיד!`
-    }
-  ];
-}
-
-// ============ BUSINESS MODE ============
-
-function getBusinessCategory(desc) {
-  const d = (desc || '').toLowerCase();
-  if (/מסעד|קפה|פיצרי|בר|אוכל|שף|מטבח|restaurant|cafe|bar|food|kitchen|pizza|sushi|burger/.test(d)) return 'restaurant';
-  if (/אופנה|בוטיק|בגד|חולצ|שמל|fashion|boutique|clothing|apparel|shop|store/.test(d)) return 'fashion';
-  if (/קליניק|מרפא|רופא|טיפול|אסתטי|שיני|קוסמטיק|clinic|dental|doctor|therapy|aesthetic|beauty|spa|massage/.test(d)) return 'clinic';
-  if (/מספר|תסרוק|ספר|salon|hair|barber/.test(d)) return 'salon';
-  if (/כושר|חדר כושר|אימון|יוגה|פילאטיס|gym|fitness|yoga|pilates|trainer/.test(d)) return 'fitness';
-  return 'generic';
-}
-
-// Category-driven wardrobe / close-up action / scene-3 activity / venue.
-// The avatar plays the SILENT employee or owner of the business — never talks.
-function getCategoryUniform(cat) {
-  switch (cat) {
-    case 'restaurant': return 'chef coat or clean apron over a casual work shirt';
-    case 'salon': return 'stylist apron over a stylish casual outfit';
-    case 'clinic': return 'white medical coat over professional attire';
-    case 'fitness': return 'activewear and professional trainer outfit';
-    case 'fashion': return 'on-brand stylish outfit matching a modern boutique';
-    default: return 'professional business attire appropriate for the venue';
+  try { prewarmVideos(videos.filter(Boolean)) } catch (e) {
+    console.warn(`[Job ${jobId}] prewarm failed:`, e.message)
   }
-}
-function getCategoryCloseUp(cat) {
-  switch (cat) {
-    case 'restaurant': return 'hands cutting fresh ingredients, plating food, garnishing a dish, steam rising from the pan';
-    case 'salon': return 'scissors trimming hair in motion, blow-dryer airflow, brush shaping strands, color application';
-    case 'clinic': return 'gloved hands applying product, professional device in use, close-up of treatment technique on skin';
-    case 'fitness': return 'weights moving, hands gripping equipment, resistance band under tension, feet driving through a rep';
-    case 'fashion': return 'hands sliding clothes on a rack, fabric texture detail, hanger in motion, folding a garment';
-    default: return 'hands performing the core service action of the business';
-  }
-}
-function getCategoryScene3Action(cat) {
-  switch (cat) {
-    case 'restaurant': return 'plating a finished dish at the pass, stirring a pot, focused on the food, adjusting garnish';
-    case 'salon': return 'styling a client whose back is to the camera, holding scissors mid-cut, finishing a blowout';
-    case 'clinic': return 'performing a treatment on a reclined client, holding a professional device, focused on technique';
-    case 'fitness': return 'demonstrating an exercise, spotting a trainee, setting up equipment with focus';
-    case 'fashion': return 'arranging clothes on a display, greeting a customer at the rack, folding a garment with care';
-    default: return 'performing the core service of the business with focused professional expression';
-  }
-}
-function getCategoryVenue(cat) {
-  switch (cat) {
-    case 'restaurant': return 'restaurant kitchen and dining area';
-    case 'salon': return 'hair salon with chairs, mirrors and styling stations';
-    case 'clinic': return 'modern clean clinic treatment room';
-    case 'fitness': return 'modern gym or training studio';
-    case 'fashion': return 'stylish boutique interior with clothing racks and display';
-    default: return 'professional business interior';
-  }
-}
-
-// New business hook — third-person / customer-perspective narration.
-// The avatar is the SILENT employee; the voiceover describes the business
-// from an outside narrator's POV (never "היי אני" from the avatar).
-function getBusinessHook(desc, name, voiceGender = 'female') {
-  const cat = getBusinessCategory(desc);
-  const hooks = {
-    restaurant: `${name || 'המסעדה הזאת'} — המקום שכולם מדברים עליו`,
-    fashion: `${name || 'הבוטיק הזה'} — מוצאים כאן חתיכות שלא תמצאו בשום מקום`,
-    clinic: `${name || 'הקליניקה הזאת'} — כאן מקבלים יחס אמיתי ותוצאות`,
-    salon: `${name || 'המספרה הזאת'} — יוצאים מכאן אחרים`,
-    fitness: `${name || 'הסטודיו הזה'} — מתאמנים כאן אחרת`,
-    generic: `${name || 'העסק הזה'} — זה לא סתם עוד עסק בשכונה`,
-  };
-  // Third-person narration works for any gender; keep consistent.
-  return hooks[cat] || hooks.generic;
-}
-
-function getBusinessDefaultVoiceover(name, desc, hook, voiceGender = 'female') {
-  const h = hook || getBusinessHook(desc, name, voiceGender);
-  // Third-person / customer perspective — avatar does NOT talk.
-  return `${h}. הסוד? כל פרט נעשה בידיים, טרי, מהרגע הראשון. ב${name} מרגישים את ההבדל מיד — ${desc || 'חוויה אמיתית'}, וזה מה שגורם ללקוחות לחזור. בואו ל${name} — אתם חייבים לנסות את זה.`;
-}
-
-function getBusinessDefaultScenes(name, desc) {
-  const hook = getBusinessHook(desc, name);
-  const cat = getBusinessCategory(desc);
-  const uniform = getCategoryUniform(cat);
-  const closeUp = getCategoryCloseUp(cat);
-  const scene3Action = getCategoryScene3Action(cat);
-  const venue = getCategoryVenue(cat);
-  const silentRule = 'silent, NOT speaking, NOT looking like talking, mouth closed or natural relaxed smile, no open-mouth expression, no lip movement implied';
-  return [
-    {
-      type: 'הכנסה',
-      nb_prompt: `avatar wearing ${uniform} inside a ${venue}, starting their workday with calm confident posture, ${silentRule}, iPhone handheld documentary style, natural daylight, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar adjusts apron or uniform and looks around the workspace with calm confidence, subtle natural body motion, ${STABLE}`,
-      subtitle: hook
-    },
-    {
-      type: 'פעולה',
-      nb_prompt: `extreme close-up of ${closeUp}, NO face visible, NO full person, only hands and tools, cinematic shallow depth of field, warm natural lighting, professional documentary close-up, preserve atmosphere and colors from reference images`,
-      kling_prompt: `Slow cinematic motion of ${closeUp}, hands working smoothly with clear purpose, NO person visible. ${BUSINESS_CRAFT_LOCK} silent, smooth natural motion only, business appearance unchanged from reference`,
-      subtitle: `כל פרט נעשה בידיים`
-    },
-    {
-      type: 'בפעולה',
-      nb_prompt: `avatar wearing ${uniform} ${scene3Action}, inside the ${venue}, focused professional expression with mouth closed, authentic documentary moment, warm interior lighting, ${silentRule}, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle`,
-      kling_prompt: `Avatar ${scene3Action}, natural working motion, hands moving with purpose, focused expression. ${BUSINESS_CRAFT_LOCK} ${STABLE}`,
-      subtitle: `ב${name} עושים את זה ברמה אחרת`
-    },
-    {
-      type: 'הזמנה',
-      // Business-success contextual-result fallback: avatar IN the thriving
-      // moment of the business (customers visibly enjoying, workspace alive)
-      // rather than alone by the sign. Claude's live script overrides this.
-      nb_prompt: `avatar wearing ${uniform} inside ${name} at a business-success moment — workspace alive with customers/activity softly visible in background, ${name} signage or branded element in frame, warm relaxed smile with mouth closed, quiet professional pride, context-appropriate warm lighting from the venue, inviting atmosphere, ${silentRule}, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene`,
-      kling_prompt: `Avatar in the business-success moment of ${name}, mouth-closed warm smile forms gradually with eyes softening in quiet pride, customers or activity moving softly in the background, small welcoming nod. ${BUSINESS_CRAFT_LOCK} ${STABLE}`,
-      subtitle: `בואו ל${name} — אתם חייבים לנסות`
-    }
-  ];
-}
-
-async function generateBusinessScript(name, desc, hook, voiceGender) {
-  if (!ANTHROPIC_KEY) return null;
-  const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
-  const genderInstruction = voiceGender === 'male'
-    ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'/'מובכת'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר. אל תערבב לשון נקבה.`
-    : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה. אל תערבב לשון זכר.`;
-
-  const cat = getBusinessCategory(desc);
-  const uniform = getCategoryUniform(cat);
-  const closeUp = getCategoryCloseUp(cat);
-  const scene3Action = getCategoryScene3Action(cat);
-  const venue = getCategoryVenue(cat);
-  const categoryHints = {
-    restaurant: 'Focus on the craft of the food, freshness, the kitchen energy, what customers taste and feel.',
-    fashion: 'Focus on the boutique vibe, the pieces, the feel of the fabric, the personal touch.',
-    clinic: 'Focus on expertise, care, results, the calm professionalism of the treatment room.',
-    salon: 'Focus on the styling craft, the finish, the confidence customers leave with.',
-    fitness: 'Focus on the energy of the space, the trainers, how members feel leaving a session.',
-    generic: 'Focus on what the owner does uniquely well and why customers keep coming back.',
-  };
-
-  const callClaude = async (extra = '') => anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514', max_tokens: 2500,
-    messages: [{ role: 'user', content: `You are a UGC ad expert writing Hebrew scripts for LOCAL BUSINESSES. Redesigned business-video format:
-
-Business name: "${name}"
-Business description: ${desc}
-Auto-detected category: ${cat}
-Venue: ${venue}
-Uniform: ${uniform}
-Close-up action: ${closeUp}
-Scene-3 activity: ${scene3Action}
-Category guidance: ${categoryHints[cat]}
-
-${genderInstruction}
-
-CRITICAL ROLE RULES — THE AVATAR PLAYS THE SILENT EMPLOYEE/OWNER:
-- The avatar represents the employee or owner of "${name}" — NOT a customer.
-- The avatar NEVER talks, NEVER appears to talk, NEVER opens the mouth wide.
-- The avatar's mouth must be closed or a natural relaxed smile in every scene with the avatar.
-- Voiceover plays OVER the 4 scenes as background narration — it is NOT spoken by the avatar.
-
-NARRATION STYLE (CRITICAL — NOT FIRST PERSON FROM THE AVATAR):
-- The voiceover is third-person or customer-perspective narration ABOUT "${name}".
-- NEVER write "היי אני ..." or anything that sounds like the avatar speaking.
-- Natural Israeli narration like: "במסעדה הזאת כל מנה מוכנה טריה", "אם אתם מחפשים ...", "הסוד של ${name} זה ...", "כל מי שמגיע ל${name} מבין מיד ...".
-
-NEW 4-SCENE STRUCTURE:
-- Scene 1 (👋 הכנסה): avatar wearing ${uniform}, inside the ${venue}, starting their workday — putting on apron / standing behind the counter / arriving at the workspace. Mouth closed. Voiceover HOOK.
-- Scene 2 (✨ פעולה): EXTREME CLOSE-UP of ${closeUp}. NO face, NO full person — only hands and tools/products. Uses business/product reference photos for authenticity. Voiceover describes the craft.
-- Scene 3 (🏪 בפעולה): avatar ${scene3Action} inside the ${venue}. Mouth closed, focused professional expression. Voiceover describes the story / unique value of ${name}.
-- Scene 4 (🚀 הזמנה — BUSINESS-SUCCESS CONTEXTUAL RESULT): NOT just the avatar standing by the sign. Show the BUSINESS ALIVE AND THRIVING — the lifestyle/moment the business delivers to its customers, with the owner/employee happy IN that moment. Category → business-success context:
-  * restaurant → peak-service dining room with happy customers at tables in soft-focus background, owner at the pass with a quiet satisfied smile and a finished plate visible / outdoor terrace packed at sunset
-  * fashion/boutique → store full of engaged customers browsing the rack, owner at the counter with a satisfied warm smile, garments visible on mannequins behind
-  * clinic → calm consultation room with a happy client (off-camera or from behind — do NOT show identifiable client face) having just finished a treatment, clinician smiling quietly with professional pride
-  * salon → mid-styling moment with a happy client's styled hair visible (client face partly off-frame or from behind), stylist confident with tools in hand
-  * fitness → full class energised in soft-focus behind the trainer, trainer at the front with a proud calm smile, clients mid-movement
-  * generic service → the OUTCOME moment — finished work handed to a satisfied customer (customer from behind or partial), branded van / signage / tools visible, golden-hour exterior
-The lighting for scene 4 comes from the context (golden-hour terrace, warm dining-room pendants, mid-day natural daylight through the shopfront) — NOT generic "warm interior". The avatar may appear alongside their customers/workspace being USED, not alone by the sign.
-
-VOICEOVER TIMING — STRICT:
-- Scene 1: ~10 Hebrew words — hook about ${name}, third-person narration.
-- Scene 2: ~12 Hebrew words — describe the craft/action shown in the close-up.
-- Scene 3: ~16 Hebrew words — unique value / story of ${name}, what customers get.
-- Scene 4: ~10 Hebrew words — direct CTA: "בואו ל${name}", "תזמינו עכשיו", "אתם חייבים לנסות".
-
-SENTENCE COMPLETENESS (CRITICAL):
-כל משפט חייב להסתיים בתוך הסצנה שלו. כל סצנה = משפט שלם או שניים שלמים.
-- Each voiceover_sceneN must be a SELF-CONTAINED Hebrew sentence ending with . ? or !.
-- NEVER end a scene mid-phrase; NEVER start a scene with a word that depends on the previous one.
-
-HOOK (voiceover_scene1) — PRE-SET:
-voiceover_scene1 is already: "${hook}" — use this EXACT text.
-
-EVERY nb_prompt for scenes 1 and 3 MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". Scene 4 follows the same anatomy rule BUT its ending must OMIT "NEVER in a car, NEVER in a vehicle" — service businesses may legitimately show a branded vehicle in the success-result context. The no-phone rule stays for scene 4. Scene 2 (hands-only close-up) must explicitly say "NO face visible, NO full person, only hands and tools".
-
-EVERY nb_prompt for scenes with the avatar MUST include: "silent, NOT speaking, NOT looking like talking, mouth closed or natural relaxed smile, no open-mouth expression, no lip movement implied".
-
-END every Kling prompt with: "silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference"
-
-BUSINESS PRODUCT / CRAFT LOCK — CRITICAL (MANDATORY FOR SCENES 2, 3, 4):
-Kling has an "object drift" failure mode where the signature item (the dish being plated, the garment being styled, the tool being used, the branded signage) slowly morphs into a different object over the 5–8s video. EVERY kling_prompt for scenes 2, 3, 4 MUST include a lock block, BEFORE the ending phrase:
-(i) POSITIVE LOCK: "The signature items (tools, finished dish/garment/styling, branded signage, finished work) maintain EXACT same appearance throughout the entire video — same shape, color, logo, text, materials, position. They are rigid physical objects that do not morph. Every frame is visually identical in product identity to the reference."
-(ii) NEGATIVE LOCK: "no tool or product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no dish/garment/finished-work becoming a different object, no identity drift, no gradual transformation into a similar-but-different item."
-(iii) For scene 2 (close-up of hands+tools), emphasise: "the tools and the finished craft are the anchor — camera and light may shift, but the tools and item NEVER do."
-(iv) For scene 4 (business-success context), emphasise: "signage text and logo remain identical frame-to-frame; finished dishes/garments/tools/branded elements stay rigid."
-
-Return ONLY valid JSON (no markdown):
-{
-  "voiceover_scene1": "~10 Hebrew words — third-person hook about ${name}",
-  "voiceover_scene2": "~12 Hebrew words — describe the craft/action shown in the hands-only close-up",
-  "voiceover_scene3": "~16 Hebrew words — unique value / story of ${name}, what customers experience",
-  "voiceover_scene4": "~10 Hebrew words — direct CTA to visit ${name}",
-  "setting": "one-line description of the ${venue}",
-  "scenes": [
-    {
-      "type": "הכנסה",
-      "nb_prompt": "avatar wearing ${uniform} inside a ${venue}, starting their workday with calm confident posture, mouth closed with natural relaxed expression, silent NOT speaking, iPhone handheld documentary style, natural daylight, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar adjusts apron or uniform and looks around the workspace with calm confidence, subtle natural body motion, silent no talking no lip movement mouth closed or naturally relaxed, smooth natural motion only, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference",
-      "subtitle": "same as voiceover_scene1"
-    },
-    {
-      "type": "פעולה",
-      "nb_prompt": "extreme close-up of ${closeUp}, NO face visible, NO full person, only hands and tools, cinematic shallow depth of field, warm natural lighting, professional documentary close-up, preserve exact appearance from reference images",
-      "kling_prompt": "Slow cinematic motion of ${closeUp}, hands working smoothly with clear purpose, NO person visible. PRODUCT/CRAFT LOCK: the tools and the finished craft are the anchor of the shot — camera and light may shift, but the tools and item NEVER do. The tools, dish, garment, or finished work maintain EXACT same appearance throughout the entire video — same shape, color, logo, text, materials, position. Every frame is visually identical in product identity to the reference. no tool or product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no dish/garment/finished-work becoming a different object, no identity drift. silent smooth natural motion only, business appearance unchanged from reference",
-      "subtitle": "same as voiceover_scene2"
-    },
-    {
-      "type": "בפעולה",
-      "nb_prompt": "avatar wearing ${uniform} ${scene3Action}, inside the ${venue}, focused professional expression with mouth closed, silent NOT speaking, authentic documentary moment, warm interior lighting, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar ${scene3Action}, natural working motion hands moving with purpose focused expression. PRODUCT/CRAFT LOCK: The signature items (tools, the work in progress, the finished dish/garment/styled-result, branded signage if visible) maintain EXACT same appearance throughout the entire video — same shape, color, logo, text, materials, position. They are rigid physical objects that do not morph. Every frame shows the same tools and the same work from the reference. no tool or product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no identity drift, no gradual transformation into a similar-but-different item. silent no talking no lip movement mouth closed or naturally relaxed, smooth natural motion only, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference",
-      "subtitle": "same as voiceover_scene3"
-    },
-    {
-      "type": "הזמנה",
-      "nb_prompt": "avatar wearing ${uniform} inside the BUSINESS-SUCCESS CONTEXTUAL RESULT for ${name} — WRITE THE SPECIFIC MOMENT HERE based on the category (e.g., for a restaurant: 'standing calmly at the pass in a packed dining room at dinner service, happy customers softly out of focus at tables behind, warm pendant lighting, a finished plate visible on the pass'; for a fashion boutique: 'at the counter of the store with customers browsing the racks behind, satisfied warm smile, garments on mannequins softly visible'; for a salon: 'mid-styling with a happy client's styled hair visible from behind, tools in one hand, quiet professional pride'; for a clinic: 'quietly confident in a calm treatment room with a client off-camera or from behind'; for a fitness studio: 'at the front of the room with a full class moving behind, trainer with a proud calm expression'; for a generic service: 'outside next to the branded van at golden hour handing finished work to a customer shown from behind'). Warm relaxed mouth-closed smile, quiet pride. ${name} signage or branded element visible somewhere in frame. CONTEXTUAL LIGHTING from the scene (warm pendants, golden-hour, daylight through the shopfront) — NOT generic warm interior. Silent NOT speaking, correct human anatomy, exactly two arms, NEVER show a phone or mobile device in any scene",
-      "kling_prompt": "Avatar in the BUSINESS-SUCCESS CONTEXTUAL RESULT scene described in the scene-4 nb_prompt — physics + environment motion: customers move gently in the soft-focus background, other hands or glasses or tools drift softly in the periphery, ${name} signage or branded element catches the contextual light. Avatar's closed-lip warm smile forms gradually with eyes softening at the outer corners in quiet professional pride, small subtle nod or calm looking-around gesture, eyes may briefly glance at a customer or finished work off-screen then refocus on the lens, optional small welcoming hand gesture. PRODUCT/CRAFT LOCK: ${name} signage text and logo remain identical frame-to-frame — the letters, colors, and layout of the sign are rigid across the entire video. Finished dishes/garments/tools/branded elements visible in the scene stay rigid and do not morph. The signage, finished work, and branded elements are visually identical in every frame to the reference. no sign-text morphing, no logo transformation, no finished-dish or finished-garment reshaping, no color shifting on branded elements, no product or craft identity drift. Handheld documentary-style iPhone feel with mild wobble, silent no talking no lip movement, mouth closed or naturally relaxed, smooth natural motion only, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
-      "subtitle": "same as voiceover_scene4"
-    }
-  ]
-}${extra}` }]
-  });
-  const parseResponse = (message) => {
-    const text = message.content?.[0]?.text || '';
-    try {
-      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-      const v1 = parsed.voiceover_scene1 || '';
-      const v2 = parsed.voiceover_scene2 || '';
-      const v3 = parsed.voiceover_scene3 || '';
-      const v4 = parsed.voiceover_scene4 || '';
-      parsed.voiceover = joinVoiceoverChunks([v1, v2, v3, v4]);
-      if (parsed.scenes) {
-        parsed.scenes[0].subtitle = v1;
-        parsed.scenes[1].subtitle = v2;
-        parsed.scenes[2].subtitle = v3;
-        parsed.scenes[3].subtitle = v4;
-      }
-      return parsed;
-    } catch { return null; }
-  };
-
-  let parsed = parseResponse(await callClaude());
-  if (parsed && scriptGenderMismatch(parsed.voiceover, voiceGender)) {
-    console.warn(`[generateBusinessScript] Gender mismatch (wanted ${voiceGender}), regenerating...`);
-    const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD WRONG GENDER. ${genderInstruction}\nREWRITE every verb, adjective, and pronoun to match the speaker's gender (${voiceGender}). Do NOT mix genders. Verify every single word.`;
-    const retry = parseResponse(await callClaude(extraInstruction));
-    if (retry) parsed = retry;
-  }
-  if (parsed && scenesHaveBrokenSentences(parsed.scenes)) {
-    console.warn('[generateBusinessScript] Broken sentences across scenes, regenerating...');
-    const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES. REWRITE so each voiceover_sceneN is a SELF-CONTAINED grammatically complete Hebrew sentence ending with . ? or ! — and no scene starts with a word that depends on the previous scene.`;
-    const retry = parseResponse(await callClaude(extraInstruction));
-    if (retry) parsed = retry;
-  }
-  return parsed;
 }
