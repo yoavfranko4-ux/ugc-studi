@@ -11,7 +11,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import { prewarmVideos } from '../../../lib/video-cache.js'
-import { generateNBFrame, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
+import { generateNBFrame, buildKlingPrompt, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -210,6 +210,31 @@ function scriptHasForeignWords(fullText) {
 const DISCOVERY_OPENERS = /^(עד\s+ש|ואז\s+גיליתי|ואז\s+מצאתי|עד\s+שמצאתי|עד\s+שגיליתי)/u;
 const BEAT_2_REQUIRED_PHRASES = ['עד שגיליתי', 'ואז גיליתי', 'גיליתי את'];
 const BEAT_4_CTA_VERBS = ['תקנו', 'תזמינו', 'תיכנסו לאתר', 'תנסו'];
+// BEAT 1 generic-vibe phrases — let through "ad-speak" lines that pass the
+// forbidden-phrase list but still feel like a stock generic ad opener.
+const BEAT_1_GENERIC_WORDS = [
+  'משהו חסר',
+  'משהו קטן',
+  'הבדל גדול',
+  'פתרון חכם',
+  'יעשה הבדל',
+  'פתרון מושלם',
+  'מה שחיפשתי',
+  'בדיוק מה ש',
+];
+// BEAT 1 must START with a concrete sensory / situational opener. Without one
+// of these, the line tends to drift into generic ad-speak.
+const BEAT_1_SPECIFIC_PAIN_OPENERS = [
+  'התעוררתי',
+  'הרגשתי ש',
+  'התביישתי',
+  'כל פעם ש',
+  'בכל יום',
+  'כל בוקר',
+  'כל ערב',
+  'תמיד הסתכלתי',
+  'לא הצלחתי',
+];
 const BEAT_1_FORBIDDEN_PHRASES = [
   'מנסה כל פתרון',
   'ניסיתי כל פתרון',
@@ -247,9 +272,20 @@ function beatStructureViolations(scenes, productName) {
       violations.push(`Beat 1 contains generic phrase "${phrase}" — pain must be SPECIFIC to the product category (sensory or emotional language tied to the category, not a one-size-fits-all line).`);
     }
   }
-  // BEAT 1: must not mention the product name — the product is introduced in Beat 2.
+  // BEAT 1: no generic ad-vibe phrasings ("משהו חסר ביומיום", "פתרון חכם", etc.)
+  for (const word of BEAT_1_GENERIC_WORDS) {
+    if (v1.includes(word)) {
+      violations.push(`Beat 1 too generic — contains "${word}". Replace with a concrete sensory moment (התעוררתי / התביישתי / כל פעם ש... / כל בוקר ...) tied to the product category.`);
+    }
+  }
+  // BEAT 1: must not mention the product name — product belongs in Beat 2 only.
   if (productName && v1 && v1.toLowerCase().includes(productLower)) {
-    violations.push(`Beat 1 mentions the product name "${productName}" — the product must only be introduced in Beat 2.`);
+    violations.push(`Beat 1 contains product name "${productName}" — product name belongs in Beat 2 only.`);
+  }
+  // BEAT 1: must START with a concrete sensory / situational opener.
+  const hasSpecificOpener = BEAT_1_SPECIFIC_PAIN_OPENERS.some(o => v1.includes(o));
+  if (!hasSpecificOpener) {
+    violations.push(`Beat 1 must start with a specific pain opener like התעוררתי / הרגשתי ש / התביישתי / כל פעם ש / בכל יום / כל בוקר. Got: "${v1.slice(0, 80)}"`);
   }
 
   // BEAT 2: must open with a discovery phrase.
@@ -1124,8 +1160,21 @@ async function runJob(jobId, body) {
     console.log(`[Job ${jobId}] Starting all 4 Kling videos in parallel...`);
     const videoMeta = new Array(4).fill('none'); // 'kling' | 'static' | 'none'
     const runKlingOnce = async (i, frameUrl) => {
+      const beat = i + 1;
+      const klingScene4Context = i === 3;
+      const klingIsBusinessCraft = videoType === 'business';
+      // Wrap Claude's kling_prompt with the same skill layers we use for the
+      // NanoBanana frame: PRODUCT_LOCK + realism + negatives. This was the
+      // missing piece that let Kling drift the kippah and skip the realism
+      // anchors (handheld wobble, no AI feel, etc.).
+      const wrappedKlingPrompt = buildKlingPrompt(
+        scenes[i].kling_prompt,
+        beat,
+        productName,
+        { isBusinessCraft: klingIsBusinessCraft, scene4Context: klingScene4Context }
+      );
       const klingInput = {
-        prompt: scenes[i].kling_prompt,
+        prompt: wrappedKlingPrompt,
         image_url: frameUrl,
         duration: '5',
         aspect_ratio: '9:16',

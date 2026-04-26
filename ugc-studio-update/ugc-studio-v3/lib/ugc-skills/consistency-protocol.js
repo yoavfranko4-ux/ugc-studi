@@ -19,7 +19,14 @@ export const PRODUCT_LOCK =
   'to the reference, no product morphing, no shape changing, no color shifting, ' +
   'no logo transformation, no text changing, no material distortion, ' +
   'no product becoming a different object, no product identity drift, ' +
-  'no gradual transformation into a similar-but-different item.';
+  'no gradual transformation into a similar-but-different item. ' +
+  'PRODUCT CONSISTENCY: The product appearing in this scene must be IDENTICAL to ' +
+  'the product shown in the source image — same color, same texture, same shape, ' +
+  'same details, same embroidery/patterns, same stitching, same fabric weave, ' +
+  'same printed graphics. Do NOT change the product\'s appearance between scenes. ' +
+  'Do NOT modify color, do NOT alter material, do NOT redraw embroidery, ' +
+  'do NOT re-letter any text. The product is the central anchor of consistency ' +
+  'across all 4 scenes — identical in scene 1, scene 2, scene 3, and scene 4.';
 
 // PRODUCT_INTEGRATION is appended *after* PRODUCT_LOCK for scenes where a
 // person and product share the frame (beats 3 and 4). PRODUCT_LOCK preserves

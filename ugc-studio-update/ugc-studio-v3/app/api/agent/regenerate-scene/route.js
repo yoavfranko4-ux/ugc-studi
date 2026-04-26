@@ -21,7 +21,7 @@
 
 import { fal } from '@fal-ai/client'
 import { supabase } from '../../../../lib/supabase'
-import { generateNBFrame } from '../../../../lib/agent-pipeline.js'
+import { generateNBFrame, buildKlingPrompt } from '../../../../lib/agent-pipeline.js'
 
 export const maxDuration = 300;
 export const runtime = 'nodejs';
@@ -123,6 +123,7 @@ export async function POST(req) {
   if (!Array.isArray(businessPhotos)) {
     businessPhotos = Array.isArray(persistedInputs.businessPhotos) ? persistedInputs.businessPhotos : [];
   }
+  const productName = persistedInputs.productName || persistedInputs.businessName || null;
 
   const result = job.result || {};
   const scenes = result.story?.scenes || [];
@@ -215,8 +216,14 @@ export async function POST(req) {
     return Response.json({ error: 'NanoBanana frame generation returned no URL' }, { status: 502 });
   }
 
-  // 2) Re-run Kling on the new frame
-  const newVideoUrl = await runKlingForScene(klingPrompt, newFrameUrl);
+  // 2) Re-run Kling on the new frame — wrap the raw kling_prompt with the
+  // skill layers (PRODUCT_LOCK + realism + negatives) so the regenerated
+  // scene matches the same vibe the main /api/agent flow now produces.
+  const wrappedKlingPrompt = buildKlingPrompt(klingPrompt, sceneNumber, productName, {
+    isBusinessCraft: videoType === 'business',
+    scene4Context,
+  });
+  const newVideoUrl = await runKlingForScene(wrappedKlingPrompt, newFrameUrl);
   if (!newVideoUrl) {
     // NB frame succeeded but Kling failed 3x. Persist the new frame anyway
     // so the client can at least show the updated still while the user

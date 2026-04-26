@@ -17,6 +17,7 @@ import { fal } from '@fal-ai/client'
 import {
   generateUGCPrompt,
   buildPrompt,
+  buildKlingPrompt,
   getActorCard,
   getShotTypeForBeat,
   getShotType,
@@ -38,7 +39,7 @@ export const BUSINESS_CRAFT_LOCK = SKILL_BUSINESS_CRAFT_LOCK;
 
 // Re-export the full skill orchestrator so callers can reach for it via
 // lib/agent-pipeline.js without learning the ugc-skills path.
-export { generateUGCPrompt };
+export { generateUGCPrompt, buildKlingPrompt };
 
 // Generate a still frame via NanoBanana (fal.ai).
 //

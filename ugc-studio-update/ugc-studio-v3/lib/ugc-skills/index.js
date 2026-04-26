@@ -151,6 +151,62 @@ export function generateUGCPrompt({
   });
 }
 
+// Wrap a Claude-authored kling_prompt with the same skill layers we apply to
+// the NanoBanana side: PRODUCT_LOCK (when a product is present), realism
+// anchors that fight the polished AI feel, and the standard motion / anatomy
+// negatives. The Claude prompt is preserved verbatim — we only append; we
+// never rewrite the caller's intent.
+//
+//   klingPromptRaw — the kling_prompt string Claude produced for this scene
+//   beat           — 1..4; gates which negatives we add (e.g. scene 4 keeps
+//                    the no-vehicle rule for non-car products; scene 2 has
+//                    no person so person negatives are skipped)
+//   productName    — when present, append PRODUCT_LOCK + the product-specific
+//                    integration hint if we have one
+//   opts.isBusinessCraft — use BUSINESS_CRAFT_LOCK instead of PRODUCT_LOCK
+//   opts.scene4Context   — drop the no-vehicle negative for scene 4 (car
+//                          products legitimately show the car)
+export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
+  const raw = (klingPromptRaw || '').trim();
+  const parts = [raw];
+
+  // Skip person-only realism for the product-only beauty shot (scene 2).
+  const hasPerson = beat !== 2;
+
+  // PRODUCT_LOCK — every scene that contains the product (beats 2, 3, 4).
+  if (productName && beat !== 1) {
+    parts.push(getProductLock(productName, opts.isBusinessCraft === true));
+    const productKey = String(productName).toLowerCase().trim();
+    const productHint = PRODUCT_INTEGRATION_BY_PRODUCT[productKey];
+    if (productHint) parts.push(productHint);
+  }
+
+  // Realism anchors — short, Kling-friendly versions. Person + non-person
+  // shots both get the handheld iPhone wobble + anti-AI cues.
+  const realism = hasPerson
+    ? 'REALISM: handheld iPhone selfie wobble, real human texture, candid not posed, not AI-generated feel, real unretouched skin with natural pores and asymmetry, warm natural indoor lighting, flat washed-out color, low saturation, no beauty filter, no studio lighting, no LUT, looks like a real phone clip not a render.'
+    : 'REALISM: handheld iPhone back-camera wobble, slight natural shake, ambient room lighting, flat washed-out color, real surface texture, not a render, not a catalog shot.';
+  parts.push(realism);
+
+  // Negatives — short Kling list. Anatomy + product consistency + the two
+  // hard product-frame rules (no phone, no vehicle for non-car shots).
+  const negatives = [
+    'no face distortion',
+    'stable face anatomy',
+    'no AI artifacts',
+    'no morphing',
+    'no melting hands',
+    'no extra limbs',
+    'consistent product appearance across every frame',
+    'NEVER show a phone or mobile device in any scene',
+  ];
+  if (!opts.scene4Context) negatives.push('NEVER in a car, NEVER in a vehicle');
+  negatives.push('no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays');
+  parts.push(`NEGATIVES: ${negatives.join(', ')}.`);
+
+  return parts.filter(Boolean).join(' ');
+}
+
 // Re-exports so consumers can reach for lower-level pieces without chasing down
 // individual files.
 export {
