@@ -65,21 +65,71 @@ const BEAT_ENVIRONMENTS = {
   4: 'same indoor location as before, satisfied expression, everyday natural setting, casual home atmosphere'
 };
 
+// Business-mode environments. Generic enough to cover any business category
+// (barber, yoga, bakery, garage, restaurant) — the AI infers the specific
+// venue from the business name + description that we inject into Layer 2.
+const BUSINESS_BEAT_ENVIRONMENTS = {
+  1: 'realistic everyday setting that feels relevant to the business ' +
+     'context (NOT a home with shopping bags, NOT a kitchen, ' +
+     'NOT a bedroom). The avatar appears as a customer or person ' +
+     'who has had a frustrating experience with a similar service ' +
+     'in the past — sitting somewhere generic and neutral (a public ' +
+     'space, waiting area, or appropriate location for the business ' +
+     'category). Frustrated, tired, or disappointed expression. ' +
+     'Gaze drifts off-camera as if recalling a bad past experience. ' +
+     'iPhone selfie style, casual handheld, natural daylight. ' +
+     'NEVER show shopping bags, NEVER show a home bedroom or kitchen, ' +
+     'NEVER show retail brand logos. Setting should feel "before" — ' +
+     'a moment of disappointment that the business will solve.',
+
+  2: 'AESTHETIC SHOWCASE of the business at its absolute best moment. ' +
+     'Wide or medium shot showing the business environment in ' +
+     'its most appealing, aspirational form — the kind of shot ' +
+     'that makes viewers think "I want to experience this." ' +
+     'Soft natural light, beautifully composed, clean and inviting. ' +
+     'STRICTLY AVOID: extreme close-ups of body parts, mess or debris, ' +
+     'anything that could look unsanitary, unappealing, or aggressive. ' +
+     'No tight crops on hands working with sharp tools, no visible ' +
+     'dirt or scattered residue. ' +
+     'Style: high-quality phone footage that feels real, NOT ' +
+     'overproduced stock photography, NOT studio-lit. ' +
+     'GOAL: convey the elevated experience of the business in one shot.',
+
+  3: 'Avatar AUTHENTICALLY EXPERIENCING the business service in action. ' +
+     'Phone footage feel — slight handheld wobble, natural lighting, ' +
+     'casual unposed moment. Show the service happening to or with ' +
+     'the avatar in a way that is aesthetically pleasant and inviting. ' +
+     'AVOID: over-produced studio look, dramatic theatrical lighting, ' +
+     'staged poses. The viewer should feel "this is real, this is ' +
+     'happening in a real place right now". Aesthetic but everyday. ' +
+     'Lighting and composition match the warmth and tone of the ' +
+     'business — but always feels like a real iPhone capture, not ' +
+     'a commercial.',
+
+  4: 'Avatar smiling confidently with relaxed satisfaction, business ' +
+     'environment visible but tastefully blurred in the background. ' +
+     'Same indoor location and lighting consistency as scene 3. ' +
+     'iPhone selfie energy — warm, genuine, inviting. The "after" ' +
+     'moment that completes the story. Natural unforced expression ' +
+     'of contentment.'
+};
+
 // Scene 4 context — a continuation, not a new scene. Default: stay in the
 // scene-1 location (home/office/kitchen). Car-product override only.
-function getScene4Environment(productName) {
+function getScene4Environment(productName, { isBusinessCraft = false } = {}) {
   const name = String(productName || '').toLowerCase();
-  if (name.includes('רכב') || name.includes('car') || name.includes('אוטו')) {
+  if (!isBusinessCraft && (name.includes('רכב') || name.includes('car') || name.includes('אוטו'))) {
     return 'sitting in the driver seat of their car, calm satisfied moment after using the product, natural in-car lighting through the windshield';
   }
-  return BEAT_ENVIRONMENTS[4];
+  return isBusinessCraft ? BUSINESS_BEAT_ENVIRONMENTS[4] : BEAT_ENVIRONMENTS[4];
 }
 
-function getEnvironmentForBeat(beat, productName, { scene4Context = false } = {}) {
+function getEnvironmentForBeat(beat, productName, { scene4Context = false, isBusinessCraft = false } = {}) {
   if (beat === 4 && scene4Context !== false) {
-    return getScene4Environment(productName);
+    return getScene4Environment(productName, { isBusinessCraft });
   }
-  return BEAT_ENVIRONMENTS[beat] || BEAT_ENVIRONMENTS[2];
+  const table = isBusinessCraft ? BUSINESS_BEAT_ENVIRONMENTS : BEAT_ENVIRONMENTS;
+  return table[beat] || table[2];
 }
 
 // Orchestrator. Builds a single scene's NanoBanana prompt end-to-end.
@@ -121,12 +171,25 @@ export function generateUGCPrompt({
   const shot = getShotType(shotType);
   const camera = shot.camera;
 
-  const scenario = [
-    pain ? `Emotional beat: ${pain}.` : '',
-    sceneContext || ''
-  ].filter(Boolean).join(' ');
+  // Layer 2 — Scenario. Business mode injects the business name + description
+  // so NanoBanana can adapt the visual environment to the actual venue type
+  // (barber, yoga studio, bakery, garage, etc.) while Layer 3 keeps the
+  // generic structural beats. Product mode keeps the original behavior.
+  const scenario = isBusinessCraft
+    ? [
+        pain ? `Emotional beat: ${pain}.` : '',
+        `business "${productName || ''}" — ${sceneContext || ''}.`,
+        'Adapt the visual environment to match the business type ' +
+          'naturally (a barber shop, yoga studio, bakery, garage, etc. — ' +
+          'infer from the business name and description). Keep the ' +
+          'setting realistic and consistent with the business category.'
+      ].filter(Boolean).join(' ')
+    : [
+        pain ? `Emotional beat: ${pain}.` : '',
+        sceneContext || ''
+      ].filter(Boolean).join(' ');
 
-  const env = environment || getEnvironmentForBeat(beat, productName, { scene4Context });
+  const env = environment || getEnvironmentForBeat(beat, productName, { scene4Context, isBusinessCraft });
 
   const productLockPhrase = productOnly
     ? ''
