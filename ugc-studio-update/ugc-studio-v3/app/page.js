@@ -53,6 +53,9 @@ export default function LandingPage() {
   const [heroProduct, setHeroProduct] = useState('icecream')
   const [flowProduct, setFlowProduct] = useState('whitening')
   const [liveCount, setLiveCount] = useState(1237)
+  // Videos that play INSIDE the cauldron (where "yotzr" text used to be).
+  // 4s each, 0.5s crossfade. Independent of heroProduct (12s ingredient cycle).
+  const [cauldronVideoIndex, setCauldronVideoIndex] = useState(0)
 
   const [scrolled, setScrolled] = useState(false)
   const [typedText, setTypedText] = useState('')
@@ -185,6 +188,14 @@ export default function LandingPage() {
         return HERO_CYCLE[(i + 1) % HERO_CYCLE.length]
       })
     }, 12000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Inner cauldron videos: 4s each with 0.5s crossfade.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCauldronVideoIndex(i => (i + 1) % PRODUCT_CYCLE.length)
+    }, 4000)
     return () => clearInterval(interval)
   }, [])
 
@@ -403,21 +414,25 @@ export default function LandingPage() {
                   <line x1="32" y1="56" x2="268" y2="56" stroke="url(#rimGradient)" strokeWidth="3" />
                   <ellipse cx="150" cy="70" rx="105" ry="14" fill="url(#cauldronInner)" />
 
-                  <text
-                    x="150"
-                    y="145"
-                    textAnchor="middle"
-                    fontFamily="Heebo, sans-serif"
-                    fontSize="36"
-                    fontWeight="900"
-                    fill="#FF0080"
-                    fillOpacity="0.95"
-                    letterSpacing="3"
-                  >
-                    yotzr
-                  </text>
-                  <rect x="215" y="130" width="8" height="8" fill="#FF0080" />
-                  <line x1="60" y1="170" x2="240" y2="170" stroke="#FF0080" strokeWidth="1" strokeOpacity="0.3" />
+                  {/* Video screen INSIDE the cauldron — replaces "yotzr" text.
+                      foreignObject scales with the cauldron viewBox so the videos
+                      sit perfectly inside the neon body regardless of cauldron size. */}
+                  <foreignObject x="105" y="78" width="90" height="124">
+                    <div className="cauldron-screen" xmlns="http://www.w3.org/1999/xhtml">
+                      {PRODUCT_CYCLE.map((key, i) => (
+                        <video
+                          key={key}
+                          src={PRODUCTS[key].video}
+                          autoPlay
+                          muted
+                          loop
+                          playsInline
+                          preload="auto"
+                          className={`cauldron-video ${cauldronVideoIndex === i ? 'active' : ''}`}
+                        />
+                      ))}
+                    </div>
+                  </foreignObject>
 
                   <path d="M 32 80 Q 10 90 18 115" stroke="#FF0080" strokeWidth="3" fill="none" />
                   <path d="M 268 80 Q 290 90 282 115" stroke="#FF0080" strokeWidth="3" fill="none" />
@@ -779,13 +794,59 @@ export default function LandingPage() {
 
       {/* FOOTER */}
       <footer className="footer">
-        <div className="brand">yotzr. <span style={{ color: 'var(--ink-3)' }}>© 2026</span></div>
-        <div>MADE IN ISRAEL · <span style={{ color: 'var(--accent)' }}>●</span> HEBREW-NATIVE AI</div>
-        <div>
-          <a href="/legal#contact" style={{ color: 'var(--ink-2)', marginInlineEnd: 20 }}>צור קשר</a>
-          <a href="/legal#terms" style={{ color: 'var(--ink-2)', marginInlineEnd: 20 }}>תקנון</a>
-          <a href="/legal#privacy" style={{ color: 'var(--ink-2)', marginInlineEnd: 20 }}>פרטיות</a>
-          <a href="/legal#refund" style={{ color: 'var(--ink-2)' }}>ביטול והחזר</a>
+        <div className="footer-grid">
+          <div className="footer-brand-block">
+            <div className="footer-logo">
+              <span className="footer-logo-dot" />
+              <span className="footer-logo-text">yotzr<span className="footer-logo-version">· BETA</span></span>
+            </div>
+            <p className="footer-tagline">
+              סרטוני UGC מקצועיים בעברית — בלי מצלמה, בלי שחקנים. AI שמדבר עברית כמו שצריך.
+            </p>
+            <div className="footer-made">
+              <span className="footer-flag">●</span>
+              MADE IN ISRAEL · HEBREW-NATIVE AI
+            </div>
+          </div>
+
+          <div className="footer-col">
+            <div className="footer-col-title">מוצר</div>
+            <a href="#flow" className="footer-link">איך זה עובד</a>
+            <a href="#pricing" className="footer-link">מחירים</a>
+            <a href="/login" className="footer-link">כניסה</a>
+          </div>
+
+          <div className="footer-col">
+            <div className="footer-col-title">משפטי</div>
+            <a href="/legal#terms" className="footer-link">תקנון</a>
+            <a href="/legal#privacy" className="footer-link">פרטיות</a>
+            <a href="/legal#refund" className="footer-link">ביטול והחזר</a>
+          </div>
+
+          <div className="footer-col">
+            <div className="footer-col-title">צור קשר</div>
+            <a href="/legal#contact" className="footer-link">צור קשר</a>
+            <a href="https://www.instagram.com/yotzr.ai" target="_blank" rel="noopener noreferrer" className="footer-link">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="14" height="14" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="5" />
+                <circle cx="12" cy="12" r="4" />
+                <circle cx="17.5" cy="6.5" r="0.7" fill="currentColor" stroke="none" />
+              </svg>
+              Instagram
+            </a>
+            <a href="https://www.tiktok.com/@yotzr.ai" target="_blank" rel="noopener noreferrer" className="footer-link">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" aria-hidden="true">
+                <path d="M19.6 6.5a4.6 4.6 0 0 1-3.6-1.7v8.7a5.5 5.5 0 1 1-5.5-5.5h.7v3a2.6 2.6 0 1 0 1.8 2.5V2h2.9a4.6 4.6 0 0 0 4.6 4.6v0z"/>
+              </svg>
+              TikTok
+            </a>
+          </div>
+        </div>
+
+        <div className="footer-bottom">
+          <span className="footer-copy">© 2026 Yotzr · ברוש 3, נתניה</span>
+          <span className="footer-bottom-spacer" />
+          <span className="footer-bottom-meta">כל הזכויות שמורות</span>
         </div>
       </footer>
 
@@ -862,17 +923,32 @@ export default function LandingPage() {
         .nav-cta { display: flex; gap: 12px; align-items: center; }
 
         .btn {
-          padding: 10px 20px; border-radius: 4px;
+          padding: 10px 20px; border-radius: 8px;
           font-size: 14px; font-weight: 600;
-          transition: all .2s;
+          min-height: 44px;
+          transition: transform .3s cubic-bezier(.16,1,.3,1),
+                      box-shadow .3s cubic-bezier(.16,1,.3,1),
+                      background .3s cubic-bezier(.16,1,.3,1),
+                      color .3s cubic-bezier(.16,1,.3,1),
+                      border-color .3s cubic-bezier(.16,1,.3,1);
           display: inline-flex; align-items: center; gap: 8px;
           font-family: var(--body);
+          cursor: pointer;
         }
-        .btn-ghost { color: var(--ink); border: 1px solid var(--line-2); }
-        .btn-ghost:hover { border-color: var(--ink); background: var(--ink); color: var(--bg); }
-        .btn-primary { background: var(--accent); color: #0A0908; font-weight: 700; }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 30px -8px var(--accent); }
-        .btn-lg { padding: 18px 30px; font-size: 15px; }
+        .btn:focus-visible {
+          outline: 2px solid var(--accent);
+          outline-offset: 3px;
+        }
+        .btn-ghost { color: var(--ink); border: 1px solid var(--line-2); background: rgba(255,255,255,.03); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+        .btn-ghost:hover { border-color: var(--ink); background: var(--ink); color: var(--bg); transform: translateY(-2px); }
+        .btn-primary {
+          background: linear-gradient(135deg, var(--accent) 0%, #d946ef 100%);
+          color: #0A0908; font-weight: 700;
+          box-shadow: 0 8px 24px -8px var(--accent), inset 0 1px 0 rgba(255,255,255,.18);
+        }
+        .btn-primary:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 16px 40px -10px var(--accent), inset 0 1px 0 rgba(255,255,255,.22); }
+        .btn-primary:active { transform: translateY(-1px) scale(.99); }
+        .btn-lg { padding: 18px 30px; font-size: 15px; min-height: 56px; border-radius: 12px; }
         .btn-lg svg { width: 16px; height: 16px; }
 
         .hero-toggle {
@@ -934,7 +1010,8 @@ export default function LandingPage() {
         }
         .hero-sub {
           font-size: 22px; font-weight: 400; color: var(--ink-2);
-          max-width: 560px; line-height: 1.45; margin-top: 32px;
+          max-width: 560px; line-height: 1.55; margin-top: 32px;
+          letter-spacing: -.005em;
         }
         .hero-cta-row { display: flex; gap: 12px; margin-top: 40px; align-items: center; flex-wrap: wrap; }
         .hero-cta-micro {
@@ -1010,6 +1087,32 @@ export default function LandingPage() {
           57% { transform: translateX(calc(-50% + 4px)) rotate(1deg); }
           60% { transform: translateX(calc(-50% - 3px)) rotate(-0.5deg); }
           63% { transform: translateX(calc(-50% + 3px)) rotate(0.5deg); }
+        }
+
+        /* Video screen embedded inside the cauldron via foreignObject.
+           Sits in the SVG coordinate space, so it scales with the cauldron. */
+        .cauldron-screen {
+          width: 100%; height: 100%;
+          position: relative;
+          border-radius: 6px;
+          overflow: hidden;
+          background: #000;
+          box-shadow:
+            inset 0 0 14px rgba(255,0,128,.7),
+            inset 0 0 4px rgba(255,0,128,.9);
+          border: 1px solid rgba(255,0,128,.55);
+        }
+        .cauldron-video {
+          position: absolute; inset: 0;
+          width: 100%; height: 100%;
+          object-fit: cover;
+          opacity: 0;
+          transition: opacity .5s ease-in-out;
+          display: block;
+        }
+        .cauldron-video.active { opacity: 1; }
+        @media (prefers-reduced-motion: reduce) {
+          .cauldron-video { transition: none; }
         }
 
         .bubble { opacity: 0; animation: bubbleUp 2s ease-in-out infinite; }
@@ -1247,21 +1350,45 @@ export default function LandingPage() {
           margin: 0 auto; line-height: 1.5;
         }
 
-        .tabs { display: flex; gap: 12px; justify-content: center; margin-bottom: 60px; flex-wrap: wrap; }
+        .tabs { display: flex; gap: 14px; justify-content: center; margin-bottom: 60px; flex-wrap: wrap; }
         .tab {
-          padding: 14px 28px; border: 1px solid var(--line-2);
-          background: var(--bg-2); color: var(--ink-2);
-          border-radius: 4px; font-family: var(--display);
-          font-weight: 600; font-size: 15px; transition: all .25s;
-          display: flex; align-items: center; gap: 10px; position: relative;
+          padding: 14px 24px;
+          border: 1px solid rgba(217,70,239,.18);
+          background: rgba(255,255,255,.035);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          color: var(--ink-2);
+          border-radius: 14px;
+          font-family: var(--display);
+          font-weight: 600; font-size: 15px;
+          min-height: 48px;
+          transition: transform .35s cubic-bezier(.16,1,.3,1),
+                      border-color .35s cubic-bezier(.16,1,.3,1),
+                      background .35s cubic-bezier(.16,1,.3,1),
+                      box-shadow .35s cubic-bezier(.16,1,.3,1),
+                      color .35s cubic-bezier(.16,1,.3,1);
+          display: inline-flex; align-items: center; gap: 10px; position: relative;
+          cursor: pointer;
         }
         .tab .tab-num {
           font-family: var(--mono); font-size: 10px; color: var(--ink-3);
-          font-weight: 500; letter-spacing: .12em;
+          font-weight: 600; letter-spacing: .14em;
         }
-        .tab:hover:not(.active) { border-color: var(--ink-2); color: var(--ink); }
-        .tab.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-        .tab.active .tab-num { color: var(--accent); }
+        .tab:hover:not(.active) {
+          border-color: rgba(217,70,239,.55);
+          color: var(--ink);
+          transform: translateY(-2px) scale(1.02);
+          box-shadow: 0 12px 28px -10px rgba(217,70,239,.35);
+          background: rgba(217,70,239,.06);
+        }
+        .tab.active {
+          background: linear-gradient(135deg, var(--accent) 0%, #d946ef 100%);
+          color: var(--bg);
+          border-color: var(--accent);
+          box-shadow: 0 14px 36px -10px rgba(255,0,128,.55), 0 0 0 1px rgba(255,255,255,.1) inset;
+          transform: translateY(-1px);
+        }
+        .tab.active .tab-num { color: var(--bg); opacity: .8; }
 
         .flow-branch { max-width: 920px; margin: 0 auto; position: relative; }
         .branch-line {
@@ -1571,17 +1698,117 @@ export default function LandingPage() {
           font-size: clamp(56px, 9vw, 140px); line-height: .92;
           letter-spacing: -.04em; margin-bottom: 24px;
         }
-        .final-cta-title .accent { color: var(--accent); }
-        .final-cta-sub { font-size: 22px; color: var(--ink-2); margin-bottom: 40px; }
+        .final-cta-title .accent {
+          background: linear-gradient(135deg, var(--accent) 0%, #ff8be0 50%, #d946ef 100%);
+          -webkit-background-clip: text; background-clip: text;
+          -webkit-text-fill-color: transparent;
+          color: transparent;
+          text-shadow: 0 0 50px rgba(255,0,128,.45);
+        }
+        .final-cta-sub {
+          font-size: 22px; color: var(--ink-2);
+          margin-bottom: 40px; line-height: 1.5;
+          max-width: 600px; margin-inline: auto;
+        }
 
         .footer {
-          padding: 40px; border-top: 1px solid var(--line);
-          display: flex; justify-content: space-between; align-items: center;
-          flex-wrap: wrap; gap: 20px;
-          font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
+          padding: 80px 40px 28px;
+          border-top: 1px solid var(--line);
+          background:
+            radial-gradient(ellipse at 50% 0%, rgba(255,0,128,.08), transparent 60%),
+            var(--bg);
+          color: var(--ink-2);
+          position: relative;
+        }
+        .footer-grid {
+          max-width: 1200px;
+          margin: 0 auto 56px;
+          display: grid;
+          grid-template-columns: 1.6fr 1fr 1fr 1fr;
+          gap: 56px;
+          align-items: start;
+        }
+        .footer-brand-block { max-width: 360px; }
+        .footer-logo {
+          display: inline-flex; align-items: center; gap: 10px;
+          margin-bottom: 16px;
+        }
+        .footer-logo-dot {
+          width: 10px; height: 10px; border-radius: 2px;
+          background: var(--accent);
+          box-shadow: 0 0 14px var(--accent-glow);
+        }
+        .footer-logo-text {
+          font-family: var(--display); font-weight: 900;
+          font-size: 22px; letter-spacing: -.03em;
+          color: var(--ink);
+        }
+        .footer-logo-version {
+          font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
+          color: var(--ink-3); font-weight: 500; margin-inline-start: 8px;
+        }
+        .footer-tagline {
+          color: var(--ink-2);
+          font-size: 14px; line-height: 1.6;
+          margin-bottom: 18px;
+        }
+        .footer-made {
+          font-family: var(--mono); font-size: 10px; letter-spacing: .18em;
+          text-transform: uppercase; color: var(--ink-3);
+          display: inline-flex; align-items: center; gap: 8px;
+        }
+        .footer-flag {
+          color: var(--accent);
+          text-shadow: 0 0 8px var(--accent-glow);
+          font-size: 12px;
+        }
+
+        .footer-col { display: flex; flex-direction: column; gap: 10px; }
+        .footer-col-title {
+          font-family: var(--mono); font-size: 11px; letter-spacing: .22em;
+          text-transform: uppercase; color: #d946ef;
+          font-weight: 700; margin-bottom: 6px;
+        }
+        .footer-link {
+          font-family: var(--body); font-size: 14px;
+          color: var(--ink-2);
+          display: inline-flex; align-items: center; gap: 8px;
+          transition: color .25s cubic-bezier(.16,1,.3,1),
+                      transform .25s cubic-bezier(.16,1,.3,1);
+          width: fit-content;
+        }
+        .footer-link:hover {
+          color: #ff8be0;
+          transform: translateX(-3px);
+        }
+        .footer-link svg {
+          opacity: .8; transition: opacity .25s;
+        }
+        .footer-link:hover svg { opacity: 1; color: #ff8be0; }
+
+        .footer-bottom {
+          max-width: 1200px;
+          margin: 0 auto;
+          padding-top: 22px;
+          border-top: 1px solid var(--line);
+          display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+          font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
           text-transform: uppercase; color: var(--ink-3);
         }
-        .footer .brand { font-family: var(--display); letter-spacing: -.02em; font-size: 14px; text-transform: none; }
+        .footer-copy { color: var(--ink-2); }
+        .footer-bottom-spacer { flex: 1; }
+
+        @media (max-width: 900px) {
+          .footer { padding: 56px 20px 24px; }
+          .footer-grid {
+            grid-template-columns: 1fr 1fr;
+            gap: 36px 24px;
+            margin-bottom: 40px;
+          }
+          .footer-brand-block { grid-column: 1 / -1; max-width: none; }
+          .footer-bottom { justify-content: center; text-align: center; }
+          .footer-bottom-spacer { display: none; }
+        }
 
         @media (max-width: 900px) {
           .nav { padding: 16px 20px; }
@@ -1763,18 +1990,57 @@ export default function LandingPage() {
         .mid-cta-sub { color: var(--ink-2); font-size: 15px; line-height: 1.5; }
         .mid-cta-btn {
           flex-shrink: 0;
+          position: relative;
           padding: 18px 32px;
           font-size: 16px; font-weight: 800;
           min-height: 56px;
           background: linear-gradient(135deg, #ff0080 0%, #d946ef 100%);
           color: #fff;
           border-radius: 100px;
-          box-shadow: 0 12px 36px -8px rgba(217,70,239,.65);
-          transition: transform .2s, box-shadow .2s;
+          box-shadow: 0 12px 36px -8px rgba(217,70,239,.65),
+                      inset 0 1px 0 rgba(255,255,255,.22);
+          transition: transform .35s cubic-bezier(.16,1,.3,1),
+                      box-shadow .35s cubic-bezier(.16,1,.3,1);
+        }
+        .mid-cta-btn::before {
+          content: '';
+          position: absolute;
+          inset: -8px -16px;
+          border-radius: inherit;
+          background: radial-gradient(ellipse at center, rgba(217,70,239,.55), transparent 70%);
+          z-index: -1;
+          opacity: .6;
+          filter: blur(14px);
+          transition: opacity .35s cubic-bezier(.16,1,.3,1);
         }
         .mid-cta-btn:hover {
           transform: translateY(-3px) scale(1.04);
-          box-shadow: 0 18px 48px -8px rgba(217,70,239,.85);
+          box-shadow: 0 22px 56px -8px rgba(217,70,239,.85),
+                      inset 0 1px 0 rgba(255,255,255,.28);
+        }
+        .mid-cta-btn:hover::before { opacity: 1; }
+
+        /* Cinematic ambient blob in hero — slow oscillation, behind everything. */
+        .hero::before {
+          content: '';
+          position: absolute;
+          top: -10%; right: -20%;
+          width: 70vw; height: 70vw;
+          max-width: 900px; max-height: 900px;
+          border-radius: 50%;
+          background: radial-gradient(circle at 40% 40%, rgba(255,0,128,.18), transparent 60%);
+          filter: blur(60px);
+          z-index: 0;
+          pointer-events: none;
+          animation: hero-blob 22s ease-in-out infinite;
+        }
+        @keyframes hero-blob {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          33%      { transform: translate(-6vw, 4vh) scale(1.1); }
+          66%      { transform: translate(4vw, -3vh) scale(.95); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .hero::before { animation: none; }
         }
 
         /* Subtle floating particles in the hero. */
