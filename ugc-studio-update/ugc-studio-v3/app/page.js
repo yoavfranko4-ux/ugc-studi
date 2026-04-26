@@ -749,8 +749,10 @@ export default function LandingPage() {
         <div className="brand">yotzr. <span style={{ color: 'var(--ink-3)' }}>© 2026</span></div>
         <div>MADE IN ISRAEL · <span style={{ color: 'var(--accent)' }}>●</span> HEBREW-NATIVE AI</div>
         <div>
-          <a href="#" style={{ color: 'var(--ink-2)', marginInlineEnd: 20 }}>תנאי שימוש</a>
-          <a href="#" style={{ color: 'var(--ink-2)' }}>פרטיות</a>
+          <a href="/legal#contact" style={{ color: 'var(--ink-2)', marginInlineEnd: 20 }}>צור קשר</a>
+          <a href="/legal#terms" style={{ color: 'var(--ink-2)', marginInlineEnd: 20 }}>תקנון</a>
+          <a href="/legal#privacy" style={{ color: 'var(--ink-2)', marginInlineEnd: 20 }}>פרטיות</a>
+          <a href="/legal#refund" style={{ color: 'var(--ink-2)' }}>ביטול והחזר</a>
         </div>
       </footer>
 
