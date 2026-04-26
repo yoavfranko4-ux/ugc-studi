@@ -2,36 +2,39 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-// Product → presenter avatar (keeps the recipe animation visually coherent).
-const PRODUCT_AVATARS = { icecream: 'noa', kipa: 'daniel', teeth: 'maya' }
-const PRODUCT_CYCLE = ['icecream', 'kipa', 'teeth']
-
-// Product images now ship as {base}.webp + {base}.jpg for mobile fallback,
-// so `image` stores the base path (no extension).
+// Real customer demos. The flow tabs and the hero video stack both
+// read from this single source of truth.
+const PRODUCT_CYCLE = ['whitening', 'perfume', 'barbershop']
 const PRODUCTS = {
-  icecream: {
-    script: "חזית הגלידריה הכי צבעונית בתל אביב. גלידה איטלקית עם טעמים ייחודיים, ישיבה בחוץ, אווירה שכונתית חמה. מתאים לקיץ, למשפחות, ולחברים.",
-    image: "/landing-assets/product-icecream",
-    imageW: 1000, imageH: 545,
-    video: "/landing-assets/video-icecream.mp4",
-    poster: "/landing-assets/poster-icecream.jpg",
-    selected: 0,
-  },
-  kipa: {
-    script: "כיפת קטיפה איכותית בגווני ורוד ופודרה עם רקמה מעוצבת. מתאימה לחתונות, לבר מצווה ולשבת. הרגשה רכה, מראה אלגנטי, ייחודית במיוחד.",
-    image: "/landing-assets/product-kipa",
-    imageW: 500, imageH: 500,
-    video: "/landing-assets/video-kipa.mp4",
-    poster: "/landing-assets/poster-kipa.jpg",
-    selected: 1,
-  },
-  teeth: {
+  whitening: {
     script: "אבקת הלבנת שיניים טבעית 100% על בסיס פחם פעיל. מלבינה ומנקה מבלי לפגוע באמייל. רק 30 שניות ביום לחיוך לבן ובוהק.",
-    image: "/landing-assets/product-teeth",
-    imageW: 1000, imageH: 1000,
-    video: "/landing-assets/video-teeth.mp4",
-    poster: "/landing-assets/poster-teeth.jpg",
-    selected: 2,
+    image: "/examples/whitening-product.jpg",
+    video: "/examples/whitening-video.mp4",
+    poster: "/examples/whitening-product.jpg",
+    selected: 2, // Maya
+    cat: 'מוצר',
+    avatar: 'Maya',
+    label: '🦷 אבקת הלבנה',
+  },
+  perfume: {
+    script: "בושם שמש — תערובת ייחודית של פירות הדר ופרחים בלזמיים. ניחוח רענן ליום, חם ומפנק לערב. נשאר על העור 12 שעות.",
+    image: "/examples/perfume-product.jpg",
+    video: "/examples/perfume-video.mp4",
+    poster: "/examples/perfume-product.jpg",
+    selected: 2, // Maya
+    cat: 'מוצר',
+    avatar: 'Maya',
+    label: '🌸 בושם שמש',
+  },
+  barbershop: {
+    script: "ברבר שופ הצמרת — מספרת גברים בוטיק במרכז העיר. תספורות מודרניות, גילוח קלאסי בסכין, אווירה מקצועית. תור היום, מראה חדש מחר.",
+    image: "/examples/barbershop-business.jpg",
+    video: "/examples/barbershop-video.mp4",
+    poster: "/examples/barbershop-business.jpg",
+    selected: 1, // Daniel
+    cat: 'עסק',
+    avatar: 'Daniel',
+    label: '💈 ברבר שופ',
   },
 }
 
@@ -39,13 +42,11 @@ export default function LandingPage() {
   const [type, setType] = useState('product')   // 'product' | 'business' — hero headline variant
   const [voiceActive, setVoiceActive] = useState('noa')
 
-  // Two independent product states:
-  //  - heroProduct:  drives the cauldron animation, auto-cycles every 12s,
-  //                  never reacts to flow-section tab clicks.
-  //  - flowProduct:  drives the Step 1-4 demo (tabs, typewriter, dropzone,
-  //                  avatar selection, result video). Never auto-cycles.
-  const [heroProduct, setHeroProduct] = useState('icecream')
-  const [flowProduct, setFlowProduct] = useState('icecream')
+  // Hero shows a 3-video crossfade loop (4s each). Flow section uses tabs
+  // bound to flowProduct — clicks here never reach the hero loop.
+  const [heroVideoIndex, setHeroVideoIndex] = useState(0)
+  const [flowProduct, setFlowProduct] = useState('whitening')
+  const [liveCount, setLiveCount] = useState(1237)
 
   const [scrolled, setScrolled] = useState(false)
   const [typedText, setTypedText] = useState('')
@@ -169,16 +170,18 @@ export default function LandingPage() {
     }
   }
 
-  // Hero cauldron: rotate every 12s forever. No user-pause logic —
-  // flow tabs can't reach this state.
+  // Hero video stack: crossfade between 3 demos every 4s.
   useEffect(() => {
     const interval = setInterval(() => {
-      setHeroProduct(prev => {
-        const i = PRODUCT_CYCLE.indexOf(prev)
-        return PRODUCT_CYCLE[(i + 1) % PRODUCT_CYCLE.length]
-      })
-    }, 12000)
+      setHeroVideoIndex(i => (i + 1) % PRODUCT_CYCLE.length)
+    }, 4000)
     return () => clearInterval(interval)
+  }, [])
+
+  // Live counter "social proof": tick up every ~6s so it feels alive.
+  useEffect(() => {
+    const t = setInterval(() => setLiveCount(c => c + Math.floor(Math.random() * 3) + 1), 6000)
+    return () => clearInterval(t)
   }, [])
 
   // Start typing when step 1 enters view
@@ -299,7 +302,7 @@ export default function LandingPage() {
                 : 'סרטוני UGC מקצועיים בעברית — בלי מצלמה, בלי שחקנים. בחר אווטאר, העלה מוצר, קבל סרטון מוכן.'}
             </p>
             <div className="hero-cta-row reveal delay-3">
-              <a href="#pricing" className="btn btn-primary btn-lg">
+              <a href="#pricing" className="btn btn-primary btn-lg btn-pulse">
                 נסה 3 ימים ב-₪20
                 <svg viewBox="0 0 16 16" fill="none"><path d="M13 8l-6 5V3l6 5z" fill="currentColor" /></svg>
               </a>
@@ -307,6 +310,10 @@ export default function LandingPage() {
                 <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.3" /><path d="M11 8l-4 2.5v-5L11 8z" fill="currentColor" /></svg>
                 ראה איך זה עובד
               </a>
+            </div>
+            <div className="live-proof reveal delay-3">
+              <span className="live-dot" />
+              <span><b>{liveCount.toLocaleString('en-US')}</b> סרטונים נוצרו השבוע</span>
             </div>
             <div className="hero-cta-micro reveal delay-3">
               <span className="check">✓</span>1 סרטון מלא &nbsp;<span className="check">✓</span>ללא חידוש אוטומטי &nbsp;<span className="check">✓</span>ייצוא MP4 מלא
@@ -317,114 +324,40 @@ export default function LandingPage() {
           </div>
 
           <div className="hero-animation reveal delay-2">
-            <div className="editorial-frame">
-              <div className="label-top">
-                <span className="accent">● LIVE</span> PREVIEW · AUTO-GENERATED
+            <div className="hero-video-frame">
+              <div className="hero-video-glow" aria-hidden="true" />
+              <div className="hero-video-stack">
+                {PRODUCT_CYCLE.map((key, i) => {
+                  const p = PRODUCTS[key]
+                  return (
+                    <video
+                      key={key}
+                      src={p.video}
+                      poster={p.poster}
+                      autoPlay
+                      muted
+                      loop
+                      playsInline
+                      preload="auto"
+                      className={`hero-video ${heroVideoIndex === i ? 'active' : ''}`}
+                    />
+                  )
+                })}
+                <div className="hero-video-badge">
+                  <span className="hero-badge-dot" /> LIVE · AUTO-GENERATED
+                </div>
+                <div className="hero-video-meta">
+                  <span>9:16</span>
+                  <span>·</span>
+                  <span>HEB VO</span>
+                  <span>·</span>
+                  <span>{PRODUCTS[PRODUCT_CYCLE[heroVideoIndex]].avatar}</span>
+                </div>
               </div>
-              <div className="label-bottom">3 STEPS · 12 SECONDS · INFINITE LOOP</div>
-              <span className="corner tl" /><span className="corner tr" />
-              <span className="corner bl" /><span className="corner br" />
-
-              <div className="animation-stage-wrapper">
-              <div className="animation-stage" key={heroProduct}>
-                <div className="stage-glow" />
-
-                <div className="steam">
-                  <span /><span /><span /><span /><span /><span />
-                </div>
-
-                <div className="ingredient ingredient-product">
-                  <picture>
-                    <source srcSet={`/landing-assets/product-${heroProduct}.webp`} type="image/webp" />
-                    <img src={`/landing-assets/product-${heroProduct}.jpg`} alt="" />
-                  </picture>
-                  <div className="ingredient-label">מוצר · PRODUCT</div>
-                </div>
-
-                <div className="ingredient ingredient-script">
-                  <div className="script-card">
-                    <div className="script-line" />
-                    <div className="script-line" />
-                    <div className="script-line short" />
-                  </div>
-                  <div className="ingredient-label">סקריפט · SCRIPT</div>
-                </div>
-
-                <div className="ingredient ingredient-avatar">
-                  <picture>
-                    <source srcSet={`/landing-assets/avatar-${PRODUCT_AVATARS[heroProduct]}.webp`} type="image/webp" />
-                    <img src={`/landing-assets/avatar-${PRODUCT_AVATARS[heroProduct]}.jpg`} alt="" />
-                  </picture>
-                  <div className="ingredient-label">אווטאר · AVATAR</div>
-                </div>
-
-                <svg className="cauldron" viewBox="0 0 300 220" fill="none" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-                  <defs>
-                    <linearGradient id="cauldronBody" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stopColor="#2a1520" />
-                      <stop offset="0.5" stopColor="#1a0d14" />
-                      <stop offset="1" stopColor="#0A0908" />
-                    </linearGradient>
-                    <radialGradient id="cauldronInner" cx="0.5" cy="0.3" r="0.7">
-                      <stop offset="0" stopColor="#FF0080" stopOpacity="1" />
-                      <stop offset="0.6" stopColor="#FF0080" stopOpacity="0.5" />
-                      <stop offset="1" stopColor="#FF0080" stopOpacity="0" />
-                    </radialGradient>
-                    <linearGradient id="rimGradient" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0" stopColor="#FF0080" stopOpacity="0.6" />
-                      <stop offset="0.5" stopColor="#FF0080" stopOpacity="1" />
-                      <stop offset="1" stopColor="#FF0080" stopOpacity="0.6" />
-                    </linearGradient>
-                  </defs>
-
-                  <path
-                    d="M 40 80 Q 40 195 150 205 Q 260 195 260 80 L 275 72 L 268 56 L 32 56 L 25 72 Z"
-                    fill="url(#cauldronBody)"
-                    stroke="#FF0080"
-                    strokeWidth="2.5"
-                  />
-                  <line x1="32" y1="56" x2="268" y2="56" stroke="url(#rimGradient)" strokeWidth="3" />
-                  <ellipse cx="150" cy="70" rx="105" ry="14" fill="url(#cauldronInner)" />
-
-                  <text
-                    x="150"
-                    y="145"
-                    textAnchor="middle"
-                    fontFamily="Heebo, sans-serif"
-                    fontSize="36"
-                    fontWeight="900"
-                    fill="#FF0080"
-                    fillOpacity="0.95"
-                    letterSpacing="3"
-                  >
-                    yotzr
-                  </text>
-                  <rect x="215" y="130" width="8" height="8" fill="#FF0080" />
-                  <line x1="60" y1="170" x2="240" y2="170" stroke="#FF0080" strokeWidth="1" strokeOpacity="0.3" />
-
-                  <path d="M 32 80 Q 10 90 18 115" stroke="#FF0080" strokeWidth="3" fill="none" />
-                  <path d="M 268 80 Q 290 90 282 115" stroke="#FF0080" strokeWidth="3" fill="none" />
-
-                  <circle cx="95" cy="68" r="4" fill="#FF0080" className="bubble b1" />
-                  <circle cx="130" cy="62" r="3" fill="#FF0080" className="bubble b2" />
-                  <circle cx="165" cy="70" r="3.5" fill="#FF0080" className="bubble b3" />
-                  <circle cx="200" cy="65" r="3" fill="#FF0080" className="bubble b4" />
-                  <circle cx="225" cy="68" r="2.5" fill="#FF0080" className="bubble b5" />
-                </svg>
-
-                <div className="result-frame">
-                  <picture>
-                    <source srcSet={`/landing-assets/scene3-${heroProduct}.webp`} type="image/webp" />
-                    <img src={`/landing-assets/scene3-${heroProduct}.jpg`} alt="" />
-                  </picture>
-                  <div className="result-badge">
-                    <span className="check">✓</span>
-                    <span>מוכן</span>
-                  </div>
-                </div>
-
-                <div className="flash" />
-              </div>
+              <div className="hero-video-dots">
+                {PRODUCT_CYCLE.map((k, i) => (
+                  <span key={k} className={`hero-dot ${heroVideoIndex === i ? 'active' : ''}`} />
+                ))}
               </div>
             </div>
           </div>
@@ -456,20 +389,21 @@ export default function LandingPage() {
         </div>
 
         <div className="tabs reveal delay-2">
-          {[
-            { key: 'icecream', num: '01', label: '🍨 גלידה פופ' },
-            { key: 'kipa', num: '02', label: '🧢 כיפה' },
-            { key: 'teeth', num: '03', label: '🦷 אבקת הלבנה' },
-          ].map(t => (
-            <button
-              key={t.key}
-              className={`tab ${flowProduct === t.key ? 'active' : ''}`}
-              onClick={() => switchProduct(t.key)}
-            >
-              <span className="tab-num">{t.num}</span>
-              <span>{t.label}</span>
-            </button>
-          ))}
+          {PRODUCT_CYCLE.map((key, i) => {
+            const p = PRODUCTS[key]
+            const num = String(i + 1).padStart(2, '0')
+            return (
+              <button
+                key={key}
+                className={`tab ${flowProduct === key ? 'active' : ''}`}
+                onClick={() => switchProduct(key)}
+              >
+                <span className="tab-num">{num}</span>
+                <span>{p.label}</span>
+                <span className="tab-cat">{p.cat}</span>
+              </button>
+            )
+          })}
         </div>
 
         <div className="flow-branch" ref={branchRef}>
@@ -510,10 +444,7 @@ export default function LandingPage() {
                   <span style={{ color: 'var(--ink-3)' }}>JPG · PNG · WEBP</span>
                 </div>
                 {imageSrc && (
-                  <picture>
-                    <source srcSet={`${imageSrc}.webp`} type="image/webp" />
-                    <img src={`${imageSrc}.jpg`} alt="" width={data.imageW} height={data.imageH} loading="lazy" />
-                  </picture>
+                  <img src={imageSrc} alt="" loading="lazy" />
                 )}
                 <div className="demo-dropzone-check">✓ הועלה בהצלחה</div>
               </div>
@@ -626,53 +557,28 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* EXAMPLES — דוגמאות אמיתיות */}
-      <section className="examples-section" id="examples">
-        <div className="section-divider">
-          <span className="num">03 /</span>
-          <span>דוגמאות אמיתיות · REAL EXAMPLES</span>
-          <div className="line" />
-          <span>3 סרטונים · 3 לקוחות</span>
-        </div>
-
-        <div className="examples-header">
-          <h2 className="examples-title reveal">
-            סרטונים <span className="examples-accent">אמיתיים.</span>
-          </h2>
-          <p className="examples-lede reveal delay-1">
-            לא דמו. לא רינדור. סרטונים שיוצרו על ידי לקוחות אמיתיים — מוצרים, עסקים, ותוצאות מוכנות לפרסום.
-          </p>
-        </div>
-
-        <div className="examples-grid">
-          {[
-            { key: 'whitening',  title: 'אבקת הלבנת שיניים', cat: 'מוצר', avatar: 'Maya',   video: '/examples/whitening-video.mp4',  img: '/examples/whitening-product.jpg' },
-            { key: 'perfume',    title: 'בושם שמש',           cat: 'מוצר', avatar: 'Maya',   video: '/examples/perfume-video.mp4',    img: '/examples/perfume-product.jpg' },
-            { key: 'barbershop', title: 'ברבר שופ הצמרת',     cat: 'עסק',  avatar: 'Daniel', video: '/examples/barbershop-video.mp4', img: '/examples/barbershop-business.jpg' },
-          ].map((ex, i) => (
-            <div key={ex.key} className={`example-card reveal delay-${i + 1}`}>
-              <div className="example-video-wrap">
-                <video src={ex.video} autoPlay muted loop playsInline preload="metadata" />
-                <div className="example-product-thumb">
-                  <img src={ex.img} alt={ex.title} loading="lazy" />
-                </div>
-              </div>
-              <div className="example-meta">
-                <div className="example-tags">
-                  <span className="example-tag">{ex.cat}</span>
-                  <span className="example-tag example-tag-avatar">@{ex.avatar}</span>
-                </div>
-                <h3 className="example-title">{ex.title}</h3>
-              </div>
-            </div>
-          ))}
+      {/* MID CTA */}
+      <section className="mid-cta">
+        <div className="mid-cta-inner reveal">
+          <div className="mid-cta-text">
+            <div className="mid-cta-eyebrow">● עכשיו אצלך · NOW IT'S YOUR TURN</div>
+            <h2 className="mid-cta-title">
+              ראית איך זה <span className="mid-cta-accent">עובד.</span><br />
+              עכשיו תורך.
+            </h2>
+            <p className="mid-cta-sub">3 דקות מהרעיון לסרטון מוכן לפרסום. בלי מצלמה, בלי שחקנים.</p>
+          </div>
+          <a href="#pricing" className="btn btn-primary btn-lg mid-cta-btn">
+            התחל עכשיו · ₪20
+            <svg viewBox="0 0 16 16" fill="none"><path d="M13 8l-6 5V3l6 5z" fill="currentColor" /></svg>
+          </a>
         </div>
       </section>
 
       {/* PRICING */}
       <section className="pricing-section" id="pricing">
         <div className="section-divider">
-          <span className="num">04 /</span>
+          <span className="num">03 /</span>
           <span>מחירים · PRICING</span>
           <div className="line" />
           <span>ללא חיובים נסתרים</span>
@@ -965,276 +871,99 @@ export default function LandingPage() {
         }
 
         /* ============================================================
-           HERO ANIMATION — 12s recipe loop: ingredients → cauldron → frame.
+           HERO VIDEO STACK — 3 demo videos, 4s each, 0.5s crossfade.
            ============================================================ */
         .hero-animation {
           position: relative;
-          aspect-ratio: 9/16;
-          max-height: 78vh;
-          justify-self: start;
           width: 100%;
+          display: flex; align-items: center; justify-content: center;
+          padding: 20px;
         }
-        .animation-stage-wrapper {
-          position: absolute; inset: 12px;
+        .hero-video-frame {
+          position: relative;
+          width: 100%;
+          max-width: 400px;
+          display: flex; flex-direction: column; align-items: center; gap: 18px;
+        }
+        .hero-video-stack {
+          position: relative;
+          width: 100%;
+          aspect-ratio: 9 / 16;
+          border-radius: 24px;
           overflow: hidden;
-          border-radius: 6px;
-          border: 1px solid var(--line-2);
-          background:
-            radial-gradient(circle at 50% 100%, rgba(255,0,128,0.15) 0%, transparent 50%),
-            var(--bg-2);
+          background: #000;
+          box-shadow:
+            0 0 0 1px rgba(217,70,239,.45),
+            0 0 60px rgba(217,70,239,.4),
+            0 0 120px rgba(217,70,239,.22),
+            0 30px 80px -20px rgba(0,0,0,.7);
+          isolation: isolate;
         }
-        .animation-stage {
+        .hero-video {
           position: absolute; inset: 0;
-          animation: stageFadeIn 0.4s ease-out;
+          width: 100%; height: 100%;
+          object-fit: cover; display: block;
+          opacity: 0;
+          transition: opacity .5s ease-in-out;
+          z-index: 1;
         }
-        @keyframes stageFadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-
-        .stage-glow {
-          position: absolute; bottom: -100px; left: 50%;
-          transform: translateX(-50%);
-          width: 300px; height: 300px;
-          background: radial-gradient(circle, rgba(255,0,128,0.4) 0%, transparent 70%);
+        .hero-video.active { opacity: 1; z-index: 2; }
+        .hero-video-glow {
+          position: absolute; inset: -30px;
+          border-radius: 32px;
+          background:
+            radial-gradient(circle at 30% 30%, rgba(217,70,239,.55), transparent 60%),
+            radial-gradient(circle at 70% 70%, rgba(255,0,128,.45), transparent 60%);
           filter: blur(40px);
-          animation: glowPulse 3s ease-in-out infinite;
+          z-index: -1;
+          animation: hero-glow-pulse 4s ease-in-out infinite;
           pointer-events: none;
         }
-        @keyframes glowPulse {
-          0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
-          50% { opacity: 1; transform: translateX(-50%) scale(1.2); }
+        @keyframes hero-glow-pulse {
+          0%, 100% { opacity: .65; transform: scale(.96); }
+          50% { opacity: 1; transform: scale(1.05); }
         }
-
-        .cauldron {
-          position: absolute; bottom: 12%; left: 50%;
-          transform: translateX(-50%);
-          width: 65%; max-width: 320px;
-          z-index: 2;
-          filter: drop-shadow(0 0 50px rgba(255,0,128,0.6));
-          animation: cauldronShake 12s linear infinite;
+        .hero-video-badge {
+          position: absolute; top: 14px; left: 14px; z-index: 4;
+          background: rgba(0,0,0,.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+          color: var(--ink);
+          font-family: var(--mono); font-size: 10px; letter-spacing: .18em;
+          font-weight: 700; padding: 6px 11px; border-radius: 100px;
+          display: inline-flex; align-items: center; gap: 7px;
+          border: 1px solid rgba(217,70,239,.5);
         }
-        @keyframes cauldronShake {
-          0%, 50%, 67%, 100% { transform: translateX(-50%) rotate(0); }
-          54% { transform: translateX(calc(-50% - 4px)) rotate(-1deg); }
-          57% { transform: translateX(calc(-50% + 4px)) rotate(1deg); }
-          60% { transform: translateX(calc(-50% - 3px)) rotate(-0.5deg); }
-          63% { transform: translateX(calc(-50% + 3px)) rotate(0.5deg); }
+        .hero-badge-dot {
+          width: 7px; height: 7px; border-radius: 50%;
+          background: #ff3b3b; box-shadow: 0 0 10px #ff3b3b;
+          animation: rec-pulse 1.5s infinite;
         }
-
-        .bubble { opacity: 0; animation: bubbleUp 2s ease-in-out infinite; }
-        .bubble.b1 { animation-delay: 0s; }
-        .bubble.b2 { animation-delay: 0.6s; }
-        .bubble.b3 { animation-delay: 1.2s; }
-        .bubble.b4 { animation-delay: 1.8s; }
-        .bubble.b5 { animation-delay: 2.4s; }
-        @keyframes bubbleUp {
-          0% { opacity: 0; transform: translateY(0) scale(0.5); }
-          30% { opacity: 1; }
-          100% { opacity: 0; transform: translateY(-15px) scale(1.2); }
+        @keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+        .hero-video-meta {
+          position: absolute; bottom: 14px; right: 14px; z-index: 4;
+          background: rgba(0,0,0,.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+          color: var(--ink);
+          font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+          padding: 6px 11px; border-radius: 100px;
+          display: inline-flex; align-items: center; gap: 6px;
+          border: 1px solid rgba(255,255,255,.12);
         }
-
-        .steam {
-          position: absolute; bottom: 40%; left: 50%;
-          transform: translateX(-50%);
-          width: 50%; height: 50%;
-          pointer-events: none; z-index: 3;
+        .hero-video-dots {
+          display: flex; gap: 8px; align-items: center;
         }
-        .steam span {
-          position: absolute; bottom: 0;
-          left: calc(20% + var(--i, 0) * 12%);
-          width: 20px; height: 20px; border-radius: 50%;
-          background: radial-gradient(circle, rgba(255,0,128,0.6) 0%, transparent 70%);
-          filter: blur(8px); opacity: 0;
-          animation: steamRise 3s ease-out infinite;
+        .hero-dot {
+          width: 8px; height: 8px; border-radius: 50%;
+          background: rgba(217,70,239,.25);
+          transition: all .4s ease;
         }
-        .steam span:nth-child(1) { --i: 0; animation-delay: 0s; }
-        .steam span:nth-child(2) { --i: 1; animation-delay: 0.5s; }
-        .steam span:nth-child(3) { --i: 2; animation-delay: 1s; }
-        .steam span:nth-child(4) { --i: 3; animation-delay: 1.5s; }
-        .steam span:nth-child(5) { --i: 4; animation-delay: 2s; }
-        .steam span:nth-child(6) { --i: 5; animation-delay: 2.5s; }
-        @keyframes steamRise {
-          0% { opacity: 0; transform: translateY(0) scale(0.5); }
-          30% { opacity: 0.8; }
-          100% { opacity: 0; transform: translateY(-100px) scale(2); }
+        .hero-dot.active {
+          background: #d946ef;
+          width: 28px; border-radius: 100px;
+          box-shadow: 0 0 10px rgba(217,70,239,.7);
         }
-
-        .ingredient {
-          position: absolute; top: 5%; left: 50%;
-          transform: translateX(-50%);
-          width: 38%; max-width: 160px;
-          aspect-ratio: 1; opacity: 0; z-index: 4;
-        }
-        .ingredient picture,
-        .ingredient img {
-          width: 100%; height: 100%;
-          object-fit: cover;
-          border-radius: 8px;
-          border: 2px solid var(--accent);
-          box-shadow: 0 10px 30px rgba(255,0,128,0.4);
-          display: block;
-        }
-        .ingredient-label {
-          position: absolute; bottom: -24px; left: 50%;
-          transform: translateX(-50%);
-          font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
-          text-transform: uppercase; color: var(--accent);
-          white-space: nowrap; font-weight: 700;
-        }
-
-        .script-card {
-          width: 100%; height: 100%;
-          background: var(--bg-3);
-          border: 2px solid var(--accent);
-          border-radius: 8px;
-          padding: 20px 16px;
-          display: flex; flex-direction: column; justify-content: center;
-          gap: 8px;
-          box-shadow: 0 10px 30px rgba(255,0,128,0.4);
-        }
-        .script-line {
-          height: 6px;
-          background: linear-gradient(90deg, var(--ink-2) 0%, var(--ink-3) 100%);
-          border-radius: 3px;
-        }
-        .script-line.short { width: 60%; }
-
-        .ingredient-product { animation: fallInProduct 12s linear infinite; animation-delay: 0s; }
-        .ingredient-script  { animation: fallInScript  12s linear infinite; animation-delay: 0s; }
-        .ingredient-avatar  { animation: fallInAvatar  12s linear infinite; animation-delay: 0s; }
-
-        @keyframes fallInProduct {
-          0%   { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.8) rotate(-10deg); }
-          4%   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
-          8%   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
-          13%  { opacity: 1; transform: translateX(-50%) translateY(80px) scale(0.7) rotate(15deg); }
-          16%  { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
-          17%, 100% { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
-        }
-        @keyframes fallInScript {
-          0%, 17% { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.8) rotate(-10deg); }
-          21%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
-          25%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
-          30%  { opacity: 1; transform: translateX(-50%) translateY(80px) scale(0.7) rotate(15deg); }
-          33%  { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
-          34%, 100% { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
-        }
-        @keyframes fallInAvatar {
-          0%, 33% { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.8) rotate(-10deg); }
-          38%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
-          42%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
-          47%  { opacity: 1; transform: translateX(-50%) translateY(80px) scale(0.7) rotate(15deg); }
-          50%  { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
-          51%, 100% { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
-        }
-
-        .result-frame {
-          position: absolute; bottom: 30%; left: 50%;
-          transform: translateX(-50%) translateY(100px) scale(0.5);
-          width: 42%; max-width: 170px;
-          aspect-ratio: 9/16;
-          opacity: 0; z-index: 5;
-          animation: resultEmerge 12s linear infinite;
-          animation-delay: 0s;
-        }
-        .result-frame picture,
-        .result-frame img {
-          width: 100%; height: 100%;
-          object-fit: cover;
-          border-radius: 8px;
-          display: block;
-        }
-        .result-frame img {
-          border: 3px solid var(--accent);
-          box-shadow:
-            0 0 50px rgba(255,0,128,0.6),
-            0 10px 30px rgba(0,0,0,0.5);
-        }
-        @keyframes resultEmerge {
-          0%, 67%    { opacity: 0; transform: translateX(-50%) translateY(100px) scale(0.3); }
-          72%        { opacity: 1; transform: translateX(-50%) translateY(-30px) scale(1.15); }
-          76%        { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-          88%        { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-          92%        { opacity: 0; transform: translateX(-50%) translateY(-30px) scale(0.8); }
-          93%, 100%  { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.5); }
-        }
-
-        .result-badge {
-          position: absolute; top: -12px; right: -12px;
-          background: var(--accent); color: var(--bg);
-          padding: 6px 12px; border-radius: 20px;
-          font-family: var(--mono); font-size: 10px; font-weight: 700;
-          letter-spacing: 0.1em; text-transform: uppercase;
-          display: flex; align-items: center; gap: 5px;
-          box-shadow: 0 4px 12px rgba(255,0,128,0.5);
-        }
-        .result-badge .check { font-size: 12px; font-weight: 900; }
-
-        .flash {
-          position: absolute; inset: 0;
-          background: white; opacity: 0;
-          pointer-events: none; z-index: 6;
-          animation: flashPulse 12s linear infinite;
-          animation-delay: 0s;
-        }
-        @keyframes flashPulse {
-          0%, 65%, 70%, 100% { opacity: 0; }
-          67% { opacity: 0.7; }
-          68% { opacity: 0.3; }
-          69% { opacity: 0.9; }
-        }
-
         @media (prefers-reduced-motion: reduce) {
-          .ingredient-product,
-          .ingredient-script,
-          .ingredient-avatar,
-          .result-frame,
-          .flash,
-          .cauldron,
-          .stage-glow,
-          .bubble,
-          .steam span { animation: none; }
-          .result-frame { opacity: 1; transform: translateX(-50%); }
+          .hero-video-glow { animation: none; }
+          .hero-video { transition: none; }
         }
-        .editorial-frame { position: relative; width: 100%; height: 100%; }
-        .editorial-frame .corner {
-          position: absolute; width: 14px; height: 14px;
-          border-color: var(--accent); border-style: solid;
-        }
-        .editorial-frame .corner.tl { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
-        .editorial-frame .corner.tr { top: -1px; right: -1px; border-width: 2px 2px 0 0; }
-        .editorial-frame .corner.bl { bottom: -1px; left: -1px; border-width: 0 0 2px 2px; }
-        .editorial-frame .corner.br { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
-        .editorial-frame .label-top {
-          position: absolute; top: -24px; right: 0;
-          font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
-          text-transform: uppercase; color: var(--ink-3);
-        }
-        .editorial-frame .label-top .accent { color: var(--accent); }
-        .editorial-frame .label-bottom {
-          position: absolute; bottom: -24px; left: 0;
-          font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
-          text-transform: uppercase; color: var(--ink-3);
-        }
-        .editorial-frame .inner {
-          position: absolute; inset: 12px; overflow: hidden;
-          border-radius: 4px; border: 1px solid var(--line-2); background: var(--bg-2);
-        }
-        .editorial-frame video { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .editorial-frame .rec-corner {
-          position: absolute; top: 22px; right: 22px;
-          font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
-          color: var(--ink); background: rgba(0,0,0,.5);
-          padding: 4px 9px; border-radius: 2px;
-          display: flex; align-items: center; gap: 6px;
-          backdrop-filter: blur(6px);
-        }
-        .editorial-frame .rec-corner .rec {
-          width: 6px; height: 6px; border-radius: 50%;
-          background: #ff3b3b; animation: rec-pulse 1.5s infinite;
-        }
-        @keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 
         .scroll-cue {
           position: absolute; bottom: 30px; right: 40px;
@@ -1629,11 +1358,8 @@ export default function LandingPage() {
           .scroll-cue { display: none; }
         }
         @media (max-width: 900px) {
-          .hero-animation { max-height: 60vh; aspect-ratio: 3/4; }
-          .ingredient { width: 30%; }
-          .ingredient-label { font-size: 9px; bottom: -20px; }
-          .cauldron { width: 35%; }
-          .result-frame { width: 35%; }
+          .hero-animation { padding: 8px; }
+          .hero-video-frame { max-width: 320px; }
         }
 
         .reveal {
@@ -1678,90 +1404,167 @@ export default function LandingPage() {
           50% { transform: translateX(-50%) scale(1.06); opacity: 1; }
         }
 
-        /* ===== EXAMPLES GALLERY ===== */
-        .examples-section { padding: 30px 40px 80px; position: relative; }
-        .examples-header { text-align: center; max-width: 900px; margin: 40px auto 50px; }
-        .examples-title {
-          font-family: var(--display); font-weight: 900;
-          font-size: clamp(48px, 7vw, 96px); letter-spacing: -.04em;
-          line-height: .95; margin-bottom: 16px;
-        }
-        .examples-accent {
+        /* ===== POLISH — gradients, glass, hover, social proof ===== */
+        .tab-cat {
+          display: inline-block;
+          margin-inline-start: 8px;
+          padding: 2px 8px;
+          background: rgba(217,70,239,.18);
           color: #d946ef;
-          text-shadow: 0 0 30px rgba(217,70,239,.45);
-        }
-        .examples-lede { font-size: 18px; color: var(--ink-2); line-height: 1.5; }
-
-        .examples-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 24px;
-          max-width: 1200px;
-          margin: 0 auto;
-        }
-        .example-card {
-          background: var(--bg-2);
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          overflow: hidden;
-          transition: transform .3s cubic-bezier(.2,.8,.2,1),
-                      border-color .3s, box-shadow .3s, filter .3s;
-        }
-        .example-card:hover {
-          transform: translateY(-6px) scale(1.012);
-          border-color: #d946ef;
-          box-shadow: 0 24px 60px -20px rgba(217,70,239,.45);
-          filter: saturate(1.08);
-        }
-        .example-video-wrap {
-          position: relative;
-          aspect-ratio: 9 / 16;
-          background: #000;
-          overflow: hidden;
-        }
-        .example-video-wrap video {
-          width: 100%; height: 100%;
-          object-fit: cover; display: block;
-        }
-        .example-product-thumb {
-          position: absolute;
-          bottom: 14px; left: 14px;
-          width: 64px; height: 64px;
-          border-radius: 12px;
-          overflow: hidden;
-          border: 2px solid rgba(255,255,255,.22);
-          background: #fff;
-          box-shadow: 0 8px 24px rgba(0,0,0,.55);
-        }
-        .example-product-thumb img {
-          width: 100%; height: 100%;
-          object-fit: cover; display: block;
-        }
-        .example-meta { padding: 18px 20px 22px; }
-        .example-tags { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-        .example-tag {
-          display: inline-flex; align-items: center;
-          background: rgba(217,70,239,.14);
-          color: #d946ef;
-          border: 1px solid rgba(217,70,239,.4);
-          padding: 4px 10px;
+          border: 1px solid rgba(217,70,239,.35);
           border-radius: 100px;
-          font-family: var(--mono);
-          font-size: 10px; font-weight: 700;
+          font-family: var(--mono); font-size: 9px;
           letter-spacing: .14em; text-transform: uppercase;
+          font-weight: 700;
         }
-        .example-tag-avatar {
-          background: rgba(217,70,239,.06);
-          color: #d946ef;
-        }
-        .example-title {
-          font-family: var(--display); font-weight: 900;
-          font-size: 22px; letter-spacing: -.02em; color: var(--ink);
+        .tab.active .tab-cat {
+          background: rgba(0,0,0,.25);
+          color: var(--bg);
+          border-color: transparent;
         }
 
+        /* Pulsing primary CTA — used for the hero "Try" button. */
+        .btn-pulse {
+          position: relative;
+          animation: btn-pulse 2.4s ease-in-out infinite;
+        }
+        .btn-pulse:hover { animation-play-state: paused; transform: translateY(-3px) scale(1.03); }
+        @keyframes btn-pulse {
+          0%, 100% {
+            box-shadow: 0 0 0 0 rgba(255,0,128,.55), 0 8px 24px -6px rgba(255,0,128,.6);
+          }
+          50% {
+            box-shadow: 0 0 0 14px rgba(255,0,128,0), 0 14px 30px -6px rgba(255,0,128,.7);
+          }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .btn-pulse { animation: none; }
+        }
+
+        /* Live counter under the hero CTA. */
+        .live-proof {
+          display: inline-flex; align-items: center; gap: 10px;
+          margin-top: 14px;
+          padding: 8px 14px;
+          background: rgba(255,255,255,.04);
+          backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+          border: 1px solid rgba(217,70,239,.22);
+          border-radius: 100px;
+          font-family: var(--body); font-size: 13px;
+          color: var(--ink-2);
+        }
+        .live-proof b { color: var(--ink); font-weight: 800; }
+        .live-dot {
+          width: 8px; height: 8px; border-radius: 50%;
+          background: #20e070;
+          box-shadow: 0 0 10px #20e070;
+          animation: live-blink 1.6s ease-in-out infinite;
+        }
+        @keyframes live-blink { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(.85); } }
+
+        /* Sweeping gradient on display-h1 .accent (subtle sheen). */
+        .display-h1 .accent {
+          background: linear-gradient(135deg, #ff0080 0%, #ff8be0 50%, #d946ef 100%);
+          -webkit-background-clip: text; background-clip: text;
+          -webkit-text-fill-color: transparent;
+          color: transparent;
+          text-shadow: 0 0 40px rgba(255,0,128,.35);
+        }
+
+        /* Mid-page CTA — glass card between FLOW and PRICING. */
+        .mid-cta {
+          padding: 60px 40px;
+          position: relative;
+          overflow: hidden;
+        }
+        .mid-cta::before {
+          content: ''; position: absolute; inset: 0;
+          background:
+            radial-gradient(ellipse at 20% 50%, rgba(217,70,239,.18), transparent 55%),
+            radial-gradient(ellipse at 80% 50%, rgba(255,0,128,.14), transparent 55%);
+          pointer-events: none;
+        }
+        .mid-cta-inner {
+          position: relative;
+          max-width: 1100px;
+          margin: 0 auto;
+          padding: 36px 42px;
+          background: rgba(255,255,255,.04);
+          backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+          border: 1px solid rgba(217,70,239,.22);
+          border-radius: 24px;
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 32px; flex-wrap: wrap;
+          box-shadow: 0 20px 60px -20px rgba(217,70,239,.35);
+        }
+        .mid-cta-eyebrow {
+          font-family: var(--mono); font-size: 11px; letter-spacing: .22em;
+          text-transform: uppercase; color: #d946ef;
+          margin-bottom: 12px; font-weight: 700;
+        }
+        .mid-cta-title {
+          font-family: var(--display); font-weight: 900;
+          font-size: clamp(32px, 4.4vw, 52px);
+          line-height: 1.05; letter-spacing: -.03em;
+          margin-bottom: 12px; color: var(--ink);
+        }
+        .mid-cta-accent {
+          background: linear-gradient(135deg, #d946ef 0%, #ff8be0 100%);
+          -webkit-background-clip: text; background-clip: text;
+          -webkit-text-fill-color: transparent;
+          color: transparent;
+        }
+        .mid-cta-sub { color: var(--ink-2); font-size: 15px; line-height: 1.5; }
+        .mid-cta-btn {
+          flex-shrink: 0;
+          padding: 18px 32px;
+          font-size: 16px; font-weight: 800;
+          min-height: 56px;
+          background: linear-gradient(135deg, #ff0080 0%, #d946ef 100%);
+          color: #fff;
+          border-radius: 100px;
+          box-shadow: 0 12px 36px -8px rgba(217,70,239,.65);
+          transition: transform .2s, box-shadow .2s;
+        }
+        .mid-cta-btn:hover {
+          transform: translateY(-3px) scale(1.04);
+          box-shadow: 0 18px 48px -8px rgba(217,70,239,.85);
+        }
+
+        /* Subtle floating particles in the hero. */
+        .hero::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background-image:
+            radial-gradient(circle at 12% 20%, rgba(217,70,239,.18) 0, transparent 1.5px),
+            radial-gradient(circle at 88% 35%, rgba(255,0,128,.22) 0, transparent 1.5px),
+            radial-gradient(circle at 22% 78%, rgba(217,70,239,.15) 0, transparent 1.5px),
+            radial-gradient(circle at 72% 88%, rgba(255,0,128,.18) 0, transparent 1.5px),
+            radial-gradient(circle at 50% 45%, rgba(217,70,239,.12) 0, transparent 1.5px),
+            radial-gradient(circle at 8% 60%, rgba(255,255,255,.08) 0, transparent 1px),
+            radial-gradient(circle at 92% 70%, rgba(255,255,255,.08) 0, transparent 1px);
+          background-size: 1200px 900px;
+          animation: hero-particles 30s linear infinite;
+          opacity: .85;
+          z-index: 0;
+        }
+        @keyframes hero-particles {
+          0% { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
+          100% { background-position: 0 -900px, 0 -900px, 0 -900px, 0 -900px, 0 -900px, 0 -900px, 0 -900px; }
+        }
+        .hero > * { position: relative; z-index: 1; }
+        @media (prefers-reduced-motion: reduce) {
+          .hero::after { animation: none; }
+        }
+
+        /* Touch-friendly hit targets on mobile. */
         @media (max-width: 900px) {
-          .examples-section { padding: 30px 20px 60px; }
-          .examples-grid { grid-template-columns: 1fr; gap: 20px; max-width: 420px; }
+          .btn { min-height: 48px; }
+          .mid-cta { padding: 40px 20px; }
+          .mid-cta-inner { padding: 28px 24px; flex-direction: column; align-items: stretch; text-align: center; }
+          .mid-cta-btn { width: 100%; justify-content: center; }
         }
 
         /* ===== PRO CARD — neon green ===== */
