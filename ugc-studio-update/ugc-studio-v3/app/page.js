@@ -626,10 +626,53 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* EXAMPLES — דוגמאות אמיתיות */}
+      <section className="examples-section" id="examples">
+        <div className="section-divider">
+          <span className="num">03 /</span>
+          <span>דוגמאות אמיתיות · REAL EXAMPLES</span>
+          <div className="line" />
+          <span>3 סרטונים · 3 לקוחות</span>
+        </div>
+
+        <div className="examples-header">
+          <h2 className="examples-title reveal">
+            סרטונים <span className="examples-accent">אמיתיים.</span>
+          </h2>
+          <p className="examples-lede reveal delay-1">
+            לא דמו. לא רינדור. סרטונים שיוצרו על ידי לקוחות אמיתיים — מוצרים, עסקים, ותוצאות מוכנות לפרסום.
+          </p>
+        </div>
+
+        <div className="examples-grid">
+          {[
+            { key: 'whitening',  title: 'אבקת הלבנת שיניים', cat: 'מוצר', avatar: 'Maya',   video: '/examples/whitening-video.mp4',  img: '/examples/whitening-product.jpg' },
+            { key: 'perfume',    title: 'בושם שמש',           cat: 'מוצר', avatar: 'Maya',   video: '/examples/perfume-video.mp4',    img: '/examples/perfume-product.jpg' },
+            { key: 'barbershop', title: 'ברבר שופ הצמרת',     cat: 'עסק',  avatar: 'Daniel', video: '/examples/barbershop-video.mp4', img: '/examples/barbershop-business.jpg' },
+          ].map((ex, i) => (
+            <div key={ex.key} className={`example-card reveal delay-${i + 1}`}>
+              <div className="example-video-wrap">
+                <video src={ex.video} autoPlay muted loop playsInline preload="metadata" />
+                <div className="example-product-thumb">
+                  <img src={ex.img} alt={ex.title} loading="lazy" />
+                </div>
+              </div>
+              <div className="example-meta">
+                <div className="example-tags">
+                  <span className="example-tag">{ex.cat}</span>
+                  <span className="example-tag example-tag-avatar">@{ex.avatar}</span>
+                </div>
+                <h3 className="example-title">{ex.title}</h3>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* PRICING */}
       <section className="pricing-section" id="pricing">
         <div className="section-divider">
-          <span className="num">03 /</span>
+          <span className="num">04 /</span>
           <span>מחירים · PRICING</span>
           <div className="line" />
           <span>ללא חיובים נסתרים</span>
@@ -679,10 +722,10 @@ export default function LandingPage() {
             <div className="plan-period">לחודש</div>
             <ul className="plan-features">
               <li><span className="check">✓</span>4 סרטונים בחודש</li>
-              <li><span className="check">✓</span>3 אווטארים</li>
-              <li><span className="check">✓</span>2 קולות עברית</li>
-              <li><span className="check">✓</span>ייצוא 4K</li>
-              <li><span className="check">✓</span>מצב &quot;סרטון עסק&quot;</li>
+              <li><span className="check">✓</span>עד 3 אווטרים</li>
+              <li><span className="check">✓</span>עד 2 קולות</li>
+              <li><span className="check">✓</span>שינוי קריינות 1x לסרטון</li>
+              <li><span className="check">✓</span>שינוי סצנה 1x לסרטון</li>
             </ul>
             <button
               className="btn btn-primary plan-cta"
@@ -695,22 +738,22 @@ export default function LandingPage() {
           </div>
 
           {/* PRO */}
-          <div className="plan reveal delay-3">
+          <div className="plan pro-card reveal delay-3">
+            <div className="plan-badge pro-badge">🔥 הכי משתלם</div>
             <div className="plan-icon">🔥</div>
             <div className="plan-label">PRO · פרו</div>
-            <div className="plan-name">פרו</div>
+            <div className="plan-name pro-title">פרו</div>
             <div className="plan-price">499<span className="currency">₪</span></div>
             <div className="plan-period">לחודש</div>
             <ul className="plan-features">
               <li><span className="check">✓</span>8 סרטונים בחודש</li>
-              <li><span className="check">✓</span>כל האווטארים (6+)</li>
-              <li><span className="check">✓</span>כל הקולות (כולל פרימיום)</li>
-              <li><span className="check">✓</span>ייצוא 4K · ללא לוגו</li>
-              <li><span className="check">✓</span>עדיפות בתור</li>
-              <li><span className="check">✓</span>תמיכה אישית ב-WhatsApp</li>
+              <li><span className="check">✓</span>כל האווטרים</li>
+              <li><span className="check">✓</span>כל הקולות</li>
+              <li><span className="check">✓</span>שינוי קריינות 2x לסרטון</li>
+              <li><span className="check">✓</span>שינוי סצנה 2x לסרטון</li>
             </ul>
             <button
-              className="btn btn-ghost plan-cta"
+              className="btn btn-primary pro-cta plan-cta"
               onClick={() => onCheckout('pro')}
               disabled={loadingPlan !== null}
             >
@@ -1634,6 +1677,164 @@ export default function LandingPage() {
           0%, 100% { transform: translateX(-50%) scale(1); opacity: .95; }
           50% { transform: translateX(-50%) scale(1.06); opacity: 1; }
         }
+
+        /* ===== EXAMPLES GALLERY ===== */
+        .examples-section { padding: 30px 40px 80px; position: relative; }
+        .examples-header { text-align: center; max-width: 900px; margin: 40px auto 50px; }
+        .examples-title {
+          font-family: var(--display); font-weight: 900;
+          font-size: clamp(48px, 7vw, 96px); letter-spacing: -.04em;
+          line-height: .95; margin-bottom: 16px;
+        }
+        .examples-accent {
+          color: #d946ef;
+          text-shadow: 0 0 30px rgba(217,70,239,.45);
+        }
+        .examples-lede { font-size: 18px; color: var(--ink-2); line-height: 1.5; }
+
+        .examples-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 24px;
+          max-width: 1200px;
+          margin: 0 auto;
+        }
+        .example-card {
+          background: var(--bg-2);
+          border: 1px solid var(--line);
+          border-radius: 14px;
+          overflow: hidden;
+          transition: transform .3s cubic-bezier(.2,.8,.2,1),
+                      border-color .3s, box-shadow .3s, filter .3s;
+        }
+        .example-card:hover {
+          transform: translateY(-6px) scale(1.012);
+          border-color: #d946ef;
+          box-shadow: 0 24px 60px -20px rgba(217,70,239,.45);
+          filter: saturate(1.08);
+        }
+        .example-video-wrap {
+          position: relative;
+          aspect-ratio: 9 / 16;
+          background: #000;
+          overflow: hidden;
+        }
+        .example-video-wrap video {
+          width: 100%; height: 100%;
+          object-fit: cover; display: block;
+        }
+        .example-product-thumb {
+          position: absolute;
+          bottom: 14px; left: 14px;
+          width: 64px; height: 64px;
+          border-radius: 12px;
+          overflow: hidden;
+          border: 2px solid rgba(255,255,255,.22);
+          background: #fff;
+          box-shadow: 0 8px 24px rgba(0,0,0,.55);
+        }
+        .example-product-thumb img {
+          width: 100%; height: 100%;
+          object-fit: cover; display: block;
+        }
+        .example-meta { padding: 18px 20px 22px; }
+        .example-tags { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        .example-tag {
+          display: inline-flex; align-items: center;
+          background: rgba(217,70,239,.14);
+          color: #d946ef;
+          border: 1px solid rgba(217,70,239,.4);
+          padding: 4px 10px;
+          border-radius: 100px;
+          font-family: var(--mono);
+          font-size: 10px; font-weight: 700;
+          letter-spacing: .14em; text-transform: uppercase;
+        }
+        .example-tag-avatar {
+          background: rgba(217,70,239,.06);
+          color: #d946ef;
+        }
+        .example-title {
+          font-family: var(--display); font-weight: 900;
+          font-size: 22px; letter-spacing: -.02em; color: var(--ink);
+        }
+
+        @media (max-width: 900px) {
+          .examples-section { padding: 30px 20px 60px; }
+          .examples-grid { grid-template-columns: 1fr; gap: 20px; max-width: 420px; }
+        }
+
+        /* ===== PRO CARD — neon green ===== */
+        .plan.pro-card {
+          background: linear-gradient(180deg, #001a0d 0%, #000 100%);
+          border: 2px solid #00ff88;
+          box-shadow: 0 0 30px rgba(0,255,136,.33), inset 0 0 20px rgba(0,255,136,.13);
+          position: relative;
+          overflow: hidden;
+        }
+        .plan.pro-card::before {
+          content: '';
+          position: absolute;
+          top: -50%; left: -50%;
+          width: 200%; height: 200%;
+          background: radial-gradient(circle, rgba(0,255,136,.22) 0%, transparent 70%);
+          animation: pulse-flame 3s ease-in-out infinite;
+          pointer-events: none;
+          z-index: 0;
+        }
+        .plan.pro-card::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(140deg, transparent 30%, rgba(0,255,136,.12) 50%, transparent 70%);
+          animation: pulse-flame 4.5s ease-in-out infinite reverse;
+          pointer-events: none;
+          z-index: 0;
+        }
+        .plan.pro-card > * { position: relative; z-index: 1; }
+        @keyframes pulse-flame {
+          0%, 100% { opacity: 0.4; transform: scale(0.9); }
+          50% { opacity: 0.75; transform: scale(1.1); }
+        }
+        .plan.pro-card:hover {
+          transform: translateY(-6px);
+          box-shadow: 0 0 50px rgba(0,255,136,.55), inset 0 0 22px rgba(0,255,136,.18);
+          border-color: #00ff88;
+        }
+        .plan.pro-card .pro-title {
+          color: #00ff88;
+          text-shadow: 0 0 10px rgba(0,255,136,.85), 0 0 20px rgba(0,255,136,.55);
+        }
+        .plan.pro-card .plan-price {
+          color: #00ff88;
+          text-shadow: 0 0 12px rgba(0,255,136,.5);
+        }
+        .plan.pro-card .plan-price .currency { color: rgba(0,255,136,.7); }
+        .plan.pro-card .plan-features li {
+          border-bottom-color: rgba(0,255,136,.16);
+          color: var(--ink);
+        }
+        .plan.pro-card .plan-features li .check {
+          color: #00ff88;
+          text-shadow: 0 0 8px rgba(0,255,136,.85);
+        }
+        .plan.pro-card .pro-badge {
+          background: #00ff88;
+          color: #001a0d;
+          box-shadow: 0 0 22px rgba(0,255,136,.65);
+          font-weight: 800;
+        }
+        .plan.pro-card .btn-primary.pro-cta {
+          background: #00ff88;
+          color: #001a0d;
+          font-weight: 800;
+        }
+        .plan.pro-card .btn-primary.pro-cta:hover {
+          box-shadow: 0 10px 32px -6px #00ff88;
+          transform: translateY(-2px);
+        }
+        .plan.pro-card .plan-label { color: rgba(0,255,136,.7); }
+        .plan.pro-card .plan-note { color: rgba(0,255,136,.5); }
       `}</style>
     </>
   )

@@ -10,6 +10,8 @@ export const LIMITS = {
     videos: 1,
     avatarIds: ['Noa', 'Adam'],                                 // 2 avatars (female + male)
     voiceIds: ['cp6q5qJLs8rR7eAWOepf', 'nBiC8Jexp2XGyIxATg9S'], // noa + daniel
+    voiceRegensPerVideo: 1,
+    sceneRegensPerVideo: 1,
     durationDays: 3,
     autoRenew: false,
   },
@@ -17,6 +19,8 @@ export const LIMITS = {
     videos: 4,
     avatarIds: ['Noa', 'Adam', 'Maya'],                         // 3 avatars
     voiceIds: ['cp6q5qJLs8rR7eAWOepf', 'nBiC8Jexp2XGyIxATg9S'],
+    voiceRegensPerVideo: 1,
+    sceneRegensPerVideo: 1,
     durationDays: 30,
     autoRenew: true,
   },
@@ -24,8 +28,29 @@ export const LIMITS = {
     videos: 8,
     avatarIds: null, // null = all avatars allowed
     voiceIds: null,  // null = all voices allowed
+    voiceRegensPerVideo: 2,
+    sceneRegensPerVideo: 2,
     durationDays: 30,
     autoRenew: true,
+  },
+}
+
+// Mirror of LIMITS shaped per spec (count-based fields).
+// Infrastructure only — enforcement comes after PayPlus integration.
+export const SUBSCRIPTION_LIMITS = {
+  basic: {
+    videosPerMonth: 4,
+    maxAvatars: 3,
+    maxVoices: 2,
+    voiceRegensPerVideo: 1,
+    sceneRegensPerVideo: 1,
+  },
+  pro: {
+    videosPerMonth: 8,
+    maxAvatars: Infinity,
+    maxVoices: Infinity,
+    voiceRegensPerVideo: 2,
+    sceneRegensPerVideo: 2,
   },
 }
 
