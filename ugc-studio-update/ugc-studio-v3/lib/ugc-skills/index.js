@@ -193,11 +193,13 @@ export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
   const hasPerson = beat !== 2;
 
   // PRODUCT_LOCK — every scene that contains the product (beats 2, 3, 4).
+  // Append the per-category integration block (resolved from productName via
+  // the categorical PRODUCT_CATEGORIES map) so Kling enforces the same
+  // product-type-specific rules the NB frame received.
   if (productName && beat !== 1) {
     parts.push(getProductLock(productName, opts.isBusinessCraft === true));
-    const productKey = String(productName).toLowerCase().trim();
-    const productHint = PRODUCT_INTEGRATION_BY_PRODUCT[productKey];
-    if (productHint) parts.push(productHint);
+    const categoryHint = getProductIntegrationForName(productName);
+    if (categoryHint) parts.push(categoryHint);
   }
 
   // Realism anchors — short, Kling-friendly versions. Person + non-person
