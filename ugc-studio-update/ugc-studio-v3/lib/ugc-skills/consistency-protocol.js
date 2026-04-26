@@ -170,6 +170,35 @@ export function getProductIntegrationForName(productName) {
   return DEFAULT_PRODUCT_INTEGRATION;
 }
 
+// One-line short label per category, used as the EMERGENCY_TRIM fallback in
+// buildKlingPrompt when the assembled prompt would otherwise exceed the
+// Kling v3 pro 2500-char limit. Keep these ~80–150 chars each.
+const SHORT_LABELS = {
+  headwear: 'HEADWEAR: sits naturally on head, gravity-correct, hair around edges, contact shadow on forehead.',
+  held: 'HELD: visible grip pressure, fingers curl around product, contact shadow between palm and product.',
+  wornBody: 'WORN-BODY: fabric drapes naturally on body, realistic creases at joints, weave visible.',
+  wornFace: 'WORN-FACE: presses on skin with light compression, casts subtle shadow, moves with head.',
+  appliedSkin: 'SKIN-APPLIED: visible sheen on skin, partially absorbed, skin texture visible underneath.',
+  liquid: 'LIQUID: correct viscosity and surface tension, light refraction, real container clarity.',
+  food: 'FOOD: natural texture, real organic imperfections, moisture or oil sheen where appropriate.',
+  tech: 'TECH: realistic screen reflections, accurate light reflections on glass, cable physics.',
+  beauty: 'BEAUTY: natural skin tone blending, slight texture, recently applied not airbrushed.'
+};
+
+export function getCategoryShortLabel(productName) {
+  if (!productName) return '';
+  const lower = String(productName).toLowerCase();
+  for (const [categoryKey, category] of Object.entries(PRODUCT_CATEGORIES)) {
+    const allKeywords = [...category.keywords_he, ...category.keywords_en];
+    for (const keyword of allKeywords) {
+      if (lower.includes(keyword.toLowerCase())) {
+        return SHORT_LABELS[categoryKey] || '';
+      }
+    }
+  }
+  return '';
+}
+
 // Same as getProductIntegrationForName but also returns the matched category
 // key. Useful for logs and tests; the runtime path only needs the integration
 // string.

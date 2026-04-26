@@ -44,8 +44,13 @@ import {
   DEFAULT_PRODUCT_INTEGRATION,
   PRODUCT_CATEGORIES,
   getProductIntegrationForName,
+  getCategoryShortLabel,
   resolveProductCategory
 } from './consistency-protocol.js';
+
+// Kling v3 pro image-to-video has a 2500-char prompt limit. Keep a 100-char
+// buffer below that for safety so the request never gets rejected.
+const KLING_HARD_LIMIT = 2400;
 
 // Environment dictionaries live here (rather than in their own file) because
 // they're small and only consumed by the orchestrator.
@@ -225,7 +230,38 @@ export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
   negatives.push('no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays');
   parts.push(`NEGATIVES: ${negatives.join(', ')}.`);
 
-  return parts.filter(Boolean).join(' ');
+  const finalPrompt = parts.filter(Boolean).join(' ');
+
+  // Bodyguard: Kling v3 pro rejects prompts longer than 2500 chars. If we are
+  // anywhere near that, rebuild from the raw Claude prompt + a minimal set of
+  // realism / negatives / product-lock so the API call still succeeds.
+  if (finalPrompt.length > KLING_HARD_LIMIT) {
+    console.warn(`[buildKlingPrompt] EMERGENCY TRIM: ${finalPrompt.length} → ${KLING_HARD_LIMIT}`);
+
+    const minimalRealism = 'REALISM: handheld iPhone selfie wobble, real human texture, candid not posed, NOT AI-generated, real unretouched skin.';
+    const minimalNegatives = 'NEGATIVES: no face distortion, stable anatomy, exactly 2 arms 2 hands, no extra limbs, no floating hands, no AI artifacts, consistent product appearance.';
+    const productLockShort = productName
+      ? `PRODUCT LOCK: ${productName} — identical color, shape, texture, embroidery to source image across all scenes. No morphing, no drift.`
+      : '';
+    const categoryShort = beat !== 1 ? getCategoryShortLabel(productName) : '';
+
+    const trimmed = [raw, minimalRealism, minimalNegatives, productLockShort, categoryShort]
+      .filter(Boolean)
+      .join(' ');
+
+    if (trimmed.length > KLING_HARD_LIMIT) {
+      const overhead = minimalRealism.length + minimalNegatives.length
+        + productLockShort.length + categoryShort.length + 20;
+      const truncatedRaw = raw.slice(0, KLING_HARD_LIMIT - overhead);
+      return [truncatedRaw, minimalRealism, minimalNegatives, productLockShort, categoryShort]
+        .filter(Boolean)
+        .join(' ');
+    }
+
+    return trimmed;
+  }
+
+  return finalPrompt;
 }
 
 // Re-exports so consumers can reach for lower-level pieces without chasing down
@@ -260,5 +296,6 @@ export {
   DEFAULT_PRODUCT_INTEGRATION,
   PRODUCT_CATEGORIES,
   getProductIntegrationForName,
+  getCategoryShortLabel,
   resolveProductCategory
 };

@@ -1173,6 +1173,10 @@ async function runJob(jobId, body) {
         productName,
         { isBusinessCraft: klingIsBusinessCraft, scene4Context: klingScene4Context }
       );
+      console.log(`[Kling Scene ${i+1}] FINAL prompt length: ${wrappedKlingPrompt.length}`);
+      if (wrappedKlingPrompt.length > 2500) {
+        console.error(`[Kling Scene ${i+1}] ⚠️ STILL TOO LONG: ${wrappedKlingPrompt.length}`);
+      }
       const klingInput = {
         prompt: wrappedKlingPrompt,
         image_url: frameUrl,

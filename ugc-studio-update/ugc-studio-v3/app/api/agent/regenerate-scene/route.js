@@ -40,6 +40,10 @@ const MAX_REGENS_PER_SCENE = 3;
 // the user can just click regenerate again if Kling returns garbage,
 // which is cheaper than carrying the ffprobe dependency into this route.
 async function runKlingForScene(klingPrompt, frameUrl) {
+  console.log(`[Kling regenerate-scene] FINAL prompt length: ${klingPrompt?.length ?? 0}`);
+  if ((klingPrompt?.length ?? 0) > 2500) {
+    console.error(`[Kling regenerate-scene] ⚠️ STILL TOO LONG: ${klingPrompt.length}`);
+  }
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       console.log(`[regenerate-scene] Kling attempt ${attempt}/3`);
