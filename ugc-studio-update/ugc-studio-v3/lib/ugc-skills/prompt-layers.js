@@ -36,9 +36,10 @@ const NOT_AI_PHRASE = REALISM_ANCHORS.notAI;
 // Compact replacement for the long PRODUCT_LOCK + PRODUCT_CONSISTENCY block
 // inside customNegatives. PRODUCT_LOCK in consistency-protocol is a single
 // string that already glues both sections together, so we replace everything
-// up to (but not including) the next section header — which is one of
-// "PRODUCT INTEGRATION:", "HELD PRODUCT INTEGRATION:", "KIPPAH INTEGRATION:"
-// — and keep those tail sections verbatim because they enforce consistency.
+// up to (but not including) the next section header — one of
+// "PRODUCT INTEGRATION (universal):", "PRODUCT INTEGRATION:" (legacy generic),
+// or "HELD PRODUCT INTEGRATION:" — and keep those tail sections verbatim
+// because they enforce consistency.
 const PRODUCT_LOCK_COMBINED_SHORT =
   'PRODUCT LOCK: product appearance is identical across all 4 scenes — ' +
   'same shape, color, logo, text, material, no morphing, no drift. ' +
@@ -48,17 +49,9 @@ const PRODUCT_LOCK_COMBINED_SHORT =
 // inside customNegatives. The PRODUCT_LOCK trim cuts at the earliest of
 // these so every integration block downstream is preserved verbatim.
 const PRODUCT_LOCK_TAIL_HEADERS = [
+  'PRODUCT INTEGRATION (universal):',
   'PRODUCT INTEGRATION:',
-  'HELD PRODUCT INTEGRATION:',
-  // Per-category integration headers from PRODUCT_CATEGORIES.
-  'HEADWEAR INTEGRATION:',
-  'WORN-BODY INTEGRATION:',
-  'WORN-FACE INTEGRATION:',
-  'SKIN-APPLIED PRODUCT INTEGRATION:',
-  'LIQUID INTEGRATION:',
-  'FOOD INTEGRATION:',
-  'TECH INTEGRATION:',
-  'BEAUTY PRODUCT INTEGRATION:'
+  'HELD PRODUCT INTEGRATION:'
 ];
 
 function shortenProductLockBlock(text) {
@@ -76,126 +69,51 @@ function shortenProductLockBlock(text) {
   return `${before}${PRODUCT_LOCK_COMBINED_SHORT}${tail ? ' ' + tail : ''}`;
 }
 
-// Compact replacement for the generic PRODUCT_INTEGRATION block. Applied only
-// as a last-resort trim if the full prompt is still > PROMPT_LEN_TRIM_LAYER6
+// Compact replacement for the universal PRODUCT INTEGRATION block. Applied
+// only as a last-resort trim if the full prompt is still > PROMPT_LEN_TRIM_LAYER6
 // after the PRODUCT_LOCK shortening + negatives truncation. HELD_PRODUCT_
-// INTEGRATION and per-category integration blocks are preserved verbatim by
-// default because they enforce shot-specific / product-specific rules.
-const PRODUCT_INTEGRATION_SHORT =
-  'PRODUCT INTEGRATION: product physically integrated with the scene, not composited — ' +
-  'natural contact shadows on skin/hair/fabric, hair flows around product edges, ' +
-  'product reflects ambient scene lighting, NOT pasted-on, NOT a sticker.';
+// INTEGRATION block is preserved verbatim by default because it enforces
+// shot-specific rules.
+const UNIVERSAL_INTEGRATION_SHORT =
+  'PRODUCT INTEGRATION: product physically grounded — contact shadows, ' +
+  'natural pressure on skin/hair/fabric, reflects scene lighting, IDENTICAL across all 4 scenes.';
 
-// Last-resort compact replacement for HELD_PRODUCT_INTEGRATION. The category
-// integration (e.g. HEADWEAR / WORN-FACE / etc.) is the most product-specific
-// signal so it stays verbatim; if the prompt is *still* over budget after the
-// generic PRODUCT_INTEGRATION compaction, we fall back to this short HELD.
+// Last-resort compact replacement for HELD_PRODUCT_INTEGRATION. If the prompt
+// is still over budget after the universal PRODUCT_INTEGRATION compaction,
+// we fall back to this short HELD.
 const HELD_PRODUCT_INTEGRATION_SHORT =
   'HELD PRODUCT INTEGRATION: visible grip pressure, fingers in contact with the product ' +
   '(not floating), subtle shadow between palm and product.';
 const HELD_PRODUCT_INTEGRATION_HEADER = 'HELD PRODUCT INTEGRATION:';
-// Headers that may follow the HELD block. Anything matching one of these is
-// kept; the HELD block itself is replaced with HELD_PRODUCT_INTEGRATION_SHORT.
-const HELD_INTEGRATION_TAIL_HEADERS = [
-  'HEADWEAR INTEGRATION:',
-  'WORN-BODY INTEGRATION:',
-  'WORN-FACE INTEGRATION:',
-  'SKIN-APPLIED PRODUCT INTEGRATION:',
-  'LIQUID INTEGRATION:',
-  'FOOD INTEGRATION:',
-  'TECH INTEGRATION:',
-  'BEAUTY PRODUCT INTEGRATION:'
-];
 
 function shortenHeldIntegrationBlock(text) {
   if (!text) return text;
   const heldIdx = text.indexOf(HELD_PRODUCT_INTEGRATION_HEADER);
   if (heldIdx === -1) return text;
-  let cutIdx = -1;
-  for (const header of HELD_INTEGRATION_TAIL_HEADERS) {
-    const i = text.indexOf(header, heldIdx + HELD_PRODUCT_INTEGRATION_HEADER.length);
-    if (i !== -1 && (cutIdx === -1 || i < cutIdx)) cutIdx = i;
-  }
+  // The universal integration block (if present) follows HELD; cut there.
+  const universalIdx = text.indexOf(
+    'PRODUCT INTEGRATION (universal):',
+    heldIdx + HELD_PRODUCT_INTEGRATION_HEADER.length
+  );
   const before = text.slice(0, heldIdx);
-  const tail = cutIdx === -1 ? '' : text.slice(cutIdx);
+  const tail = universalIdx === -1 ? '' : text.slice(universalIdx);
   return `${before}${HELD_PRODUCT_INTEGRATION_SHORT}${tail ? ' ' + tail : ''}`;
 }
 
-// Absolute last-resort short forms for the per-category integration blocks.
-// Applied only when every other trim has already fired and the prompt is
-// STILL over PROMPT_LEN_TRIM_LAYER6. The category signal stays present (NB
-// still knows the product type) but each block drops to a one-liner.
-const CATEGORY_INTEGRATION_SHORT = {
-  'HEADWEAR INTEGRATION:':
-    'HEADWEAR INTEGRATION: sits on head following skull curvature, hair flows around and under the edges, natural forehead/hairline shadow, NOT floating above hair.',
-  'WORN-BODY INTEGRATION:':
-    'WORN-BODY INTEGRATION: fabric drapes with gravity, realistic creases at elbows/waist/shoulders, natural neckline, no plastic-mannequin look.',
-  'WORN-FACE INTEGRATION:':
-    'WORN-FACE INTEGRATION: realistic skin compression at contact points, natural shadow on skin, item moves with the head, NOT floating.',
-  'SKIN-APPLIED PRODUCT INTEGRATION:':
-    'SKIN-APPLIED PRODUCT INTEGRATION: subtle sheen on skin with partially-absorbed look, real skin texture still visible, NOT a flat color overlay.',
-  'LIQUID INTEGRATION:':
-    'LIQUID INTEGRATION: correct viscosity and surface tension, light refraction through transparent containers, real glass/plastic clarity.',
-  'FOOD INTEGRATION:':
-    'FOOD INTEGRATION: realistic surface variation, organic imperfections, moisture/oil sheen where appropriate, NOT plastic-looking.',
-  'TECH INTEGRATION:':
-    'TECH INTEGRATION: realistic screen glare and reflections, natural cable drape, slight fingerprint smudges on glossy surfaces.',
-  'BEAUTY PRODUCT INTEGRATION:':
-    'BEAUTY PRODUCT INTEGRATION: realistic application on skin/lips/nails, natural color blending, looks recently applied not airbrushed.'
-};
+// Universal integration block header is "PRODUCT INTEGRATION (universal):"
+// — distinct from the legacy generic "PRODUCT INTEGRATION:" so the trim
+// matcher can target it precisely without matching the still-emitted
+// PRODUCT_INTEGRATION block from index.js.
+const UNIVERSAL_INTEGRATION_HEADER = 'PRODUCT INTEGRATION (universal):';
 
-function shortenCategoryIntegrationBlocks(text) {
-  if (!text) return { text, changed: false };
-  let result = text;
-  let changed = false;
-  for (const header of Object.keys(CATEGORY_INTEGRATION_SHORT)) {
-    const idx = result.indexOf(header);
-    if (idx === -1) continue;
-    // Find where this block ends — at the next category header or end of string.
-    let endIdx = result.length;
-    for (const otherHeader of Object.keys(CATEGORY_INTEGRATION_SHORT)) {
-      if (otherHeader === header) continue;
-      const i = result.indexOf(otherHeader, idx + header.length);
-      if (i !== -1 && i < endIdx) endIdx = i;
-    }
-    const before = result.slice(0, idx);
-    const after = result.slice(endIdx).replace(/^\s+/, ' ');
-    const replacement = CATEGORY_INTEGRATION_SHORT[header];
-    if (result.slice(idx, endIdx).trim() !== replacement) {
-      result = `${before}${replacement}${after}`;
-      changed = true;
-    }
-  }
-  return { text: result, changed };
-}
-const PRODUCT_INTEGRATION_HEADER = 'PRODUCT INTEGRATION:';
-// Section headers that may appear after the generic PRODUCT_INTEGRATION
-// block. The integration-trim cuts at the earliest of these so the
-// shot-specific HELD block and any per-category integration are preserved.
-const PRODUCT_INTEGRATION_TAIL_HEADERS = [
-  'HELD PRODUCT INTEGRATION:',
-  'HEADWEAR INTEGRATION:',
-  'WORN-BODY INTEGRATION:',
-  'WORN-FACE INTEGRATION:',
-  'SKIN-APPLIED PRODUCT INTEGRATION:',
-  'LIQUID INTEGRATION:',
-  'FOOD INTEGRATION:',
-  'TECH INTEGRATION:',
-  'BEAUTY PRODUCT INTEGRATION:'
-];
-
-function shortenProductIntegrationBlock(text) {
+function shortenUniversalIntegrationBlock(text) {
   if (!text) return text;
-  const intIdx = text.indexOf(PRODUCT_INTEGRATION_HEADER);
+  const intIdx = text.indexOf(UNIVERSAL_INTEGRATION_HEADER);
   if (intIdx === -1) return text;
-  let cutIdx = -1;
-  for (const header of PRODUCT_INTEGRATION_TAIL_HEADERS) {
-    const i = text.indexOf(header, intIdx + PRODUCT_INTEGRATION_HEADER.length);
-    if (i !== -1 && (cutIdx === -1 || i < cutIdx)) cutIdx = i;
-  }
+  // The universal block is the last integration section emitted, so the
+  // tail goes to end-of-string.
   const before = text.slice(0, intIdx);
-  const tail = cutIdx === -1 ? '' : text.slice(cutIdx);
-  return `${before}${PRODUCT_INTEGRATION_SHORT}${tail ? ' ' + tail : ''}`;
+  return `${before}${UNIVERSAL_INTEGRATION_SHORT}`;
 }
 
 // Image-priority Layer 1 used when the chosen actor card is a best-effort
@@ -360,12 +278,11 @@ export function buildPrompt({
     finalPrompt = assemble();
     trim = trim === 'none' ? 'layer6' : `${trim}+layer6`;
 
-    // Last-resort: still over budget? Compact the generic PRODUCT_INTEGRATION
-    // block too. The per-category integration (HEADWEAR / WORN-FACE / etc.)
-    // and the HELD block stay verbatim at this stage.
+    // Last-resort: still over budget? Compact the universal PRODUCT_INTEGRATION
+    // block too. HELD block stays verbatim at this stage.
     if (finalPrompt.length > PROMPT_LEN_TRIM_LAYER6 && customNegativesText) {
       const before = customNegativesText;
-      customNegativesText = shortenProductIntegrationBlock(customNegativesText)
+      customNegativesText = shortenUniversalIntegrationBlock(customNegativesText)
         .replace(/\s{2,}/g, ' ')
         .trim();
       if (customNegativesText !== before) {
@@ -374,9 +291,8 @@ export function buildPrompt({
       }
     }
 
-    // Final tier — only when a per-category integration block has stacked on
-    // top of HELD and we are still over budget. The category block is the
-    // most product-specific signal so it wins; HELD compresses to a one-liner.
+    // Final tier — collapse HELD to a one-liner. We only get here when even
+    // the universal-integration trim wasn't enough.
     if (finalPrompt.length > PROMPT_LEN_TRIM_LAYER6 && customNegativesText) {
       const before = customNegativesText;
       customNegativesText = shortenHeldIntegrationBlock(customNegativesText)
@@ -385,18 +301,6 @@ export function buildPrompt({
       if (customNegativesText !== before) {
         finalPrompt = assemble();
         trim = `${trim}+held`;
-      }
-    }
-
-    // Absolute last resort — compact every per-category integration block to
-    // its one-liner short form. The category signal still survives so NB
-    // knows the product type; only the verbose explanatory phrasing is cut.
-    if (finalPrompt.length > PROMPT_LEN_TRIM_LAYER6 && customNegativesText) {
-      const { text: shortened, changed } = shortenCategoryIntegrationBlocks(customNegativesText);
-      if (changed) {
-        customNegativesText = shortened.replace(/\s{2,}/g, ' ').trim();
-        finalPrompt = assemble();
-        trim = `${trim}+category`;
       }
     }
   }

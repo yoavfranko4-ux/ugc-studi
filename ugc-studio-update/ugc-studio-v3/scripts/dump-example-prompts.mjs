@@ -1,11 +1,11 @@
-// Regression check — verifies the categorical product-integration system
-// resolves the right category and keeps the assembled NB prompt under 3500
-// chars for a variety of product types. Re-run after any tweak to
-// lib/ugc-skills/* or lib/agent-pipeline.js.
+// Regression check — verifies the assembled NB prompt stays under 3500 chars
+// for a variety of product types. The product-integration block is now
+// universal (no per-category branching), so the only thing we test is length.
+// Re-run after any tweak to lib/ugc-skills/* or lib/agent-pipeline.js.
 //
 // Run: node scripts/dump-example-prompts.mjs
 
-import { generateUGCPrompt, resolveProductCategory } from '../lib/ugc-skills/index.js';
+import { generateUGCPrompt } from '../lib/ugc-skills/index.js';
 import { getMandatoryProductPhrases } from '../lib/ugc-skills/realism-anchors.js';
 import { mapAvatarToActorInfo } from '../lib/agent-pipeline.js';
 
@@ -32,34 +32,23 @@ console.log('mapAvatarToActorInfo(', avatarUrl, ') =>', info);
 const PRODUCTS = [
   {
     name: 'כיפת האש שלי',
-    expectedCategory: 'headwear',
     sceneCtx1: 'Yoav sits on his bed surrounded by Israeli shopping bags, looking into his phone with a tired honest expression.',
     sceneCtx3: 'Yoav holds the pink kippah in one hand at chest height, looking at it with curious approval, about to put it on.'
   },
   {
     name: 'קרם להלבנת שיניים',
-    expectedCategory: 'appliedSkin',
     sceneCtx1: 'Yoav frowns at his phone in the bathroom, frustrated by yellow stains on his teeth before a date tonight.',
     sceneCtx3: 'Yoav holds the teeth-whitening cream tube in one hand, examining the label with mild curiosity in his bathroom mirror.'
   },
   {
     name: 'בושם פרחוני',
-    expectedCategory: 'liquid',
     sceneCtx1: 'Yoav sits at his desk looking unimpressed at his current cologne bottle — about to vent about the weak scent.',
     sceneCtx3: 'Yoav holds the floral perfume bottle in one hand at chest height, lifting the cap with the other to test the fragrance.'
   }
 ];
 
 for (const p of PRODUCTS) {
-  const cat = resolveProductCategory(p.name);
-  console.log(divider(`PRODUCT "${p.name}" — expected: ${p.expectedCategory} | resolved: ${cat.key} ${cat.keyword ? `(matched "${cat.keyword}")` : ''}`));
-  if (cat.key !== p.expectedCategory) {
-    console.log(`✗ CATEGORY MISMATCH: expected ${p.expectedCategory}, got ${cat.key}`);
-    failed++;
-    process.exitCode = 1;
-  } else {
-    console.log(`✓ category match`);
-  }
+  console.log(divider(`PRODUCT "${p.name}"`));
 
   // Scene 1 — pain, selfie-close (no integration block in beat 1).
   const scene1 = generateUGCPrompt({

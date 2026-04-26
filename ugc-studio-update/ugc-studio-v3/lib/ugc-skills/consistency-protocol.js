@@ -50,170 +50,60 @@ export const HELD_PRODUCT_INTEGRATION =
   'Subtle shadow between the product and the palm. ' +
   'Skin around the grip shows slight tension where fingers curl around the product.';
 
-// Default integration block used when no category keyword matches the
-// product name. Generic enough to apply to any unknown product type.
-export const DEFAULT_PRODUCT_INTEGRATION =
-  'PRODUCT INTEGRATION: product physically integrated with the scene, ' +
-  'not composited — natural contact shadows, surfaces touched, ' +
-  'product reflects ambient scene lighting, NOT pasted-on, NOT a sticker, ' +
-  'NOT floating, gravity-correct positioning.';
+// Universal product integration. One block that covers every product type —
+// held, worn on head, worn on body, on a surface, applied to skin. The
+// pipeline used to keep a per-category map (PRODUCT_CATEGORIES) keyed off
+// substrings in the product name, but that approach broke for any product
+// whose Hebrew/English name didn't match a hard-coded keyword. The universal
+// block is unconditional: every scene that has a product gets the same
+// physics-grounded guidance, and the model picks the relevant IF clauses.
+export const UNIVERSAL_PRODUCT_INTEGRATION =
+  'PRODUCT INTEGRATION (universal): the product is physically real ' +
+  'and integrated into the scene — not pasted on, not composited, ' +
+  'not floating. Natural contact with surfaces and skin: visible ' +
+  'contact shadows underneath the product, realistic pressure where ' +
+  'it touches anything (skin compresses slightly, hair flows around ' +
+  'edges, fabric folds where it presses). The product reflects the ' +
+  'ambient scene lighting and casts shadows that match the ' +
+  'environment. ' +
+  'IF held in hand: fingers curl around with visible grip pressure, ' +
+  'fingertips press into the surface, palm makes clear contact, ' +
+  'shadow between fingers and product. ' +
+  'IF worn on head: sits on the skull following its curvature, ' +
+  'gravity-correct, hair around and under edges, slight indentation ' +
+  'where it presses on hair, shadow on forehead. ' +
+  'IF worn on body: fabric drapes naturally with gravity, realistic ' +
+  'creases at elbows/waist/shoulders, weave visible under direct light. ' +
+  'IF on a surface: clear contact shadow, product grounded not floating, ' +
+  'edges meet the surface cleanly. ' +
+  'IF applied to skin: visible sheen, partial absorption, skin texture ' +
+  'still visible underneath, NOT a flat color overlay. ' +
+  'Real physics, real materials, real interaction with the world. ' +
+  'Product appears IDENTICAL across all 4 scenes — same shape, color, ' +
+  'logo, text, material, embroidery, stitching. Zero morphing, ' +
+  'zero drift between scenes.';
 
-// Categorical product integration. Replaces the old per-product key map so
-// the pipeline supports any product the studio is asked to make a video for.
-// Each category lists Hebrew + English keywords; the first category whose
-// keyword appears as a substring of the product name (lowercased) wins.
-//
-// Iteration order matters when keywords overlap (e.g. "בושם" appears in both
-// `liquid` and `beauty`). Categories listed earlier take precedence.
-export const PRODUCT_CATEGORIES = {
-  headwear: {
-    keywords_he: ['כיפה', 'כיפת', 'כובע', 'מטפחת', 'בנדנה', 'קסדה'],
-    keywords_en: ['kippah', 'kipa', 'hat', 'cap', 'beanie', 'helmet', 'headband'],
-    integration:
-      'HEADWEAR INTEGRATION: product sits naturally on the head following the curvature of the skull, ' +
-      'gravity-correct positioning, hair flows around and under the edges, slight indentation visible ' +
-      'where it presses on hair, natural shadow on forehead and around hairline, fabric/material wraps ' +
-      'the head shape realistically, NOT floating above hair, NOT photoshopped on top, NOT detached from scalp.'
-  },
-
-  held: {
-    keywords_he: ['בקבוק', 'כוס', 'ספל', 'ספר', 'מקל', 'כלי'],
-    keywords_en: ['bottle', 'cup', 'mug', 'book', 'stick', 'tool', 'phone'],
-    integration:
-      'HELD PRODUCT INTEGRATION: fingertips press into the product showing real grip pressure. ' +
-      'Product does NOT float in the hand — visible contact between palm, fingers, and product. ' +
-      'Subtle shadow between the product and the palm. ' +
-      'Skin around the grip shows slight tension where fingers curl around the product.'
-  },
-
-  wornBody: {
-    keywords_he: ['חולצה', 'מעיל', 'גופייה', 'שמלה', 'חצאית', 'מכנס', 'בגד'],
-    keywords_en: ['shirt', 'jacket', 'tank', 'dress', 'skirt', 'pants', 'clothing', 'tee', 'hoodie'],
-    integration:
-      'WORN-BODY INTEGRATION: fabric follows the body contours naturally, drapes with gravity, ' +
-      'shows realistic creases at elbows/waist/shoulders, fabric weave visible under direct light, ' +
-      'neckline sits naturally on collarbones, no plastic-mannequin look, no perfect symmetry.'
-  },
-
-  wornFace: {
-    keywords_he: ['משקפיים', 'משקפי', 'מסכה', 'עגיל', 'שרשרת'],
-    keywords_en: ['glasses', 'sunglasses', 'mask', 'earring', 'necklace', 'piercing'],
-    integration:
-      'WORN-FACE INTEGRATION: product touches skin with realistic compression — bridge of nose for glasses, ' +
-      'ear for earrings — slight skin indentation under contact points, natural shadow cast onto skin, ' +
-      'item moves with head movement, NOT floating, NOT detached.'
-  },
-
-  appliedSkin: {
-    keywords_he: ['קרם', 'סרום', 'משחה', 'ג׳ל', 'שמן', 'מסכת', 'הלבנת'],
-    keywords_en: ['cream', 'serum', 'lotion', 'gel', 'oil', 'mask', 'whitening'],
-    integration:
-      'SKIN-APPLIED PRODUCT INTEGRATION: product visibly applied on skin with subtle sheen, ' +
-      'partially absorbed look, glistening micro-droplets on the skin surface, natural skin texture ' +
-      'still visible underneath, NOT a flat color overlay, NOT a digital paint effect.'
-  },
-
-  liquid: {
-    keywords_he: ['בושם', 'שמפו', 'מרכך', 'משקה', 'מים'],
-    keywords_en: ['perfume', 'shampoo', 'conditioner', 'drink', 'beverage', 'liquid'],
-    integration:
-      'LIQUID INTEGRATION: liquid shows correct viscosity, surface tension, light refraction through ' +
-      'transparent containers, meniscus visible, surface moves naturally with handling, NOT solid-looking, ' +
-      'NOT a flat texture, real glass/plastic clarity for the bottle.'
-  },
-
-  food: {
-    keywords_he: ['אוכל', 'מזון', 'עוגה', 'לחם', 'פירות', 'ירקות', 'בשר'],
-    keywords_en: ['food', 'cake', 'bread', 'fruit', 'vegetable', 'meat', 'snack'],
-    integration:
-      'FOOD INTEGRATION: natural food texture with realistic surface variation, steam if hot, ' +
-      'condensation if cold, real organic imperfections — uneven crust, natural color variation, ' +
-      'visible moisture or oil sheen where appropriate, NOT plastic-looking, NOT over-saturated.'
-  },
-
-  tech: {
-    keywords_he: ['טלפון', 'אוזניות', 'שעון', 'מסך', 'מטען'],
-    keywords_en: ['phone', 'headphones', 'earbuds', 'watch', 'screen', 'charger', 'tech'],
-    integration:
-      'TECH INTEGRATION: realistic screen glare and reflections, accurate ambient light reflected on ' +
-      'glass surfaces, cable physics with natural drape and gravity, slight fingerprint smudges on ' +
-      'glossy surfaces, NOT factory-perfect, used-look acceptable.'
-  },
-
-  beauty: {
-    keywords_he: ['שפתון', 'איפור', 'מסקרה', 'בושם', 'לק'],
-    keywords_en: ['lipstick', 'makeup', 'mascara', 'cosmetic', 'nail polish'],
-    integration:
-      'BEAUTY PRODUCT INTEGRATION: realistic application on skin/lips/nails, natural color blending ' +
-      'with skin tone, slight texture (matte vs glossy), no over-saturation, looks recently applied not airbrushed.'
-  }
-};
-
-// Smart category resolver. Returns the first category whose keyword (Hebrew
-// or English) appears in the product name, or DEFAULT_PRODUCT_INTEGRATION if
-// nothing matches. Also returns the matched category key for logging.
+// Always returns the universal integration block. Kept as a function (rather
+// than inlining UNIVERSAL_PRODUCT_INTEGRATION at every call site) so callers
+// can be migrated incrementally and so logging stays in one place.
 export function getProductIntegrationForName(productName) {
-  if (!productName) return DEFAULT_PRODUCT_INTEGRATION;
-  const lower = String(productName).toLowerCase();
-
-  for (const [categoryKey, category] of Object.entries(PRODUCT_CATEGORIES)) {
-    const allKeywords = [...category.keywords_he, ...category.keywords_en];
-    for (const keyword of allKeywords) {
-      if (lower.includes(keyword.toLowerCase())) {
-        console.log(`[ProductIntegration] Matched category: ${categoryKey} (keyword: "${keyword}") for "${productName}"`);
-        return category.integration;
-      }
-    }
-  }
-
-  console.log(`[ProductIntegration] No category match for "${productName}", using default`);
-  return DEFAULT_PRODUCT_INTEGRATION;
+  console.log(`[ProductIntegration] Using universal skill for "${productName || 'unknown'}"`);
+  return UNIVERSAL_PRODUCT_INTEGRATION;
 }
 
-// One-line short label per category, used as the EMERGENCY_TRIM fallback in
-// buildKlingPrompt when the assembled prompt would otherwise exceed the
-// Kling v3 pro 2500-char limit. Keep these ~80–150 chars each.
-const SHORT_LABELS = {
-  headwear: 'HEADWEAR: sits naturally on head, gravity-correct, hair around edges, contact shadow on forehead.',
-  held: 'HELD: visible grip pressure, fingers curl around product, contact shadow between palm and product.',
-  wornBody: 'WORN-BODY: fabric drapes naturally on body, realistic creases at joints, weave visible.',
-  wornFace: 'WORN-FACE: presses on skin with light compression, casts subtle shadow, moves with head.',
-  appliedSkin: 'SKIN-APPLIED: visible sheen on skin, partially absorbed, skin texture visible underneath.',
-  liquid: 'LIQUID: correct viscosity and surface tension, light refraction, real container clarity.',
-  food: 'FOOD: natural texture, real organic imperfections, moisture or oil sheen where appropriate.',
-  tech: 'TECH: realistic screen reflections, accurate light reflections on glass, cable physics.',
-  beauty: 'BEAUTY: natural skin tone blending, slight texture, recently applied not airbrushed.'
-};
-
-export function getCategoryShortLabel(productName) {
-  if (!productName) return '';
-  const lower = String(productName).toLowerCase();
-  for (const [categoryKey, category] of Object.entries(PRODUCT_CATEGORIES)) {
-    const allKeywords = [...category.keywords_he, ...category.keywords_en];
-    for (const keyword of allKeywords) {
-      if (lower.includes(keyword.toLowerCase())) {
-        return SHORT_LABELS[categoryKey] || '';
-      }
-    }
-  }
+// DEPRECATED — used to return a one-liner for the per-category emergency
+// trim. There are no categories anymore, so it returns an empty string and
+// the buildKlingPrompt trim path skips the optional category-short slot.
+export function getCategoryShortLabel(_productName) {
   return '';
 }
 
-// Same as getProductIntegrationForName but also returns the matched category
-// key. Useful for logs and tests; the runtime path only needs the integration
-// string.
-export function resolveProductCategory(productName) {
-  if (!productName) return { key: 'default', integration: DEFAULT_PRODUCT_INTEGRATION };
-  const lower = String(productName).toLowerCase();
-  for (const [categoryKey, category] of Object.entries(PRODUCT_CATEGORIES)) {
-    const allKeywords = [...category.keywords_he, ...category.keywords_en];
-    for (const keyword of allKeywords) {
-      if (lower.includes(keyword.toLowerCase())) {
-        return { key: categoryKey, keyword, integration: category.integration };
-      }
-    }
-  }
-  return { key: 'default', integration: DEFAULT_PRODUCT_INTEGRATION };
+// DEPRECATED — used to return the matched category key + integration text.
+// There is now a single universal category. Preserved so older callers
+// (scripts/dump-example-prompts.mjs and any external regression checks) keep
+// running; the `key` is always 'universal'.
+export function resolveProductCategory(_productName) {
+  return { key: 'universal', integration: UNIVERSAL_PRODUCT_INTEGRATION };
 }
 
 export const BUSINESS_CRAFT_LOCK =

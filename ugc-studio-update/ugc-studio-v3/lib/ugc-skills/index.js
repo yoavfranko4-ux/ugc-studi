@@ -41,8 +41,7 @@ import {
   BUSINESS_CRAFT_LOCK,
   PRODUCT_INTEGRATION,
   HELD_PRODUCT_INTEGRATION,
-  DEFAULT_PRODUCT_INTEGRATION,
-  PRODUCT_CATEGORIES,
+  UNIVERSAL_PRODUCT_INTEGRATION,
   getProductIntegrationForName,
   getCategoryShortLabel,
   resolveProductCategory
@@ -135,23 +134,15 @@ export function generateUGCPrompt({
 
   // Product Integration — only when a person and product share the frame
   // (beats 3 and 4 of UGC mode). Scene 2 is product-only; scene 1 has no
-  // product. For the held-product shot, also layer the hand-grip hint.
-  // Per-category integration is resolved by keyword match (see
-  // PRODUCT_CATEGORIES in consistency-protocol.js).
+  // product. The universal block covers held / worn / on-surface / applied;
+  // the held-product shot still gets the hand-grip emphasis layered on top.
   const integrationParts = [];
   const personPlusProductBeat = !productOnly && productName && (beat === 3 || beat === 4);
   if (personPlusProductBeat) {
-    integrationParts.push(PRODUCT_INTEGRATION);
     if (shotType === 'held-product') {
       integrationParts.push(HELD_PRODUCT_INTEGRATION);
     }
-    const categoryHint = getProductIntegrationForName(productName);
-    // Dedupe: the `held` category integration text is identical to
-    // HELD_PRODUCT_INTEGRATION, so for held-product shots of held-category
-    // products it would appear twice without this guard.
-    if (categoryHint && !integrationParts.includes(categoryHint)) {
-      integrationParts.push(categoryHint);
-    }
+    integrationParts.push(getProductIntegrationForName(productName));
   }
 
   const customNegatives = [productLockPhrase, ...integrationParts]
@@ -198,13 +189,11 @@ export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
   const hasPerson = beat !== 2;
 
   // PRODUCT_LOCK — every scene that contains the product (beats 2, 3, 4).
-  // Append the per-category integration block (resolved from productName via
-  // the categorical PRODUCT_CATEGORIES map) so Kling enforces the same
-  // product-type-specific rules the NB frame received.
+  // Append the universal product-integration block so Kling gets the same
+  // physics-grounded rules the NB frame received.
   if (productName && beat !== 1) {
     parts.push(getProductLock(productName, opts.isBusinessCraft === true));
-    const categoryHint = getProductIntegrationForName(productName);
-    if (categoryHint) parts.push(categoryHint);
+    parts.push(getProductIntegrationForName(productName));
   }
 
   // Realism anchors — short, Kling-friendly versions. Person + non-person
@@ -243,21 +232,25 @@ export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
     const productLockShort = productName
       ? `PRODUCT LOCK: ${productName} — identical color, shape, texture, embroidery to source image across all scenes. No morphing, no drift.`
       : '';
-    const categoryShort = beat !== 1 ? getCategoryShortLabel(productName) : '';
 
-    const trimmed = [raw, minimalRealism, minimalNegatives, productLockShort, categoryShort]
+    const trimmed = [raw, minimalRealism, minimalNegatives, productLockShort]
       .filter(Boolean)
       .join(' ');
 
     if (trimmed.length > KLING_HARD_LIMIT) {
       const overhead = minimalRealism.length + minimalNegatives.length
-        + productLockShort.length + categoryShort.length + 20;
+        + productLockShort.length + 20;
       const truncatedRaw = raw.slice(0, KLING_HARD_LIMIT - overhead);
-      return [truncatedRaw, minimalRealism, minimalNegatives, productLockShort, categoryShort]
+      const truncatedFinal = [truncatedRaw, minimalRealism, minimalNegatives, productLockShort]
         .filter(Boolean)
         .join(' ');
+      console.log(`[buildKlingPrompt] TRIMMED PROMPT (${truncatedFinal.length} chars):`);
+      console.log(truncatedFinal);
+      return truncatedFinal;
     }
 
+    console.log(`[buildKlingPrompt] TRIMMED PROMPT (${trimmed.length} chars):`);
+    console.log(trimmed);
     return trimmed;
   }
 
@@ -293,8 +286,7 @@ export {
   BUSINESS_CRAFT_LOCK,
   PRODUCT_INTEGRATION,
   HELD_PRODUCT_INTEGRATION,
-  DEFAULT_PRODUCT_INTEGRATION,
-  PRODUCT_CATEGORIES,
+  UNIVERSAL_PRODUCT_INTEGRATION,
   getProductIntegrationForName,
   getCategoryShortLabel,
   resolveProductCategory
