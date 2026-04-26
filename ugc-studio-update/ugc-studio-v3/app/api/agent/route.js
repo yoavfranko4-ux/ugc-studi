@@ -11,7 +11,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import { prewarmVideos } from '../../../lib/video-cache.js'
-import { generateNBFrame, buildKlingPrompt, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
+import { generateNBFrame, buildKlingPrompt, mapAvatarToActorId, mapAvatarToActorInfo, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -1004,18 +1004,8 @@ async function frameToStaticVideo(frameUrl, durationSec = 5) {
   }
 }
 
-// Map an avatar URL / filename to the actor id used by lib/ugc-skills. The
-// skill's Layer-1 identity lock needs this to pick the right actor card.
-// Returns null for unknown / user-uploaded avatars so the caller can fall
-// back to the legacy (non-skill) prompt path safely.
-function mapAvatarToActorId(avatarUrl) {
-  if (!avatarUrl) return null;
-  const url = String(avatarUrl).toLowerCase();
-  if (url.includes('noa')) return 'noa';
-  if (url.includes('daniel')) return 'daniel';
-  if (url.includes('maya')) return 'maya';
-  return null;
-}
+// mapAvatarToActorId moved to lib/agent-pipeline.js so the regenerate-scene
+// route can share the same mapping. Imported above.
 
 async function runJob(jobId, body) {
   try {
@@ -1105,39 +1095,49 @@ async function runJob(jobId, body) {
           // contextual setting (candlelight / golden hour / car / beach) isn't
           // fought by baked-in defaults.
           const scene4Context = i === 3 && !productOnly;
-          const baseOpts = { productOnly, scene4Context };
-          const actorId = mapAvatarToActorId(avatarUrl);
           const beat = i + 1;
           const isBusinessCraft = videoType === 'business';
+          const actorInfo = mapAvatarToActorInfo(avatarUrl);
+          const actorId = actorInfo?.actorId || null;
+          const isFallbackActor = actorInfo?.isFallbackActor === true;
 
-          // Skill-first with legacy fallback. If the skill path throws (bad
-          // input, NanoBanana rejects the longer prompt, etc.) we retry with
-          // the legacy wrap so the job still ships a frame.
-          let frameUrl = null;
-          const useSkill = Boolean(actorId && !productOnly);
+          // The skill path is now the ONLY path for non-productOnly frames.
+          // The legacy fallback was removed because it skipped the mandatory
+          // realism anchors and produced AI-vibe frames. If actorId is null
+          // here we throw a clear error so the caller fixes the avatar map
+          // instead of silently shipping a broken frame.
+          if (!productOnly && !actorId) {
+            throw new Error(`[NB] Scene ${i + 1}: avatarUrl '${avatarUrl}' did not map to a known actorId (daniel|noa|maya). Refusing to fall back to the legacy path — fix mapAvatarToActorId or the upstream avatar selection.`);
+          }
+
+          const nbOpts = {
+            productOnly,
+            scene4Context,
+            actorId,
+            isFallbackActor,
+            beat,
+            productName,
+            isBusinessCraft
+          };
+
           console.log('[NB] path decision', {
             scene: i + 1,
-            path: useSkill ? 'skill-driven' : 'legacy',
+            path: productOnly ? 'product-only' : 'skill-driven',
             actorId,
+            isFallbackActor,
             beat,
             productOnly,
             avatarUrl: avatarUrl?.slice(0, 80)
           });
-          if (useSkill) {
-            try {
-              frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, {
-                ...baseOpts,
-                actorId,
-                beat,
-                productName,
-                isBusinessCraft
-              });
-            } catch (err) {
-              console.warn(`[NB] Skill path failed on scene ${i + 1}, falling back to legacy:`, err.message);
-              frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, baseOpts);
-            }
-          } else {
-            frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, baseOpts);
+
+          // No legacy fallback. If the skill path fails we retry once with the
+          // same skill options (NanoBanana 403/429 handled inside generateNBFrame).
+          let frameUrl = null;
+          try {
+            frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, nbOpts);
+          } catch (err) {
+            console.warn(`[NB] Scene ${i + 1} first attempt failed (${err.message}); retrying once with same skill opts.`);
+            frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, nbOpts);
           }
           frames.push(frameUrl);
           if (frameUrl) prevFrame = frameUrl;

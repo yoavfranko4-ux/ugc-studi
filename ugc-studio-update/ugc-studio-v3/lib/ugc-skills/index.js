@@ -15,7 +15,15 @@
 //   });
 
 import { ACTOR_CARDS, getActorCard } from './actor-cards.js';
-import { REALISM_ANCHORS, selectAnchors, getAnchorPhrases } from './realism-anchors.js';
+import {
+  REALISM_ANCHORS,
+  selectAnchors,
+  getAnchorPhrases,
+  getMandatoryHumanPhrases,
+  getMandatoryProductPhrases,
+  MANDATORY_HUMAN_ANCHORS,
+  MANDATORY_PRODUCT_ANCHORS
+} from './realism-anchors.js';
 import { CAMERA_PROFILES, getCameraProfile } from './camera-profiles.js';
 import { SHOT_TYPES, getShotTypeForBeat, getShotType } from './shot-types.js';
 import {
@@ -32,8 +40,11 @@ import {
   PRODUCT_LOCK,
   BUSINESS_CRAFT_LOCK,
   PRODUCT_INTEGRATION,
-  PRODUCT_INTEGRATION_BY_PRODUCT,
-  HELD_PRODUCT_INTEGRATION
+  HELD_PRODUCT_INTEGRATION,
+  DEFAULT_PRODUCT_INTEGRATION,
+  PRODUCT_CATEGORIES,
+  getProductIntegrationForName,
+  resolveProductCategory
 } from './consistency-protocol.js';
 
 // Environment dictionaries live here (rather than in their own file) because
@@ -94,7 +105,8 @@ export function generateUGCPrompt({
   beat,
   productOnly = false,
   scene4Context = false,
-  isBusinessCraft = false
+  isBusinessCraft = false,
+  isFallbackActor = false
 } = {}) {
   const actor = getActorCard(actorId);
 
@@ -119,6 +131,8 @@ export function generateUGCPrompt({
   // Product Integration — only when a person and product share the frame
   // (beats 3 and 4 of UGC mode). Scene 2 is product-only; scene 1 has no
   // product. For the held-product shot, also layer the hand-grip hint.
+  // Per-category integration is resolved by keyword match (see
+  // PRODUCT_CATEGORIES in consistency-protocol.js).
   const integrationParts = [];
   const personPlusProductBeat = !productOnly && productName && (beat === 3 || beat === 4);
   if (personPlusProductBeat) {
@@ -126,9 +140,13 @@ export function generateUGCPrompt({
     if (shotType === 'held-product') {
       integrationParts.push(HELD_PRODUCT_INTEGRATION);
     }
-    const productKey = String(productName).toLowerCase().trim();
-    const productHint = PRODUCT_INTEGRATION_BY_PRODUCT[productKey];
-    if (productHint) integrationParts.push(productHint);
+    const categoryHint = getProductIntegrationForName(productName);
+    // Dedupe: the `held` category integration text is identical to
+    // HELD_PRODUCT_INTEGRATION, so for held-product shots of held-category
+    // products it would appear twice without this guard.
+    if (categoryHint && !integrationParts.includes(categoryHint)) {
+      integrationParts.push(categoryHint);
+    }
   }
 
   const customNegatives = [productLockPhrase, ...integrationParts]
@@ -147,7 +165,8 @@ export function generateUGCPrompt({
     camera,
     shotType,
     skipPhoneNegative,
-    customNegatives
+    customNegatives,
+    isFallbackActor
   });
 }
 
@@ -215,6 +234,10 @@ export {
   REALISM_ANCHORS,
   selectAnchors,
   getAnchorPhrases,
+  getMandatoryHumanPhrases,
+  getMandatoryProductPhrases,
+  MANDATORY_HUMAN_ANCHORS,
+  MANDATORY_PRODUCT_ANCHORS,
   CAMERA_PROFILES,
   getCameraProfile,
   SHOT_TYPES,
@@ -231,6 +254,9 @@ export {
   PRODUCT_LOCK,
   BUSINESS_CRAFT_LOCK,
   PRODUCT_INTEGRATION,
-  PRODUCT_INTEGRATION_BY_PRODUCT,
-  HELD_PRODUCT_INTEGRATION
+  HELD_PRODUCT_INTEGRATION,
+  DEFAULT_PRODUCT_INTEGRATION,
+  PRODUCT_CATEGORIES,
+  getProductIntegrationForName,
+  resolveProductCategory
 };

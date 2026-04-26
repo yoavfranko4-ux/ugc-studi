@@ -21,7 +21,7 @@
 
 import { fal } from '@fal-ai/client'
 import { supabase } from '../../../../lib/supabase'
-import { generateNBFrame, buildKlingPrompt } from '../../../../lib/agent-pipeline.js'
+import { generateNBFrame, buildKlingPrompt, mapAvatarToActorId, mapAvatarToActorInfo } from '../../../../lib/agent-pipeline.js'
 
 export const maxDuration = 300;
 export const runtime = 'nodejs';
@@ -204,10 +204,29 @@ export async function POST(req) {
     }
   }
 
-  // 1) Re-run NanoBanana for this scene only
+  // 1) Re-run NanoBanana for this scene only — must go through the skill path
+  // (mandatory realism anchors). The legacy fallback in generateNBFrame was
+  // removed; non-productOnly calls require a valid actorId.
+  const actorInfo = mapAvatarToActorInfo(avatarUrl);
+  const actorId = actorInfo?.actorId || null;
+  const isFallbackActor = actorInfo?.isFallbackActor === true;
+  if (!productOnly && !actorId) {
+    return Response.json({
+      error: `avatarUrl '${avatarUrl}' did not map to a known actorId (daniel|noa|maya). The realism-anchors skill path requires a recognized avatar.`
+    }, { status: 400 });
+  }
+  const isBusinessCraft = videoType === 'business';
   let newFrameUrl;
   try {
-    newFrameUrl = await generateNBFrame(nbPrompt, imageUrls, 3, { productOnly, scene4Context });
+    newFrameUrl = await generateNBFrame(nbPrompt, imageUrls, 3, {
+      productOnly,
+      scene4Context,
+      actorId,
+      isFallbackActor,
+      beat: sceneNumber,
+      productName,
+      isBusinessCraft
+    });
   } catch (e) {
     console.error(`[regenerate-scene] NB frame failed for job ${jobId} scene ${sceneNumber}:`, e.message);
     return Response.json({ error: `NanoBanana frame generation failed: ${e.message}` }, { status: 502 });

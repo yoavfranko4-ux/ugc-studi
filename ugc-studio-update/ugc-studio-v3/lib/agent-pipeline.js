@@ -25,6 +25,7 @@ import {
   ANATOMY_RULE,
   STANDARD_NEGATIVES,
   ANATOMY_NEGATIVES,
+  getMandatoryProductPhrases,
   STABLE as SKILL_STABLE,
   PRODUCT_LOCK as SKILL_PRODUCT_LOCK,
   BUSINESS_CRAFT_LOCK as SKILL_BUSINESS_CRAFT_LOCK
@@ -40,6 +41,44 @@ export const BUSINESS_CRAFT_LOCK = SKILL_BUSINESS_CRAFT_LOCK;
 // Re-export the full skill orchestrator so callers can reach for it via
 // lib/agent-pipeline.js without learning the ugc-skills path.
 export { generateUGCPrompt, buildKlingPrompt };
+
+// Map an avatar URL / filename to the actor id used by lib/ugc-skills. The
+// skill's Layer-1 identity lock needs this to pick the right actor card.
+//
+// The studio UI (app/studio/page.js) ships six avatars under
+// /avatars/avatar-{1..6}.jpg, displayed as Maya, Noa, Adam, Yoav, Lior, Dana.
+// We only have three actor cards (daniel/noa/maya), so the four extras map to
+// the closest-gender card. Custom (data:) uploads return null and the caller
+// is expected to throw — the legacy fallback was removed so silent drift to a
+// no-realism prompt no longer happens.
+export function mapAvatarToActorId(avatarUrl) {
+  const info = mapAvatarToActorInfo(avatarUrl);
+  return info ? info.actorId : null;
+}
+
+// Richer mapping that also reports whether the chosen card is a best-effort
+// fallback (Adam/Yoav/Lior/Dana have no card of their own; we route them to
+// the closest-gender card and signal the consumer to lean on the reference
+// image instead of the hard-coded identity-lock text).
+export function mapAvatarToActorInfo(avatarUrl) {
+  if (!avatarUrl) return null;
+  const url = String(avatarUrl).toLowerCase();
+
+  // Studio UI numeric avatars — the production path.
+  if (url.includes('/avatars/avatar-1')) return { actorId: 'maya',   isFallbackActor: false }; // "Maya"
+  if (url.includes('/avatars/avatar-2')) return { actorId: 'noa',    isFallbackActor: false }; // "Noa"
+  if (url.includes('/avatars/avatar-3')) return { actorId: 'daniel', isFallbackActor: true  }; // "Adam"
+  if (url.includes('/avatars/avatar-4')) return { actorId: 'daniel', isFallbackActor: true  }; // "Yoav"
+  if (url.includes('/avatars/avatar-5')) return { actorId: 'daniel', isFallbackActor: true  }; // "Lior"
+  if (url.includes('/avatars/avatar-6')) return { actorId: 'noa',    isFallbackActor: true  }; // "Dana"
+
+  // Landing-page bundled avatars — exact name match, not a fallback.
+  if (url.includes('avatar-noa')    || url.includes('/noa'))    return { actorId: 'noa',    isFallbackActor: false };
+  if (url.includes('avatar-daniel') || url.includes('/daniel')) return { actorId: 'daniel', isFallbackActor: false };
+  if (url.includes('avatar-maya')   || url.includes('/maya'))   return { actorId: 'maya',   isFallbackActor: false };
+
+  return null;
+}
 
 // Generate a still frame via NanoBanana (fal.ai).
 //
@@ -63,17 +102,25 @@ export async function generateNBFrame(prompt, imageUrls, maxRetries = 3, opts = 
   const validUrls = imageUrls.filter(Boolean);
   const productOnly = opts.productOnly === true;
   const scene4Context = opts.scene4Context === true;
-  const useSkill = Boolean(opts.actorId && opts.beat);
 
   let enhancedPrompt;
   if (productOnly) {
     const productOnlyRule = 'PRODUCT ONLY SHOT — absolutely no person, no human, no hands holding the product, no face, no body parts, no avatar, no model. The frame contains ONLY the product resting on a surface. Pure product photography, studio-style, no humans in frame whatsoever.';
     const productNegatives = 'Negative (STRICT): person, human, woman, man, hands, face, body, avatar, model, people, arms, fingers, holding, selfie, skin, hair, limbs, silhouette.';
     const productRealism = 'shot on iPhone back camera in a real home setting, natural daylight through a nearby window plus ambient room light, slight handheld angle rather than dead-on tripod, subtle lens softness at corners, flat washed-out color grading, low saturation, uncolor-graded, realistic surface with tiny imperfections — faint dust, small fingerprint smudge, organic wood grain or authentic marble veining, mild warm white balance, no studio softbox, no seamless white backdrop, no perfectly clean catalog look, product firmly grounded on the surface with a visible contact shadow, product is NOT floating, NOT levitating, NOT suspended, NOT hovering, edges of the product render cleanly without melted geometry';
-    enhancedPrompt = `${productOnlyRule} ${prompt}, realistic product photography, product clearly resting on a physical surface with contact shadow, ${productRealism}, photorealistic, looks like a real phone photo not a render, no burned-in subtitles or captions or on-screen text or graphic overlays. ${productNegatives}`;
-  } else if (useSkill) {
-    // Skill-driven path — full 6-layer prompt. sceneContext is the caller's
-    // existing nb_prompt string, which becomes Layer 2 (Scenario).
+    const mandatoryProduct = getMandatoryProductPhrases().join('; ');
+    enhancedPrompt = `${productOnlyRule} ${prompt}, realistic product photography, product clearly resting on a physical surface with contact shadow, ${productRealism}, REALISM ANCHORS — MANDATORY: ${mandatoryProduct}. photorealistic, looks like a real phone photo not a render, no burned-in subtitles or captions or on-screen text or graphic overlays. ${productNegatives}`;
+  } else {
+    // Skill-driven path is the only supported non-productOnly path. Callers
+    // must supply actorId + beat. The legacy fallback was removed because it
+    // skipped the mandatory realism anchors entirely and produced AI-vibe
+    // frames (oversized eyes, plastic smile, fused fingers).
+    if (!opts.actorId) {
+      throw new Error('generateNBFrame: opts.actorId is required for non-productOnly frames (mandatory realism anchors live in the skill path).');
+    }
+    if (!opts.beat) {
+      throw new Error('generateNBFrame: opts.beat is required for non-productOnly frames.');
+    }
     enhancedPrompt = generateUGCPrompt({
       actorId: opts.actorId,
       productName: opts.productName,
@@ -81,24 +128,15 @@ export async function generateNBFrame(prompt, imageUrls, maxRetries = 3, opts = 
       sceneContext: prompt,
       scene4Context,
       isBusinessCraft: opts.isBusinessCraft === true,
-      shotTypeOverride: opts.shotTypeOverride
+      shotTypeOverride: opts.shotTypeOverride,
+      isFallbackActor: opts.isFallbackActor === true
     });
-  } else {
-    // Legacy path — skill building-blocks glued together to match the previous
-    // wrapping behavior, so routes that haven't been updated keep working.
-    const vehicleNegative = scene4Context ? '' : ', NEVER in a car, NEVER in a vehicle';
-    const standardNeg = STANDARD_NEGATIVES
-      .filter(n => !n.startsWith('no phone'))
-      .join(', ');
-    const anatomyNeg = ANATOMY_NEGATIVES.join(', ');
-    const selfieRealism = 'Natural iPhone selfie captured in the moment. Authentic casual expression. Ambient lighting from the scene.';
-    enhancedPrompt = `${CHARACTER_REF_RULE} ${ANATOMY_RULE} ${prompt}, ${selfieRealism}, ${standardNeg}, If holding a product, hold it with ONE hand only, other hand visible and relaxed at side, never two items at once. exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene${vehicleNegative}, no burned-in subtitles or captions or on-screen text or graphic overlays. Negative (avoid): ${anatomyNeg}.`;
   }
 
   const endpointId = validUrls.length === 0
     ? 'fal-ai/nano-banana-2'
     : 'fal-ai/nano-banana-2/edit';
-  console.log('[NB] Model:', endpointId, 'Images:', validUrls.length, { promptLen: enhancedPrompt?.length, productOnly, scene4Context, useSkill, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
+  console.log('[NB] Model:', endpointId, 'Images:', validUrls.length, { promptLen: enhancedPrompt?.length, productOnly, scene4Context, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
   const input = validUrls.length === 0
     ? { prompt: enhancedPrompt, image_size: { width: 720, height: 1280 } }
     : { prompt: enhancedPrompt, image_urls: validUrls, image_size: { width: 720, height: 1280 } };
