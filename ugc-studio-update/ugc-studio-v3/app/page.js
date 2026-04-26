@@ -2,8 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-// Real customer demos. The flow tabs and the hero video stack both
-// read from this single source of truth.
+// Hero cauldron auto-cycle — uses the original /landing-assets/ poster set.
+// The cauldron IS the brand identity; do not point it at /examples/.
+const HERO_CYCLE = ['icecream', 'kipa', 'teeth']
+const PRODUCT_AVATARS = { icecream: 'noa', kipa: 'daniel', teeth: 'maya' }
+
+// Flow tabs (Step 1-4) showcase real customer demos from /examples/.
 const PRODUCT_CYCLE = ['whitening', 'perfume', 'barbershop']
 const PRODUCTS = {
   whitening: {
@@ -42,9 +46,11 @@ export default function LandingPage() {
   const [type, setType] = useState('product')   // 'product' | 'business' — hero headline variant
   const [voiceActive, setVoiceActive] = useState('noa')
 
-  // Hero shows a 3-video crossfade loop (4s each). Flow section uses tabs
-  // bound to flowProduct — clicks here never reach the hero loop.
-  const [heroVideoIndex, setHeroVideoIndex] = useState(0)
+  // Two independent product states:
+  //  - heroProduct:  drives the cauldron animation, auto-cycles every 12s,
+  //                  never reacts to flow-section tab clicks.
+  //  - flowProduct:  drives the Step 1-4 demo (real customer videos).
+  const [heroProduct, setHeroProduct] = useState('icecream')
   const [flowProduct, setFlowProduct] = useState('whitening')
   const [liveCount, setLiveCount] = useState(1237)
 
@@ -170,11 +176,15 @@ export default function LandingPage() {
     }
   }
 
-  // Hero video stack: crossfade between 3 demos every 4s.
+  // Hero cauldron: rotate every 12s forever. No user-pause logic —
+  // flow tabs can't reach this state.
   useEffect(() => {
     const interval = setInterval(() => {
-      setHeroVideoIndex(i => (i + 1) % PRODUCT_CYCLE.length)
-    }, 4000)
+      setHeroProduct(prev => {
+        const i = HERO_CYCLE.indexOf(prev)
+        return HERO_CYCLE[(i + 1) % HERO_CYCLE.length]
+      })
+    }, 12000)
     return () => clearInterval(interval)
   }, [])
 
@@ -324,40 +334,114 @@ export default function LandingPage() {
           </div>
 
           <div className="hero-animation reveal delay-2">
-            <div className="hero-video-frame">
-              <div className="hero-video-glow" aria-hidden="true" />
-              <div className="hero-video-stack">
-                {PRODUCT_CYCLE.map((key, i) => {
-                  const p = PRODUCTS[key]
-                  return (
-                    <video
-                      key={key}
-                      src={p.video}
-                      poster={p.poster}
-                      autoPlay
-                      muted
-                      loop
-                      playsInline
-                      preload="auto"
-                      className={`hero-video ${heroVideoIndex === i ? 'active' : ''}`}
-                    />
-                  )
-                })}
-                <div className="hero-video-badge">
-                  <span className="hero-badge-dot" /> LIVE · AUTO-GENERATED
-                </div>
-                <div className="hero-video-meta">
-                  <span>9:16</span>
-                  <span>·</span>
-                  <span>HEB VO</span>
-                  <span>·</span>
-                  <span>{PRODUCTS[PRODUCT_CYCLE[heroVideoIndex]].avatar}</span>
-                </div>
+            <div className="editorial-frame">
+              <div className="label-top">
+                <span className="accent">● LIVE</span> PREVIEW · AUTO-GENERATED
               </div>
-              <div className="hero-video-dots">
-                {PRODUCT_CYCLE.map((k, i) => (
-                  <span key={k} className={`hero-dot ${heroVideoIndex === i ? 'active' : ''}`} />
-                ))}
+              <div className="label-bottom">3 STEPS · 12 SECONDS · INFINITE LOOP</div>
+              <span className="corner tl" /><span className="corner tr" />
+              <span className="corner bl" /><span className="corner br" />
+
+              <div className="animation-stage-wrapper">
+              <div className="animation-stage" key={heroProduct}>
+                <div className="stage-glow" />
+
+                <div className="steam">
+                  <span /><span /><span /><span /><span /><span />
+                </div>
+
+                <div className="ingredient ingredient-product">
+                  <picture>
+                    <source srcSet={`/landing-assets/product-${heroProduct}.webp`} type="image/webp" />
+                    <img src={`/landing-assets/product-${heroProduct}.jpg`} alt="" />
+                  </picture>
+                  <div className="ingredient-label">מוצר · PRODUCT</div>
+                </div>
+
+                <div className="ingredient ingredient-script">
+                  <div className="script-card">
+                    <div className="script-line" />
+                    <div className="script-line" />
+                    <div className="script-line short" />
+                  </div>
+                  <div className="ingredient-label">סקריפט · SCRIPT</div>
+                </div>
+
+                <div className="ingredient ingredient-avatar">
+                  <picture>
+                    <source srcSet={`/landing-assets/avatar-${PRODUCT_AVATARS[heroProduct]}.webp`} type="image/webp" />
+                    <img src={`/landing-assets/avatar-${PRODUCT_AVATARS[heroProduct]}.jpg`} alt="" />
+                  </picture>
+                  <div className="ingredient-label">אווטאר · AVATAR</div>
+                </div>
+
+                <svg className="cauldron" viewBox="0 0 300 220" fill="none" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="cauldronBody" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stopColor="#2a1520" />
+                      <stop offset="0.5" stopColor="#1a0d14" />
+                      <stop offset="1" stopColor="#0A0908" />
+                    </linearGradient>
+                    <radialGradient id="cauldronInner" cx="0.5" cy="0.3" r="0.7">
+                      <stop offset="0" stopColor="#FF0080" stopOpacity="1" />
+                      <stop offset="0.6" stopColor="#FF0080" stopOpacity="0.5" />
+                      <stop offset="1" stopColor="#FF0080" stopOpacity="0" />
+                    </radialGradient>
+                    <linearGradient id="rimGradient" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0" stopColor="#FF0080" stopOpacity="0.6" />
+                      <stop offset="0.5" stopColor="#FF0080" stopOpacity="1" />
+                      <stop offset="1" stopColor="#FF0080" stopOpacity="0.6" />
+                    </linearGradient>
+                  </defs>
+
+                  <path
+                    d="M 40 80 Q 40 195 150 205 Q 260 195 260 80 L 275 72 L 268 56 L 32 56 L 25 72 Z"
+                    fill="url(#cauldronBody)"
+                    stroke="#FF0080"
+                    strokeWidth="2.5"
+                  />
+                  <line x1="32" y1="56" x2="268" y2="56" stroke="url(#rimGradient)" strokeWidth="3" />
+                  <ellipse cx="150" cy="70" rx="105" ry="14" fill="url(#cauldronInner)" />
+
+                  <text
+                    x="150"
+                    y="145"
+                    textAnchor="middle"
+                    fontFamily="Heebo, sans-serif"
+                    fontSize="36"
+                    fontWeight="900"
+                    fill="#FF0080"
+                    fillOpacity="0.95"
+                    letterSpacing="3"
+                  >
+                    yotzr
+                  </text>
+                  <rect x="215" y="130" width="8" height="8" fill="#FF0080" />
+                  <line x1="60" y1="170" x2="240" y2="170" stroke="#FF0080" strokeWidth="1" strokeOpacity="0.3" />
+
+                  <path d="M 32 80 Q 10 90 18 115" stroke="#FF0080" strokeWidth="3" fill="none" />
+                  <path d="M 268 80 Q 290 90 282 115" stroke="#FF0080" strokeWidth="3" fill="none" />
+
+                  <circle cx="95" cy="68" r="4" fill="#FF0080" className="bubble b1" />
+                  <circle cx="130" cy="62" r="3" fill="#FF0080" className="bubble b2" />
+                  <circle cx="165" cy="70" r="3.5" fill="#FF0080" className="bubble b3" />
+                  <circle cx="200" cy="65" r="3" fill="#FF0080" className="bubble b4" />
+                  <circle cx="225" cy="68" r="2.5" fill="#FF0080" className="bubble b5" />
+                </svg>
+
+                <div className="result-frame">
+                  <picture>
+                    <source srcSet={`/landing-assets/scene3-${heroProduct}.webp`} type="image/webp" />
+                    <img src={`/landing-assets/scene3-${heroProduct}.jpg`} alt="" />
+                  </picture>
+                  <div className="result-badge">
+                    <span className="check">✓</span>
+                    <span>מוכן</span>
+                  </div>
+                </div>
+
+                <div className="flash" />
+              </div>
               </div>
             </div>
           </div>
@@ -871,98 +955,257 @@ export default function LandingPage() {
         }
 
         /* ============================================================
-           HERO VIDEO STACK — 3 demo videos, 4s each, 0.5s crossfade.
+           HERO ANIMATION — 12s recipe loop: ingredients → cauldron → frame.
            ============================================================ */
         .hero-animation {
           position: relative;
+          aspect-ratio: 9/16;
+          max-height: 78vh;
+          justify-self: start;
           width: 100%;
-          display: flex; align-items: center; justify-content: center;
-          padding: 20px;
         }
-        .hero-video-frame {
-          position: relative;
-          width: 100%;
-          max-width: 400px;
-          display: flex; flex-direction: column; align-items: center; gap: 18px;
-        }
-        .hero-video-stack {
-          position: relative;
-          width: 100%;
-          aspect-ratio: 9 / 16;
-          border-radius: 24px;
+        .animation-stage-wrapper {
+          position: absolute; inset: 12px;
           overflow: hidden;
-          background: #000;
-          box-shadow:
-            0 0 0 1px rgba(217,70,239,.45),
-            0 0 60px rgba(217,70,239,.4),
-            0 0 120px rgba(217,70,239,.22),
-            0 30px 80px -20px rgba(0,0,0,.7);
-          isolation: isolate;
-        }
-        .hero-video {
-          position: absolute; inset: 0;
-          width: 100%; height: 100%;
-          object-fit: cover; display: block;
-          opacity: 0;
-          transition: opacity .5s ease-in-out;
-          z-index: 1;
-        }
-        .hero-video.active { opacity: 1; z-index: 2; }
-        .hero-video-glow {
-          position: absolute; inset: -30px;
-          border-radius: 32px;
+          border-radius: 6px;
+          border: 1px solid var(--line-2);
           background:
-            radial-gradient(circle at 30% 30%, rgba(217,70,239,.55), transparent 60%),
-            radial-gradient(circle at 70% 70%, rgba(255,0,128,.45), transparent 60%);
+            radial-gradient(circle at 50% 100%, rgba(255,0,128,0.15) 0%, transparent 50%),
+            var(--bg-2);
+        }
+        .animation-stage {
+          position: absolute; inset: 0;
+          animation: stageFadeIn 0.4s ease-out;
+        }
+        @keyframes stageFadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        .stage-glow {
+          position: absolute; bottom: -100px; left: 50%;
+          transform: translateX(-50%);
+          width: 300px; height: 300px;
+          background: radial-gradient(circle, rgba(255,0,128,0.4) 0%, transparent 70%);
           filter: blur(40px);
-          z-index: -1;
-          animation: hero-glow-pulse 4s ease-in-out infinite;
+          animation: glowPulse 3s ease-in-out infinite;
           pointer-events: none;
         }
-        @keyframes hero-glow-pulse {
-          0%, 100% { opacity: .65; transform: scale(.96); }
-          50% { opacity: 1; transform: scale(1.05); }
+        @keyframes glowPulse {
+          0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
+          50% { opacity: 1; transform: translateX(-50%) scale(1.2); }
         }
-        .hero-video-badge {
-          position: absolute; top: 14px; left: 14px; z-index: 4;
-          background: rgba(0,0,0,.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-          color: var(--ink);
-          font-family: var(--mono); font-size: 10px; letter-spacing: .18em;
-          font-weight: 700; padding: 6px 11px; border-radius: 100px;
-          display: inline-flex; align-items: center; gap: 7px;
-          border: 1px solid rgba(217,70,239,.5);
+
+        .cauldron {
+          position: absolute; bottom: 12%; left: 50%;
+          transform: translateX(-50%);
+          width: 65%; max-width: 320px;
+          z-index: 2;
+          filter: drop-shadow(0 0 50px rgba(255,0,128,0.6));
+          animation: cauldronShake 12s linear infinite;
         }
-        .hero-badge-dot {
-          width: 7px; height: 7px; border-radius: 50%;
-          background: #ff3b3b; box-shadow: 0 0 10px #ff3b3b;
-          animation: rec-pulse 1.5s infinite;
+        @keyframes cauldronShake {
+          0%, 50%, 67%, 100% { transform: translateX(-50%) rotate(0); }
+          54% { transform: translateX(calc(-50% - 4px)) rotate(-1deg); }
+          57% { transform: translateX(calc(-50% + 4px)) rotate(1deg); }
+          60% { transform: translateX(calc(-50% - 3px)) rotate(-0.5deg); }
+          63% { transform: translateX(calc(-50% + 3px)) rotate(0.5deg); }
         }
-        @keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
-        .hero-video-meta {
-          position: absolute; bottom: 14px; right: 14px; z-index: 4;
-          background: rgba(0,0,0,.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-          color: var(--ink);
-          font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
-          padding: 6px 11px; border-radius: 100px;
-          display: inline-flex; align-items: center; gap: 6px;
-          border: 1px solid rgba(255,255,255,.12);
+
+        .bubble { opacity: 0; animation: bubbleUp 2s ease-in-out infinite; }
+        .bubble.b1 { animation-delay: 0s; }
+        .bubble.b2 { animation-delay: 0.6s; }
+        .bubble.b3 { animation-delay: 1.2s; }
+        .bubble.b4 { animation-delay: 1.8s; }
+        .bubble.b5 { animation-delay: 2.4s; }
+        @keyframes bubbleUp {
+          0% { opacity: 0; transform: translateY(0) scale(0.5); }
+          30% { opacity: 1; }
+          100% { opacity: 0; transform: translateY(-15px) scale(1.2); }
         }
-        .hero-video-dots {
-          display: flex; gap: 8px; align-items: center;
+
+        .steam {
+          position: absolute; bottom: 40%; left: 50%;
+          transform: translateX(-50%);
+          width: 50%; height: 50%;
+          pointer-events: none; z-index: 3;
         }
-        .hero-dot {
-          width: 8px; height: 8px; border-radius: 50%;
-          background: rgba(217,70,239,.25);
-          transition: all .4s ease;
+        .steam span {
+          position: absolute; bottom: 0;
+          left: calc(20% + var(--i, 0) * 12%);
+          width: 20px; height: 20px; border-radius: 50%;
+          background: radial-gradient(circle, rgba(255,0,128,0.6) 0%, transparent 70%);
+          filter: blur(8px); opacity: 0;
+          animation: steamRise 3s ease-out infinite;
         }
-        .hero-dot.active {
-          background: #d946ef;
-          width: 28px; border-radius: 100px;
-          box-shadow: 0 0 10px rgba(217,70,239,.7);
+        .steam span:nth-child(1) { --i: 0; animation-delay: 0s; }
+        .steam span:nth-child(2) { --i: 1; animation-delay: 0.5s; }
+        .steam span:nth-child(3) { --i: 2; animation-delay: 1s; }
+        .steam span:nth-child(4) { --i: 3; animation-delay: 1.5s; }
+        .steam span:nth-child(5) { --i: 4; animation-delay: 2s; }
+        .steam span:nth-child(6) { --i: 5; animation-delay: 2.5s; }
+        @keyframes steamRise {
+          0% { opacity: 0; transform: translateY(0) scale(0.5); }
+          30% { opacity: 0.8; }
+          100% { opacity: 0; transform: translateY(-100px) scale(2); }
         }
+
+        .ingredient {
+          position: absolute; top: 5%; left: 50%;
+          transform: translateX(-50%);
+          width: 38%; max-width: 160px;
+          aspect-ratio: 1; opacity: 0; z-index: 4;
+        }
+        .ingredient picture,
+        .ingredient img {
+          width: 100%; height: 100%;
+          object-fit: cover;
+          border-radius: 8px;
+          border: 2px solid var(--accent);
+          box-shadow: 0 10px 30px rgba(255,0,128,0.4);
+          display: block;
+        }
+        .ingredient-label {
+          position: absolute; bottom: -24px; left: 50%;
+          transform: translateX(-50%);
+          font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
+          text-transform: uppercase; color: var(--accent);
+          white-space: nowrap; font-weight: 700;
+        }
+
+        .script-card {
+          width: 100%; height: 100%;
+          background: var(--bg-3);
+          border: 2px solid var(--accent);
+          border-radius: 8px;
+          padding: 20px 16px;
+          display: flex; flex-direction: column; justify-content: center;
+          gap: 8px;
+          box-shadow: 0 10px 30px rgba(255,0,128,0.4);
+        }
+        .script-line {
+          height: 6px;
+          background: linear-gradient(90deg, var(--ink-2) 0%, var(--ink-3) 100%);
+          border-radius: 3px;
+        }
+        .script-line.short { width: 60%; }
+
+        .ingredient-product { animation: fallInProduct 12s linear infinite; animation-delay: 0s; }
+        .ingredient-script  { animation: fallInScript  12s linear infinite; animation-delay: 0s; }
+        .ingredient-avatar  { animation: fallInAvatar  12s linear infinite; animation-delay: 0s; }
+
+        @keyframes fallInProduct {
+          0%   { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.8) rotate(-10deg); }
+          4%   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          8%   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          13%  { opacity: 1; transform: translateX(-50%) translateY(80px) scale(0.7) rotate(15deg); }
+          16%  { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+          17%, 100% { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+        }
+        @keyframes fallInScript {
+          0%, 17% { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.8) rotate(-10deg); }
+          21%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          25%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          30%  { opacity: 1; transform: translateX(-50%) translateY(80px) scale(0.7) rotate(15deg); }
+          33%  { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+          34%, 100% { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+        }
+        @keyframes fallInAvatar {
+          0%, 33% { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.8) rotate(-10deg); }
+          38%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          42%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+          47%  { opacity: 1; transform: translateX(-50%) translateY(80px) scale(0.7) rotate(15deg); }
+          50%  { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+          51%, 100% { opacity: 0; transform: translateX(-50%) translateY(160px) scale(0.3) rotate(30deg); }
+        }
+
+        .result-frame {
+          position: absolute; bottom: 30%; left: 50%;
+          transform: translateX(-50%) translateY(100px) scale(0.5);
+          width: 42%; max-width: 170px;
+          aspect-ratio: 9/16;
+          opacity: 0; z-index: 5;
+          animation: resultEmerge 12s linear infinite;
+          animation-delay: 0s;
+        }
+        .result-frame picture,
+        .result-frame img {
+          width: 100%; height: 100%;
+          object-fit: cover;
+          border-radius: 8px;
+          display: block;
+        }
+        .result-frame img {
+          border: 3px solid var(--accent);
+          box-shadow:
+            0 0 50px rgba(255,0,128,0.6),
+            0 10px 30px rgba(0,0,0,0.5);
+        }
+        @keyframes resultEmerge {
+          0%, 67%    { opacity: 0; transform: translateX(-50%) translateY(100px) scale(0.3); }
+          72%        { opacity: 1; transform: translateX(-50%) translateY(-30px) scale(1.15); }
+          76%        { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+          88%        { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+          92%        { opacity: 0; transform: translateX(-50%) translateY(-30px) scale(0.8); }
+          93%, 100%  { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.5); }
+        }
+
+        .result-badge {
+          position: absolute; top: -12px; right: -12px;
+          background: var(--accent); color: var(--bg);
+          padding: 6px 12px; border-radius: 20px;
+          font-family: var(--mono); font-size: 10px; font-weight: 700;
+          letter-spacing: 0.1em; text-transform: uppercase;
+          display: flex; align-items: center; gap: 5px;
+          box-shadow: 0 4px 12px rgba(255,0,128,0.5);
+        }
+        .result-badge .check { font-size: 12px; font-weight: 900; }
+
+        .flash {
+          position: absolute; inset: 0;
+          background: white; opacity: 0;
+          pointer-events: none; z-index: 6;
+          animation: flashPulse 12s linear infinite;
+          animation-delay: 0s;
+        }
+        @keyframes flashPulse {
+          0%, 65%, 70%, 100% { opacity: 0; }
+          67% { opacity: 0.7; }
+          68% { opacity: 0.3; }
+          69% { opacity: 0.9; }
+        }
+
         @media (prefers-reduced-motion: reduce) {
-          .hero-video-glow { animation: none; }
-          .hero-video { transition: none; }
+          .ingredient-product,
+          .ingredient-script,
+          .ingredient-avatar,
+          .result-frame,
+          .flash,
+          .cauldron,
+          .stage-glow,
+          .bubble,
+          .steam span { animation: none; }
+          .result-frame { opacity: 1; transform: translateX(-50%); }
+        }
+        .editorial-frame { position: relative; width: 100%; height: 100%; }
+        .editorial-frame .corner {
+          position: absolute; width: 14px; height: 14px;
+          border-color: var(--accent); border-style: solid;
+        }
+        .editorial-frame .corner.tl { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+        .editorial-frame .corner.tr { top: -1px; right: -1px; border-width: 2px 2px 0 0; }
+        .editorial-frame .corner.bl { bottom: -1px; left: -1px; border-width: 0 0 2px 2px; }
+        .editorial-frame .corner.br { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+        .editorial-frame .label-top {
+          position: absolute; top: -24px; right: 0;
+          font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
+          text-transform: uppercase; color: var(--ink-3);
+        }
+        .editorial-frame .label-top .accent { color: var(--accent); }
+        .editorial-frame .label-bottom {
+          position: absolute; bottom: -24px; left: 0;
+          font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
+          text-transform: uppercase; color: var(--ink-3);
         }
 
         .scroll-cue {
@@ -1358,8 +1601,11 @@ export default function LandingPage() {
           .scroll-cue { display: none; }
         }
         @media (max-width: 900px) {
-          .hero-animation { padding: 8px; }
-          .hero-video-frame { max-width: 320px; }
+          .hero-animation { max-height: 60vh; aspect-ratio: 3/4; }
+          .ingredient { width: 30%; }
+          .ingredient-label { font-size: 9px; bottom: -20px; }
+          .cauldron { width: 35%; }
+          .result-frame { width: 35%; }
         }
 
         .reveal {
