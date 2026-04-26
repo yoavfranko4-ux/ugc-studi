@@ -215,7 +215,15 @@ export const CHARACTER_REF_RULE =
   'Use the person from the reference image exactly as the character — preserve their facial features, skin, hair, eye color, and bone structure from the avatar reference. Do not generate a new person; do not alter their skin texture or tone.';
 
 export const ANATOMY_RULE =
-  'CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body.';
+  'STRICT ANATOMY: exactly ONE person in frame. Body has exactly ' +
+  '2 arms connected to torso, exactly 2 hands connected to arms. ' +
+  'ABSOLUTELY NO additional limbs, NO floating hands, NO disconnected ' +
+  'arms, NO extra fingers, NO body parts appearing from frame edges, ' +
+  'NO ghost hands, NO third arm, NO partial limbs entering from ' +
+  'outside the frame. If a hand is visible, it MUST be clearly ' +
+  'connected to a visible arm, which MUST be clearly connected to ' +
+  'the torso. Every visible body part has a clear visible connection ' +
+  'to the rest of the body.';
 
 export const SINGLE_HAND_RULE =
   'If holding a product, hold it with ONE hand only, other hand visible and relaxed at side, never two items at once.';
@@ -237,11 +245,17 @@ export const STANDARD_NEGATIVES = [
 ];
 
 export const ANATOMY_NEGATIVES = [
-  'extra arms', 'extra hands', 'third hand', 'disembodied limbs',
-  'floating hands', 'phantom limbs', 'multiple arms',
-  'anatomically incorrect', 'deformed hands', 'mutant hands',
-  'extra fingers', 'six fingers', 'hands from outside frame',
-  'partial limbs entering from edges'
+  'no extra arms',
+  'no extra hands',
+  'no third hand',
+  'no floating hand',
+  'no disembodied limb',
+  'no disconnected arm',
+  'no ghost hand at frame edge',
+  'no partial body parts entering from outside',
+  'no extra fingers',
+  'no fused fingers',
+  'no body part without clear connection to torso'
 ];
 
 // Build a 6-layer prompt. All parameters are required except customNegatives
