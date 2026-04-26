@@ -97,22 +97,52 @@ const PHONE_VIDEOS = [
   },
 ]
 
+// Start each hero phone video at scene 3 (action shot at 10s) and loop
+// the 10s-14s window so we never show the early "pain" frames.
+const SCENE_START = 10
+const SCENE_END = 14
+
 function PhoneVideoStack() {
   const [idx, setIdx] = useState(0)
   const refs = useRef([])
+
+  // Seed scene-3 start on mount so the first paint is already in the action.
+  useEffect(() => {
+    const first = refs.current[0]
+    if (first) {
+      try {
+        first.currentTime = SCENE_START
+        first.play().catch(() => {})
+      } catch (_e) {}
+    }
+  }, [])
+
+  // Cycle every 4s.
   useEffect(() => {
     const t = setInterval(() => setIdx(i => (i + 1) % PHONE_VIDEOS.length), 4000)
     return () => clearInterval(t)
   }, [])
+
+  // When a new clip becomes active, jump it to scene 3 and play.
   useEffect(() => {
     const v = refs.current[idx]
     if (v) {
       try {
-        v.currentTime = 0
+        v.currentTime = SCENE_START
         v.play().catch(() => {})
       } catch (_e) {}
     }
   }, [idx])
+
+  // Manual loop within the 10s-14s window — fires for every <video> regardless
+  // of active state, so off-screen clips also rewind back to scene 3.
+  const handleTimeUpdate = (e) => {
+    const v = e.currentTarget
+    if (v.currentTime >= SCENE_END || v.currentTime < SCENE_START) {
+      v.currentTime = SCENE_START
+    }
+  }
+
   return (
     <>
       <div className="video-fallback" aria-hidden="true">
@@ -134,6 +164,8 @@ function PhoneVideoStack() {
             loop
             playsInline
             preload="auto"
+            onLoadedMetadata={(e) => { e.currentTarget.currentTime = SCENE_START }}
+            onTimeUpdate={handleTimeUpdate}
             className={i === idx ? 'active' : ''}
           />
         ))}
@@ -355,7 +387,26 @@ function DropImage({ layer, src }) {
 
 function ResultVideo({ data }) {
   const [err, setErr] = useState(false)
-  useEffect(() => { setErr(false) }, [data.video])
+  const [muted, setMuted] = useState(true)
+  const videoRef = useRef(null)
+
+  // Reset error + force-mute whenever the active product changes, so a fresh
+  // <video> autoplays cleanly under the browser's autoplay policy.
+  useEffect(() => {
+    setErr(false)
+    setMuted(true)
+  }, [data.video])
+
+  const toggleMute = () => {
+    const v = videoRef.current
+    if (!v) return
+    const next = !v.muted
+    v.muted = next
+    setMuted(next)
+    // If unmuting, make sure playback resumes (iOS may have paused on src change).
+    if (!next) v.play().catch(() => {})
+  }
+
   if (err) {
     return (
       <div
@@ -394,16 +445,28 @@ function ResultVideo({ data }) {
     )
   }
   return (
-    <video
-      key={data.video}
-      src={data.video}
-      autoPlay
-      muted
-      loop
-      playsInline
-      poster={data.image}
-      onError={() => setErr(true)}
-    />
+    <>
+      <video
+        key={data.video}
+        ref={videoRef}
+        src={data.video}
+        autoPlay
+        muted={muted}
+        loop
+        playsInline
+        poster={data.image}
+        onError={() => setErr(true)}
+      />
+      <button
+        type="button"
+        className="mute-toggle"
+        onClick={toggleMute}
+        aria-label={muted ? 'הפעל קול' : 'השתק'}
+        aria-pressed={!muted}
+      >
+        {muted ? '🔇' : '🔊'}
+      </button>
+    </>
   )
 }
 
@@ -619,7 +682,6 @@ function FlowSection() {
               <div className="reveal-label">● THE REVEAL · הסרטון שלך</div>
               <div className="demo-video">
                 <ResultVideo data={data} />
-                <button className="sound-toggle" aria-label="sound">🔇</button>
               </div>
               <div className="demo-result-meta">
                 <span><span className="accent">●</span> 20s</span>

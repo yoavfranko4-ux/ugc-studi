@@ -298,6 +298,10 @@ body.yotzr-landing::before{content:""; position:fixed; inset:0; pointer-events:n
 .yotzr .demo-video{position:relative; width:200px; aspect-ratio:9/16; border-radius:16px; overflow:hidden; background:#000; border:2px solid #1a0a14; box-shadow:0 30px 80px -10px rgba(255,20,147,.5), 0 0 0 4px #0a0508, 0 0 60px var(--pink-soft)}
 .yotzr .demo-video video{width:100%; height:100%; object-fit:cover; display:block}
 .yotzr .sound-toggle{position:absolute; top:10px; left:10px; width:32px; height:32px; border-radius:50%; background:rgba(0,0,0,.7); border:1px solid rgba(255,255,255,.2); color:#fff; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(6px); font-size:13px}
+.yotzr .mute-toggle{position:absolute; bottom:12px; right:12px; width:40px; height:40px; border-radius:50%; background:rgba(0,0,0,.6); border:1px solid rgba(217,70,239,.45); color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; line-height:1; cursor:pointer; backdrop-filter:blur(8px); transition:transform .2s ease, box-shadow .2s ease, background .2s ease, border-color .2s ease; z-index:10}
+.yotzr .mute-toggle:hover{background:rgba(217,70,239,.32); border-color:var(--pink); box-shadow:0 0 16px rgba(217,70,239,.55), 0 0 28px rgba(255,20,147,.35); transform:scale(1.1)}
+.yotzr .mute-toggle:focus-visible{outline:none; box-shadow:0 0 0 2px rgba(255,255,255,.7), 0 0 16px rgba(217,70,239,.55)}
+.yotzr .mute-toggle[aria-pressed="true"]{background:rgba(217,70,239,.4); border-color:var(--pink); box-shadow:0 0 12px rgba(217,70,239,.5)}
 .yotzr .demo-result-meta{display:flex; gap:14px; font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-3); flex-wrap:wrap; justify-content:center}
 .yotzr .demo-result-meta span .accent{color:var(--pink); text-shadow:0 0 8px var(--pink)}
 .yotzr .demo-result-actions{display:flex; gap:10px}
