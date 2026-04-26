@@ -44,7 +44,7 @@ import {
 // "now they're at a sunset restaurant". A new fancy scene reads as AI-invented;
 // continuity reads as one real moment.
 const BEAT_ENVIRONMENTS = {
-  1: 'cozy, softly-lit personal space (bedroom, kitchen corner, bathroom vanity) — the intimate "problem" moment',
+  1: 'cozy Israeli home bedroom or living room — sitting on a bed or couch with realistic Israeli shopping bags scattered around (Shufersal red logo, Rami Levy yellow-blue, Castro, Fox, Renuar, H&O, Super-Pharm, brown paper bags with Hebrew text), warm indoor lighting plus natural window light, lived-in story-time vibe — the intimate "problem" moment',
   2: 'clean but lived-in home surface — wooden nightstand, kitchen counter, or bedside table — natural daylight',
   3: 'same home setting as the previous scene, continuity of lighting and surfaces — subject is using or trying the product',
   4: 'same indoor location as before, satisfied expression, everyday natural setting, casual home atmosphere'

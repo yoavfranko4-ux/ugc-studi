@@ -208,23 +208,29 @@ function scriptHasForeignWords(fullText) {
 //   anywhere — not just at the start.
 // Returns [] when the structure is clean.
 const DISCOVERY_OPENERS = /^(עד\s+ש|ואז\s+גיליתי|ואז\s+מצאתי|עד\s+שמצאתי|עד\s+שגיליתי)/u;
+const BEAT_2_REQUIRED_PHRASES = ['עד שגיליתי', 'ואז גיליתי', 'גיליתי את'];
+const BEAT_4_CTA_VERBS = ['תקנו', 'תזמינו', 'תיכנסו לאתר', 'תנסו'];
 const BEAT_1_FORBIDDEN_PHRASES = [
   'מנסה כל פתרון',
   'ניסיתי כל פתרון',
   'שום דבר לא עבד',
   'שום פתרון לא עבד',
+  'שום פתרון',
   'ניסיתי הכל',
+  'ניסיתי המון',
+  'כלום לא עבד',
   'חיפשתי פתרון',
   'לא מצאתי משהו שמתאים',
   'כלום לא התאים',
   'כלום לא עזר',
 ];
+// BEAT 3 forbidden — discovery openers belong to BEAT 2. We narrowed this list
+// to just the two opener phrases per the latest spec: "גיליתי את"/"מצאתי את"
+// are allowed inside Beat 3 (e.g. "גיליתי את עצמי מחייכת שוב") because they
+// can describe the emotional payoff rather than the product discovery itself.
 const BEAT_3_FORBIDDEN_PHRASES = [
   'עד שגיליתי',
   'ואז גיליתי',
-  'גיליתי את',
-  'מצאתי את',
-  'עד שמצאתי',
 ];
 function beatStructureViolations(scenes, productName) {
   const violations = [];
@@ -232,6 +238,8 @@ function beatStructureViolations(scenes, productName) {
   const v1 = (scenes[0]?.subtitle || scenes[0]?.voiceover || '').trim();
   const v2 = (scenes[1]?.subtitle || scenes[1]?.voiceover || '').trim();
   const v3 = (scenes[2]?.subtitle || scenes[2]?.voiceover || '').trim();
+  const v4 = (scenes[3]?.subtitle || scenes[3]?.voiceover || '').trim();
+  const productLower = productName ? productName.toLowerCase() : '';
 
   // BEAT 1: no generic filler phrases — pain must be category-specific.
   for (const phrase of BEAT_1_FORBIDDEN_PHRASES) {
@@ -240,7 +248,7 @@ function beatStructureViolations(scenes, productName) {
     }
   }
   // BEAT 1: must not mention the product name — the product is introduced in Beat 2.
-  if (productName && v1 && v1.toLowerCase().includes(productName.toLowerCase())) {
+  if (productName && v1 && v1.toLowerCase().includes(productLower)) {
     violations.push(`Beat 1 mentions the product name "${productName}" — the product must only be introduced in Beat 2.`);
   }
 
@@ -248,19 +256,36 @@ function beatStructureViolations(scenes, productName) {
   if (!DISCOVERY_OPENERS.test(v2)) {
     violations.push(`Scene 2 (Beat 2) must START with "עד ש..." or "ואז גיליתי..." and name the product. Got: "${v2.slice(0, 60)}"`);
   }
+  // BEAT 2: must contain one of the required discovery phrases verbatim.
+  if (!BEAT_2_REQUIRED_PHRASES.some(p => v2.includes(p))) {
+    violations.push(`Scene 2 (Beat 2) must contain one of: "עד שגיליתי" / "ואז גיליתי" / "גיליתי את". Got: "${v2.slice(0, 80)}"`);
+  }
+  // BEAT 2: must name the product.
+  if (productName && !v2.toLowerCase().includes(productLower)) {
+    violations.push(`Scene 2 (Beat 2) must explicitly name the product "${productName}". Got: "${v2.slice(0, 80)}"`);
+  }
   // BEAT 2: must be short (≤ 10 words) — discovery bridge only, not benefits.
   const v2Words = v2.split(/\s+/).filter(Boolean).length;
   if (v2Words > 10) {
     violations.push(`Scene 2 (Beat 2) must be short (4-6 words). Got ${v2Words} words — move benefits to scene 3.`);
   }
 
-  // BEAT 3: must NOT contain ANY discovery phrase, anywhere in the line.
-  // This catches both "עד שגיליתי ..." at the start AND buried phrases like
+  // BEAT 3: must NOT contain the Beat-2 discovery openers anywhere.
+  // Catches both "עד שגיליתי ..." at the start AND buried phrases like
   // "היא נוחה, עד שגיליתי שהיא גם קלה".
   for (const phrase of BEAT_3_FORBIDDEN_PHRASES) {
     if (v3.includes(phrase)) {
-      violations.push(`Beat 3 contains discovery phrase "${phrase}" — that belongs in Beat 2 ONLY. Beat 3 must describe benefits and emotional payoff, not re-introduce the product.`);
+      violations.push(`Beat 3 contains discovery phrase "${phrase}" — that belongs in Beat 2 ONLY. Beat 3 must describe how the product solves the Beat-1 pain, not re-introduce it.`);
     }
+  }
+
+  // BEAT 4: must contain a clear CTA verb AND name the product.
+  const v4HasCta = BEAT_4_CTA_VERBS.some(verb => v4.includes(verb));
+  if (!v4HasCta) {
+    violations.push(`Scene 4 (Beat 4) must contain a direct CTA — one of: "תקנו" / "תזמינו" / "תיכנסו לאתר" / "תנסו". Got: "${v4.slice(0, 80)}"`);
+  }
+  if (productName && !v4.toLowerCase().includes(productLower)) {
+    violations.push(`Scene 4 (Beat 4) must reference the product "${productName}" by name (e.g. "תקנו את ${productName}"). Got: "${v4.slice(0, 80)}"`);
   }
 
   return violations;
@@ -305,23 +330,33 @@ How to use: ${applicationArea}
 Every script MUST follow these 4 beats, in this exact order. Each beat = one voiceover_sceneN. DO NOT reorder, DO NOT merge, DO NOT skip a beat. Benefits NEVER come before the product is introduced. "עד שגיליתי" NEVER appears after the benefits — it is the discovery bridge between pain and benefits.
 
 BEAT 1 — SPECIFIC PAIN (voiceover_scene1, ~5 sec, ~12-15 Hebrew words) — HARD REQUIREMENT:
+  - One Hebrew sentence in story-time first-person — the speaker is venting to a friend about a SPECIFIC MOMENT they remember
   - The pain must be SPECIFIC to the product's category — name the body part / domain / situation (hair, teeth, kippah, skin, sleep, dessert, etc.)
-  - Use sensory or emotional language that ties directly to the product category
-  - Describe a CONCRETE MOMENT or situation the listener can picture
-  - Emotional, relatable, first-person; sounds like venting to a friend
+  - Use SENSORY or EMOTIONAL language tied to the category (smell, taste, look in the mirror, embarrassment, weight, dryness, etc.)
+  - Describe a CONCRETE MOMENT the listener can vividly picture happening to them
+  - Sounds like a real story being told, NOT an ad copy line
   - MUST NOT mention the product name, brand name, or any benefit
+
+  ✅ STORY-TIME EXAMPLES BY CATEGORY (match the spirit, write your own line):
+    - Fashion: "כל פעם שיצאתי מהקניון הרגשתי שלא מצאתי את המראה שלי"
+    - Beauty (teeth): "התעוררתי כל בוקר עם שיניים צהובות שהתביישתי בהן"
+    - Religious: "הרגשתי שחסרה לי כיפה שמתאימה לי באמת"
+    - Food: "כל ארוחה הסתיימה בתחושה כבדה ובחרטה"
 
   ⛔ FORBIDDEN GENERIC PHRASES in Beat 1 (these make the pain interchangeable and kill emotional resonance — Beat 1 must NOT contain ANY of these, literally or paraphrased):
     - "מנסה כל פתרון"
     - "ניסיתי כל פתרון"
     - "שום דבר לא עבד"
     - "שום פתרון לא עבד"
+    - "שום פתרון"
     - "ניסיתי הכל"
+    - "ניסיתי המון"
+    - "כלום לא עבד"
     - "חיפשתי פתרון"
     - "לא מצאתי משהו שמתאים"
     - "כלום לא התאים"
     - "כלום לא עזר"
-  If you were about to write any of these, STOP and write a category-specific pain instead.
+  If you were about to write any of these, STOP and write a category-specific story-time pain instead.
 
   📋 PRODUCT-CATEGORY-TO-PAIN CHEATSHEET (draw from the closest match — adapt the exact wording to the specific product):
     • Religious / spiritual (kippah, tzitzit, mezuzah, head covering): "הרגשתי שאני עובר את היום בלי חיבור רוחני" / "רציתי משהו שיזכיר לי מי אני באמת" / "הכיפות שלי תמיד היו לא נוחות ולא מיוחדות"
@@ -355,24 +390,22 @@ BEAT 2 — DISCOVERY OF PRODUCT (voiceover_scene2, ~2-3 sec, ~4-6 Hebrew words, 
     * "ואז גיליתי את ${productName}"
     * "עד שמצאתי את ${productName}"
 
-BEAT 3 — BENEFITS + EMOTIONAL PAYOFF (voiceover_scene3, ~7-8 sec, ~18-22 Hebrew words) — BENEFITS ONLY, HARD REQUIREMENT:
-  - State 2-3 specific concrete benefits of ${productName}
-  - Then CONNECT the last benefit back to the pain from BEAT 1 with an emotional payoff ("וכל פעם ש... אני מרגיש ש...")
-  - Structure inside scene 3: [benefit 1] + [benefit 2] + [emotional line that resolves the pain]
-  - Beat 3 should flow naturally from Beat 2 (which already introduced the product) — go DIRECTLY into why the product is good, do not re-introduce it
+BEAT 3 — EXPLAIN THE PRODUCT + HOW IT SOLVES BEAT-1 PAIN (voiceover_scene3, ~7-8 sec, ~18-22 Hebrew words) — HARD REQUIREMENT:
+  - Explain what ${productName} actually does and HOW it directly resolves the SPECIFIC pain stated in Beat 1
+  - Make a clear cause-and-effect link: pain → mechanism → relief
+  - State 2-3 concrete things the product does, then close with a line that pays off the Beat-1 emotion
+  - Beat 3 should flow naturally from Beat 2 (which already introduced the product) — go DIRECTLY into mechanism + payoff, do not re-introduce it
 
-  ⛔ FORBIDDEN DISCOVERY PHRASES in Beat 3 (these belong in Beat 2 ONLY — Beat 3 must NOT contain ANY of these, not even buried mid-sentence):
+  ⛔ FORBIDDEN DISCOVERY OPENERS in Beat 3 (these belong in Beat 2 ONLY — Beat 3 must NOT contain ANY of these, not even buried mid-sentence):
     - "עד שגיליתי"
     - "ואז גיליתי"
-    - "גיליתי את"
-    - "מצאתי את"
-    - "עד שמצאתי"
-  If you find yourself writing one of these in Beat 3, STOP — the discovery was already made in Beat 2. Replace with a direct benefit sentence.
+  If you find yourself writing one of these in Beat 3, STOP — the discovery was already made in Beat 2. Replace with a direct mechanism / benefit sentence.
 
   GOOD example (kippah):
+    Beat 1: "הרגשתי שחסרה לי כיפה שמתאימה לי באמת"
     Beat 2: "עד שגיליתי את ${productName}"
     Beat 3: "היא עשויה מחומרים איכותיים וקלה לחבישה, וכל פעם שאני חובש אותה אני נזכר שיש מי שמעלי"
-    ✓ Beat 3 starts with a benefit, closes with an emotional line resolving Beat 1's pain. No discovery phrase.
+    ✓ Beat 3 starts with a benefit, closes with an emotional line resolving Beat 1's pain. No discovery opener.
 
   BAD example (DO NOT PRODUCE THIS):
     Beat 2: "עד שגיליתי את ${productName}"
@@ -381,20 +414,21 @@ BEAT 3 — BENEFITS + EMOTIONAL PAYOFF (voiceover_scene3, ~7-8 sec, ~18-22 Hebre
 
   Example (teeth): "היא מלבינה את השיניים תוך ימים ולא פוגעת באמייל, ולראשונה אני מחייך בתמונות בלי להרגיש לא בנוח"
 
-BEAT 4 — CTA + PERSONAL TESTIMONIAL (voiceover_scene4, ~3-4 sec, ~8-10 Hebrew words):
-  - Direct, emotionally weighted call to action
-  - Include a short personal testimonial that gives the CTA weight — "זה שינה לי את היום", "זה שווה כל שקל", "אי אפשר להתחרט"
-  - DO NOT just say "תנסו את המוצר" — always add the emotional close
+BEAT 4 — CTA REFERENCING THE PRODUCT BY NAME (voiceover_scene4, ~3-4 sec, ~8-10 Hebrew words) — HARD REQUIREMENT:
+  - Direct call to action that REFERENCES "${productName}" by name
+  - MUST contain at least one of these CTA verbs (verbatim): "תקנו" / "תזמינו" / "תיכנסו לאתר" / "תנסו"
+  - Optionally add a short emotional close ("זה שווה כל שקל" / "אי אפשר להתחרט" / "זה שינה לי את היום")
   - Examples:
-    * "אתם חייבים לנסות את זה, זה באמת שינה לי את היום"
-    * "תזמינו עכשיו, אי אפשר להתחרט על זה"
-    * "זה שווה כל שקל, בלי חוכמות"
+    * "תקנו את ${productName} עכשיו, זה שווה כל שקל"
+    * "תזמינו את ${productName} באתר, אי אפשר להתחרט"
+    * "תיכנסו לאתר ותזמינו את ${productName} היום"
+    * "תנסו את ${productName}, זה שינה לי את היום"
 
 SANITY CHECK before returning — read the 4 voiceovers in order and confirm:
-  1. Scene 1 is a specific pain and does NOT name the product.
-  2. Scene 2 starts with "עד ש" or "ואז גיליתי" and names ${productName}.
-  3. Scene 3 contains at least 2 concrete benefits AND does NOT start with "עד שגיליתי".
-  4. Scene 4 is a CTA with a personal emotional line.
+  1. Scene 1 is a SENSORY, story-time pain specific to the product category and does NOT name the product. None of the forbidden generic phrases appear.
+  2. Scene 2 contains "עד שגיליתי" / "ואז גיליתי" / "גיליתי את" AND names ${productName}.
+  3. Scene 3 explains how ${productName} resolves the Beat-1 pain AND does NOT contain "עד שגיליתי" or "ואז גיליתי".
+  4. Scene 4 contains one of "תקנו" / "תזמינו" / "תיכנסו לאתר" / "תנסו" AND names ${productName}.
 If any of these fail, rewrite before returning.
 
 SCENE 2 VISUAL NOTE:
@@ -602,16 +636,16 @@ NEVER describe smiles, laughs, or reactions that open the mouth.
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "BEAT 1 — SPECIFIC PAIN, ~12-15 Hebrew words. Category-anchored pain (names the body part/domain), never the product name, never a benefit. Sounds like a friend venting.",
-  "voiceover_scene2": "BEAT 2 — DISCOVERY, ~4-6 Hebrew words. MUST start with 'עד ש' or 'ואז גיליתי' and include the product name ${productName}. NO benefits listed. Deliberately short and punchy.",
-  "voiceover_scene3": "BEAT 3 — BENEFITS + EMOTIONAL PAYOFF, ~18-22 Hebrew words. 2-3 concrete benefits of ${productName}, then an emotional line that resolves the BEAT 1 pain. Do NOT open with 'עד שגיליתי' — discovery already happened in BEAT 2.",
-  "voiceover_scene4": "BEAT 4 — CTA + PERSONAL TESTIMONIAL, ~8-10 Hebrew words. Direct CTA combined with a personal emotional line like 'זה שינה לי את היום' / 'זה שווה כל שקל' / 'אי אפשר להתחרט'. Never a bare 'תנסו'.",
+  "voiceover_scene1": "BEAT 1 — SPECIFIC SENSORY STORY-TIME PAIN, ~12-15 Hebrew words. First-person story-time line tied to the product CATEGORY (names the body part/domain/situation). Never the product name, never a benefit. Must NOT contain any of: 'ניסיתי הכל' / 'ניסיתי המון' / 'כלום לא עבד' / 'שום פתרון'.",
+  "voiceover_scene2": "BEAT 2 — DISCOVERY, ~4-6 Hebrew words. MUST contain one of 'עד שגיליתי' / 'ואז גיליתי' / 'גיליתי את' AND include the product name ${productName}. NO benefits listed. Deliberately short and punchy.",
+  "voiceover_scene3": "BEAT 3 — EXPLAIN PRODUCT + HOW IT SOLVES THE PAIN, ~18-22 Hebrew words. Describe what ${productName} does and tie it directly to the Beat-1 pain (cause-and-effect). Do NOT use 'עד שגיליתי' or 'ואז גיליתי' — discovery already happened in BEAT 2.",
+  "voiceover_scene4": "BEAT 4 — CTA NAMING THE PRODUCT, ~8-10 Hebrew words. MUST contain one of 'תקנו' / 'תזמינו' / 'תיכנסו לאתר' / 'תנסו' AND must reference '${productName}' by name. Example: 'תקנו את ${productName} עכשיו, זה שווה כל שקל'.",
   "setting": "one-line description of the setting",
   "scenes": [
     {
       "type": "כאב",
-      "nb_prompt": "Unedited still frame pulled from a handheld iPhone selfie video, not a photograph. Avatar showing specific problem related to ${productDesc}, closed-lip frustrated expression with brow furrow, caught mid-thought with slight hesitation, eyelid mid-close or mouth in the middle of forming a word — never a finished pose. No product visible yet. Shot on iPhone 15 Pro front camera, native wide lens around 26mm, autofocus hunts gently with focus pulsing, real unretouched skin with visible pores across cheeks and forehead, subtle uneven skin tone, subtle darker half-moons under the eyes, slight natural oil sheen on nose and forehead, faint pink flush on cheeks, natural facial asymmetry, tiny flyaway hairs catching the light, soft window daylight mixed with warm room practical, uneven jaw shadow, one side of face slightly in shadow, subtle barrel distortion at corners, auto white balance, faint luminance grain, faint rolling-shutter skew, flat washed-out color, uncolor-graded, low saturation, handheld one-hand micro-shake with subtle motion blur on hair, soft focus across the whole frame, framing slightly off-center and tilted a few degrees, head not dead-level, no airbrushing, no beauty filter, no studio lighting, no 8k, no LUT, looks like a real person on their front camera not a render, correct human anatomy, exactly two arms, no extra limbs, no burned-in subtitles or captions or on-screen text or graphic overlays, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
-      "kling_prompt": "Avatar in [setting] visibly frustrated with [specific problem], no product visible. Physics of motion: brow furrows gradually in frustration, weight transfers from one leg to the other and the hips settle into the new stance, hair shifts slightly with the body weight change, eyes drift down and off-screen then pull back to the lens, one slow natural blink mid-beat, closed-lip sigh with shoulders sagging and visible chest expansion, small hesitation like a caught mid-thought. Handheld iPhone front-camera feel with mild one-hand wobble, autofocus pulses gently, silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
+      "nb_prompt": "Unedited still frame pulled from a handheld iPhone selfie video, not a photograph. STORY-TIME SETTING: avatar sitting on a bed or couch in a cozy Israeli home bedroom or living room — NOT outdoors, NOT a mall. Around them, scattered on the floor and bed/couch: realistic Israeli shopping bags from real local brands — Shufersal (red logo), Rami Levy (yellow-blue), Castro, Fox, Renuar, H&O, Super-Pharm (סופר-פארם), brown paper bags with Hebrew text on them. Authentic real-life Israeli home ambiance, lived-in feel, throw pillows, slightly messy. Avatar speaking to camera in story-time selfie style — NOT looking directly at the lens, gaze drifts off-camera (looking away to the side, slightly down, or up as if recalling a memory). Tired, frustrated, or disappointed expression — like venting to a friend about a frustrating shopping day. No product visible yet. Casual handheld iPhone selfie, slight natural shake, vertical 9:16 framing. Shot on iPhone 15 Pro front camera, native wide lens around 26mm, autofocus hunts gently with focus pulsing, real unretouched skin with visible pores across cheeks and forehead, subtle uneven skin tone, subtle darker half-moons under the eyes, slight natural oil sheen on nose and forehead, faint pink flush on cheeks, natural facial asymmetry, tiny flyaway hairs catching the light, warm indoor home lighting mixed with natural window light, uneven jaw shadow, one side of face slightly in shadow, subtle barrel distortion at corners, auto white balance, faint luminance grain, faint rolling-shutter skew, flat washed-out color, uncolor-graded, low saturation, handheld one-hand micro-shake with subtle motion blur on hair, soft focus across the whole frame, framing slightly off-center and tilted a few degrees, head not dead-level, no airbrushing, no beauty filter, no studio lighting, no 8k, no LUT, real human texture, candid not posed, looks like a real person on their front camera not a render, not AI-generated feel, correct human anatomy, exactly two arms, no extra limbs, no burned-in subtitles or captions or on-screen text or graphic overlays, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle",
+      "kling_prompt": "Avatar sitting on a bed or couch in a cozy Israeli home, Shufersal / Rami Levy / Castro / Fox / Renuar / H&O / Super-Pharm shopping bags scattered around them on the bed and floor, story-time selfie venting about a frustrating shopping day, no product visible. Physics of motion: gaze drifts off-camera to the side then up as if recalling the memory, brow furrows gradually with quiet frustration, shoulders sag with a closed-lip sigh and chest expands subtly, weight shifts on the bed/couch and a single shopping bag rustles slightly with the movement, hair follows the head turn with a small lag and catches the warm indoor light, one slow natural blink mid-beat, small hesitation like a caught mid-thought. Handheld iPhone front-camera feel with mild one-hand wobble, autofocus pulses gently, warm window daylight + ambient room practical, lived-in Israeli home ambiance, silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
       "subtitle": "same as voiceover_scene1"
     },
     {
@@ -681,15 +715,19 @@ Return ONLY valid JSON (no markdown):
   }
   // Validate the strict 4-beat structure. Collect ALL violations so the regen
   // instruction shows Claude every issue at once (rather than fixing one and
-  // surfacing the next on a second pass). Regenerate once with the full list.
+  // surfacing the next on a second pass). Regenerate up to 2 times before
+  // giving up and returning whatever Claude last produced.
   if (parsed) {
-    const violations = beatStructureViolations(parsed.scenes, productName);
-    if (violations.length > 0) {
-      console.warn('[generateScript] 4-beat structure violations:', violations);
+    const MAX_BEAT_REGEN = 2;
+    for (let attempt = 1; attempt <= MAX_BEAT_REGEN; attempt++) {
+      const violations = beatStructureViolations(parsed.scenes, productName);
+      if (violations.length === 0) break;
+      console.warn(`[generateScript] 4-beat structure violations (attempt ${attempt}/${MAX_BEAT_REGEN}):`, violations);
       const bullets = violations.map((v, i) => `  ${i + 1}. ${v}`).join('\n');
-      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules:\n- voiceover_scene1 = BEAT 1 (SPECIFIC pain tied to the product CATEGORY, never a generic "ניסיתי הכל"/"כלום לא עזר" phrase, never names the product)\n- voiceover_scene2 = BEAT 2 (SHORT 4-6 words, MUST start with "עד ש" or "ואז גיליתי" and include "${productName}", NO benefits here)\n- voiceover_scene3 = BEAT 3 (2-3 concrete benefits + emotional payoff resolving the pain, MUST NOT contain ANY of: "עד שגיליתי" / "ואז גיליתי" / "גיליתי את" / "מצאתי את" — anywhere in the line, not just at the start)\n- voiceover_scene4 = BEAT 4 (CTA + personal testimonial line)`;
+      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules:\n- voiceover_scene1 = BEAT 1 (SPECIFIC sensory pain tied to the product CATEGORY, told as a story-time first-person memory; NEVER a generic "ניסיתי הכל" / "ניסיתי המון" / "כלום לא עבד" / "שום פתרון" phrase; never names the product)\n- voiceover_scene2 = BEAT 2 (SHORT 4-6 words, MUST contain one of "עד שגיליתי" / "ואז גיליתי" / "גיליתי את" AND include "${productName}", NO benefits here)\n- voiceover_scene3 = BEAT 3 (explain what ${productName} does and HOW it solves the Beat-1 pain — direct cause-and-effect; MUST NOT contain "עד שגיליתי" or "ואז גיליתי")\n- voiceover_scene4 = BEAT 4 (clear CTA — must contain one of "תקנו" / "תזמינו" / "תיכנסו לאתר" / "תנסו" — AND must name "${productName}", e.g. "תקנו את ${productName} עכשיו")`;
       const retry = parseResponse(await callClaude(extraInstruction));
       if (retry) parsed = retry;
+      else break;
     }
   }
   // Validate authentic Hebrew — if Claude used borrowed/transliterated words
