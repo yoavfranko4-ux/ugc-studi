@@ -1,0 +1,470 @@
+/* ============================================================
+   YOTZR — full landing page styles
+   Pink-red palette · cinematic black · bold Hebrew typography
+   ============================================================ */
+:root{
+  --bg:#000; --bg-2:#0a0608; --bg-3:#120a10;
+  --ink:#F5F5F4; --ink-2:rgba(245,245,244,.66); --ink-3:rgba(245,245,244,.4); --ink-4:rgba(245,245,244,.22);
+  --line:rgba(245,245,244,.08); --line-2:rgba(245,245,244,.16);
+  --pink:#ff1493;
+  --magenta:#d946ef;
+  --pink-red:#ff006e;
+  --pink-glow:rgba(255,20,147,.5);
+  --pink-soft:rgba(255,20,147,.18);
+  --pink-faint:rgba(255,20,147,.08);
+  --grad: linear-gradient(135deg, #ff006e 0%, #ff1493 50%, #d946ef 100%);
+  --grad-soft: linear-gradient(135deg, rgba(255,0,110,.18) 0%, rgba(255,20,147,.18) 50%, rgba(217,70,239,.18) 100%);
+  --mono:"JetBrains Mono", ui-monospace, monospace;
+  --display:"Heebo","Assistant",system-ui,sans-serif;
+  --body:"Assistant","Heebo",system-ui,sans-serif;
+}
+
+/* landing-page-only resets — scope to body class to avoid bleeding into other routes */
+body.yotzr-landing{background:var(--bg); color:var(--ink); font-family:var(--body); -webkit-font-smoothing:antialiased; overflow-x:hidden; min-height:100vh; direction:rtl}
+body.yotzr-landing *{box-sizing:border-box}
+body.yotzr-landing ::selection{background:var(--pink); color:#000}
+body.yotzr-landing button{font-family:inherit; cursor:pointer; border:none; background:none; color:inherit}
+body.yotzr-landing a{color:inherit; text-decoration:none}
+
+/* film grain over everything */
+body.yotzr-landing::before{content:""; position:fixed; inset:0; pointer-events:none; z-index:200; opacity:.18; mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");}
+
+/* ============== buttons ============== */
+.yotzr .btn{padding:11px 22px; border-radius:10px; font-size:14px; font-weight:600; min-height:44px;
+  display:inline-flex; align-items:center; gap:8px; cursor:pointer; transition:transform .3s cubic-bezier(.16,1,.3,1), box-shadow .3s, background .3s, color .3s, border-color .3s}
+.yotzr .btn-ghost{color:var(--ink); border:1px solid var(--line-2); background:rgba(255,255,255,.03); backdrop-filter:blur(10px)}
+.yotzr .btn-ghost:hover{border-color:var(--pink); background:rgba(255,20,147,.08); transform:translateY(-2px); box-shadow:0 10px 30px -10px var(--pink-glow)}
+.yotzr .btn-primary{background:var(--grad); color:#fff; font-weight:700; box-shadow:0 8px 24px -6px var(--pink), 0 0 28px var(--pink-soft), inset 0 1px 0 rgba(255,255,255,.25); position:relative; overflow:hidden}
+.yotzr .btn-primary::before{content:""; position:absolute; inset:0; background:linear-gradient(90deg, transparent, rgba(255,255,255,.3), transparent); transform:translateX(-100%); transition:transform .8s}
+.yotzr .btn-primary:hover{transform:translateY(-3px) scale(1.02); box-shadow:0 16px 44px -8px var(--pink), 0 0 36px var(--pink-glow)}
+.yotzr .btn-primary:hover::before{transform:translateX(100%)}
+.yotzr .btn-lg{padding:18px 30px; font-size:15px; min-height:56px; border-radius:12px}
+.yotzr .btn-pulse{animation:pulse-cta 2.4s ease-in-out infinite}
+@keyframes pulse-cta{0%,100%{box-shadow:0 8px 24px -6px var(--pink), 0 0 28px var(--pink-soft), inset 0 1px 0 rgba(255,255,255,.25)}50%{box-shadow:0 12px 36px -4px var(--pink), 0 0 60px var(--pink-glow), inset 0 1px 0 rgba(255,255,255,.3)}}
+
+/* ============== nav ============== */
+.yotzr .nav{position:fixed; top:0; left:0; right:0; z-index:100; padding:18px 40px; display:flex; align-items:center; justify-content:space-between;
+  backdrop-filter:blur(14px); background:linear-gradient(180deg, rgba(0,0,0,.85), rgba(0,0,0,.4)); border-bottom:1px solid transparent; transition:.4s}
+.yotzr .nav.scrolled{border-color:var(--line); background:rgba(0,0,0,.92); padding:14px 40px}
+.yotzr .nav.scrolled::after{content:""; position:absolute; bottom:0; left:0; right:0; height:1px; background:linear-gradient(90deg, transparent, var(--pink-glow), transparent); opacity:.5}
+.yotzr .brand{display:flex; align-items:center; gap:10px; font-family:var(--display); font-weight:900; font-size:22px; letter-spacing:-.03em}
+.yotzr .brand-dot{width:10px; height:10px; border-radius:2px; background:var(--pink); box-shadow:0 0 18px var(--pink), 0 0 32px var(--pink-glow); animation:pdot 2s ease-in-out infinite}
+@keyframes pdot{0%,100%{opacity:1; transform:scale(1)}50%{opacity:.7; transform:scale(.88)}}
+.yotzr .brand-version{font-family:var(--mono); font-size:10px; letter-spacing:.22em; color:var(--ink-3); font-weight:500; margin-inline-start:8px}
+.yotzr .nav-links{display:flex; gap:36px; font-size:14px; color:var(--ink-2); font-weight:500}
+.yotzr .nav-links a{position:relative; padding:6px 0; transition:.3s}
+.yotzr .nav-links a::after{content:""; position:absolute; bottom:-2px; right:0; width:0; height:1px; background:var(--pink); transition:width .3s; box-shadow:0 0 8px var(--pink)}
+.yotzr .nav-links a:hover{color:var(--ink)}
+.yotzr .nav-links a:hover::after{width:100%}
+.yotzr .nav-cta{display:flex; gap:10px; align-items:center}
+
+/* ============== global pink dust ============== */
+.yotzr .dust{position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:1}
+.yotzr .dust .speck{position:absolute; border-radius:50%; background:var(--pink); box-shadow:0 0 6px var(--pink); opacity:.6; animation:floatSpeck 18s linear infinite}
+.yotzr .dust .speck.small{width:2px; height:2px; opacity:.4}
+.yotzr .dust .speck.tiny{width:1px; height:1px; opacity:.3}
+.yotzr .dust .speck.big{width:3px; height:3px; box-shadow:0 0 10px var(--pink)}
+@keyframes floatSpeck{
+  0%{transform:translate3d(0,40px,0); opacity:0}
+  10%{opacity:.7}
+  90%{opacity:.5}
+  100%{transform:translate3d(20px,-900px,0); opacity:0}
+}
+
+/* ============== ambient blobs ============== */
+.yotzr .ambient{position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:0}
+.yotzr .ambient .blob{position:absolute; border-radius:50%; filter:blur(90px); mix-blend-mode:screen; opacity:.5}
+.yotzr .ambient .b1{top:-200px; right:-150px; width:680px; height:680px; background:radial-gradient(circle, var(--pink), transparent 65%); animation:blobpulse 9s ease-in-out infinite}
+.yotzr .ambient .b2{bottom:-260px; left:-150px; width:760px; height:760px; background:radial-gradient(circle, var(--pink-red), transparent 65%); animation:blobpulse 11s ease-in-out infinite -3s}
+@keyframes blobpulse{0%,100%{transform:scale(1); opacity:.5}50%{transform:scale(1.15); opacity:.7}}
+
+/* ============== section divider ============== */
+.yotzr .section-divider{display:flex; align-items:center; gap:18px; padding:0 40px; margin:80px 0 36px; font-family:var(--mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-3); position:relative; z-index:5}
+.yotzr .section-divider .num{color:var(--pink); font-weight:700; text-shadow:0 0 8px var(--pink-soft)}
+.yotzr .section-divider .line{flex:1; height:1px; background:linear-gradient(90deg, var(--line), transparent)}
+
+/* ============== headline + accents ============== */
+.yotzr .eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-3); margin-bottom:24px}
+.yotzr .eyebrow .dot{color:var(--pink); text-shadow:0 0 8px var(--pink); margin-inline-end:6px}
+.yotzr .h-display{font-family:var(--display); font-weight:900; letter-spacing:-.045em; line-height:.9; color:var(--ink)}
+.yotzr .h-display .accent{background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; filter:drop-shadow(0 0 22px var(--pink-soft))}
+.yotzr .h-display .stroke{-webkit-text-stroke:2px var(--ink); color:transparent}
+.yotzr .h-display .en{font-family:var(--mono); font-weight:700; letter-spacing:.02em; text-transform:uppercase; font-size:.16em; color:var(--ink-3); margin-inline-start:14px; vertical-align:middle}
+
+/* ============== HERO ============== */
+.yotzr .hero{position:relative; padding:120px 80px 60px; min-height:100vh; display:grid; grid-template-columns:1.05fr .95fr; gap:60px; align-items:center; overflow:hidden}
+.yotzr .hero .left{position:relative; z-index:6}
+.yotzr .hero .h1{font-size:clamp(72px,9vw,118px)}
+.yotzr .hero .sub{font-size:20px; color:var(--ink-2); max-width:560px; line-height:1.5; margin-top:28px}
+.yotzr .hero .cta-row{display:flex; gap:12px; margin-top:32px; align-items:center; flex-wrap:wrap}
+.yotzr .hero .cta-micro{font-family:var(--mono); font-size:10px; letter-spacing:.15em; text-transform:uppercase; color:var(--ink-3); margin-inline-start:8px}
+.yotzr .hero .cta-micro .check{color:var(--pink); margin-left:4px; text-shadow:0 0 6px var(--pink)}
+.yotzr .hero .live-proof{margin-top:20px; display:inline-flex; align-items:center; gap:10px; padding:8px 14px; border-radius:99px; background:linear-gradient(90deg, rgba(255,20,147,.12), rgba(217,70,239,.06)); border:1px solid rgba(255,20,147,.32); font-size:13px; color:var(--ink-2); box-shadow:0 0 20px rgba(255,20,147,.15)}
+.yotzr .hero .live-proof b{color:var(--ink); font-variant-numeric:tabular-nums}
+.yotzr .live-dot{width:7px; height:7px; border-radius:50%; background:#22c55e; box-shadow:0 0 10px #22c55e; animation:lp 1.6s infinite}
+@keyframes lp{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ticker */
+.yotzr .hero-ticker{position:absolute; top:80px; right:0; left:0; height:36px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); overflow:hidden; background:rgba(255,20,147,.04); z-index:8}
+.yotzr .hero-ticker-track{display:flex; gap:60px; white-space:nowrap; align-items:center; height:100%; font-family:var(--mono); font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-2); animation:ticker 40s linear infinite; padding-inline-start:60px}
+.yotzr .hero-ticker-track span{display:inline-flex; align-items:center; gap:14px}
+.yotzr .hero-ticker-track .pulse{width:7px; height:7px; border-radius:50%; background:var(--pink); box-shadow:0 0 10px var(--pink); flex-shrink:0}
+.yotzr .hero-ticker-track .strong{color:var(--ink)}
+.yotzr .hero-ticker-track .sep{color:var(--ink-4)}
+@keyframes ticker{0%{transform:translateX(0)}100%{transform:translateX(50%)}}
+
+.yotzr .hero-toggle{display:inline-flex; gap:4px; background:rgba(255,255,255,.03); border:1px solid var(--line-2); border-radius:8px; padding:4px; margin-bottom:24px; backdrop-filter:blur(10px)}
+.yotzr .hero-toggle button{padding:9px 20px; border-radius:6px; font-weight:600; font-size:13px; color:var(--ink-2); transition:.25s}
+.yotzr .hero-toggle button.active{background:var(--grad); color:#fff; box-shadow:0 6px 18px -6px var(--pink)}
+.yotzr .hero-toggle button:hover:not(.active){color:var(--ink)}
+
+/* studio mock */
+.yotzr .right-stage{position:relative}
+.yotzr .studio-mock{position:relative; aspect-ratio:4/3; border-radius:18px; background:linear-gradient(180deg, #0c0a0d, #07060a); border:1px solid rgba(255,20,147,.22); overflow:hidden;
+  box-shadow:0 50px 120px -20px rgba(255,20,147,.55), 0 0 80px -20px rgba(255,0,110,.35), 0 0 0 1px rgba(255,20,147,.18), inset 0 1px 0 rgba(255,255,255,.05);
+  transform:perspective(1800px) rotateY(-7deg) rotateX(2deg)}
+.yotzr .studio-mock::before{content:""; position:absolute; inset:0; background:linear-gradient(135deg, rgba(255,20,147,.08), transparent 50%); pointer-events:none; z-index:1}
+.yotzr .studio-bar{display:flex; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid rgba(255,20,147,.12); background:rgba(255,255,255,.02); position:relative; z-index:2}
+.yotzr .studio-bar .dot{width:10px; height:10px; border-radius:50%; background:var(--line-2)}
+.yotzr .studio-bar .dot.r{background:#ff5577}.yotzr .studio-bar .dot.y{background:#ffaa33}.yotzr .studio-bar .dot.g{background:#33d977}
+.yotzr .studio-bar .path{margin-inline-start:14px; font-family:var(--mono); font-size:11px; color:var(--ink-3); letter-spacing:.1em}
+.yotzr .studio-bar .path .accent{color:var(--pink); text-shadow:0 0 6px var(--pink-glow)}
+.yotzr .studio-grid{display:grid; grid-template-columns:200px 1fr 220px; height:calc(100% - 41px); position:relative; z-index:2}
+.yotzr .studio-side{padding:14px; border-inline-end:1px solid rgba(255,20,147,.1); background:rgba(255,255,255,.015)}
+.yotzr .studio-side h5{font-family:var(--mono); font-size:9px; letter-spacing:.18em; color:var(--ink-3); text-transform:uppercase; margin-bottom:10px}
+.yotzr .studio-side .item{padding:8px 10px; border-radius:6px; font-size:12px; color:var(--ink-2); margin-bottom:4px; display:flex; align-items:center; gap:8px}
+.yotzr .studio-side .item.active{background:linear-gradient(90deg, rgba(255,20,147,.18), rgba(255,20,147,.06)); color:var(--ink); border:1px solid rgba(255,20,147,.4); box-shadow:0 0 16px rgba(255,20,147,.25)}
+.yotzr .studio-side .item .ic{width:14px; height:14px; border-radius:3px; background:var(--pink); opacity:.6; flex-shrink:0}
+.yotzr .studio-side .item.active .ic{opacity:1; box-shadow:0 0 8px var(--pink)}
+.yotzr .studio-side .item.alt .ic{background:var(--magenta)}
+.yotzr .studio-canvas{position:relative; padding:18px; display:flex; align-items:center; justify-content:center; background:radial-gradient(ellipse at center, rgba(255,20,147,.1), transparent 70%)}
+.yotzr .studio-phone{width:170px; height:300px; border-radius:22px; background:#000; border:2px solid #1a0a14; position:relative; overflow:hidden;
+  box-shadow:0 25px 60px rgba(0,0,0,.7), 0 0 0 4px #0a0508, 0 0 40px rgba(255,20,147,.3)}
+.yotzr .studio-phone::before{content:""; position:absolute; top:0; left:50%; transform:translateX(-50%); width:54px; height:16px; background:#000; border-radius:0 0 12px 12px; z-index:5}
+.yotzr .video-stack{position:absolute; inset:0; background:#000; overflow:hidden}
+.yotzr .video-stack video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0; transition:opacity .5s ease}
+.yotzr .video-stack video.active{opacity:1}
+.yotzr .video-fallback{position:absolute; inset:0; z-index:0; pointer-events:none}
+.yotzr .video-fallback .layer{position:absolute; inset:0; opacity:0; transition:opacity .5s ease}
+.yotzr .video-fallback .layer.active{opacity:1}
+.yotzr .video-fallback .l1{background:linear-gradient(170deg, #ffe1ec 0%, #ffb3d1 30%, #ff4d8f 70%, #5a0820 100%)}
+.yotzr .video-fallback .l2{background:linear-gradient(180deg, #fff4cf 0%, #ffd49e 35%, #f06090 70%, #2e0822 100%)}
+.yotzr .video-fallback .l3{background:linear-gradient(190deg, #1a1410 0%, #4a2a1a 40%, #ff5577 80%, #2a0612 100%)}
+.yotzr .video-fallback .vbadge{position:absolute; top:36px; left:50%; transform:translateX(-50%); padding:3px 8px; background:rgba(0,0,0,.55); color:#fff; font-family:var(--mono); font-size:7px; font-weight:700; letter-spacing:.12em; border-radius:99px; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,.2)}
+.yotzr .video-fallback .vlabel{position:absolute; bottom:46px; left:8px; right:8px; text-align:center; font-family:var(--display); font-weight:900; font-size:12px; color:#fff; line-height:1.15; text-shadow:0 2px 8px rgba(0,0,0,.7)}
+.yotzr .video-fallback .vlabel .accent{color:var(--pink); text-shadow:0 0 8px var(--pink)}
+.yotzr .studio-phone .ui-icons{position:absolute; right:6px; bottom:80px; display:flex; flex-direction:column; gap:10px; z-index:4}
+.yotzr .studio-phone .ui-icons .ui{width:18px; height:18px; border-radius:50%; background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.3); backdrop-filter:blur(4px)}
+.yotzr .studio-phone .ui-icons .ui.heart{background:rgba(255,20,147,.7); border-color:var(--pink); box-shadow:0 0 8px var(--pink)}
+.yotzr .studio-phone .progress{position:absolute; bottom:0; left:0; right:0; height:3px; background:rgba(255,255,255,.15); z-index:4}
+.yotzr .studio-phone .progress::after{content:""; display:block; height:100%; width:65%; background:linear-gradient(90deg, var(--pink-red), var(--pink)); box-shadow:0 0 10px var(--pink); animation:prog 4s ease-in-out infinite alternate}
+@keyframes prog{0%{width:35%}100%{width:78%}}
+.yotzr .timeline{position:absolute; bottom:18px; left:18px; right:18px; height:32px; background:rgba(0,0,0,.5); border:1px solid rgba(255,20,147,.2); border-radius:6px; padding:6px 8px; display:flex; align-items:center; gap:4px; backdrop-filter:blur(6px)}
+.yotzr .timeline .seg{flex:1; height:100%; border-radius:3px; background:rgba(255,255,255,.08)}
+.yotzr .timeline .seg.active{background:linear-gradient(90deg, var(--pink-red), var(--pink)); box-shadow:0 0 8px var(--pink)}
+.yotzr .timeline .seg.partial{background:linear-gradient(90deg, var(--pink-red) 40%, rgba(255,255,255,.08) 40%)}
+.yotzr .timeline .head{position:absolute; top:-2px; bottom:-2px; width:2px; background:#fff; box-shadow:0 0 6px #fff; left:42%}
+.yotzr .studio-right{padding:14px; border-inline-start:1px solid rgba(255,20,147,.1); background:rgba(255,255,255,.015); display:flex; flex-direction:column; gap:12px}
+.yotzr .studio-right .panel{padding:12px; border:1px solid var(--line); border-radius:6px; background:rgba(255,255,255,.025)}
+.yotzr .studio-right h5{font-family:var(--mono); font-size:9px; letter-spacing:.18em; color:var(--ink-3); text-transform:uppercase; margin-bottom:8px}
+.yotzr .studio-right .row{display:flex; align-items:center; justify-content:space-between; font-size:11px; color:var(--ink-2); padding:4px 0}
+.yotzr .studio-right .row b{color:var(--ink); font-family:var(--mono); font-size:10px; font-weight:600}
+.yotzr .studio-right .row .pill{padding:2px 7px; border-radius:99px; background:rgba(255,20,147,.16); color:var(--pink); border:1px solid rgba(255,20,147,.4); font-family:var(--mono); font-size:9px; letter-spacing:.1em}
+.yotzr .render-bar{padding:12px; border-radius:8px; background:var(--grad); color:#fff; font-weight:700; font-size:12px; text-align:center; box-shadow:0 10px 28px -8px var(--pink), 0 0 30px var(--pink-soft); position:relative; overflow:hidden}
+.yotzr .render-bar::before{content:""; position:absolute; inset:0; background:linear-gradient(90deg, transparent, rgba(255,255,255,.25), transparent); animation:sheen 2.2s linear infinite}
+@keyframes sheen{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+.yotzr .render-bar .pulse-rim{display:inline-block; width:7px; height:7px; border-radius:50%; background:#fff; margin-inline-end:8px; vertical-align:middle; box-shadow:0 0 8px #fff; animation:lp 1.2s infinite}
+.yotzr .badge{position:absolute; top:60px; right:18px; padding:6px 10px; background:rgba(0,0,0,.7); border:1px solid rgba(255,20,147,.4); border-radius:6px; font-family:var(--mono); font-size:10px; color:var(--ink); display:flex; align-items:center; gap:6px; backdrop-filter:blur(10px); z-index:5; box-shadow:0 0 14px rgba(255,20,147,.25)}
+.yotzr .badge .rec{width:6px; height:6px; border-radius:50%; background:var(--pink-red); animation:lp 1s infinite; box-shadow:0 0 8px var(--pink-red)}
+.yotzr .float-chip{position:absolute; padding:9px 14px; background:rgba(8,4,8,.85); border:1px solid rgba(255,20,147,.5); border-radius:10px; font-family:var(--mono); font-size:10px; color:var(--ink); box-shadow:0 12px 36px -8px rgba(255,20,147,.6), 0 0 20px rgba(255,20,147,.25); z-index:8; backdrop-filter:blur(10px); display:inline-flex; align-items:center; gap:8px; letter-spacing:.06em}
+.yotzr .float-chip .accent{color:var(--pink); text-shadow:0 0 6px var(--pink)}
+.yotzr .float-chip .sparkle{width:6px; height:6px; border-radius:50%; background:var(--pink); box-shadow:0 0 8px var(--pink); animation:lp 1.2s infinite}
+.yotzr .float-chip.c1{top:18%; left:-30px; animation:bob 4s ease-in-out infinite}
+.yotzr .float-chip.c2{bottom:14%; right:-24px; animation:bob 5s ease-in-out infinite -2s}
+.yotzr .float-chip.c3{top:48%; right:-50px; animation:bob 6s ease-in-out infinite -1s}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+.yotzr .corner{position:absolute; width:14px; height:14px; border:1.5px solid var(--pink); z-index:7}
+.yotzr .corner.tl{top:-6px; right:-6px; border-left:none; border-bottom:none}
+.yotzr .corner.tr{top:-6px; left:-6px; border-right:none; border-bottom:none}
+.yotzr .corner.bl{bottom:-6px; right:-6px; border-left:none; border-top:none}
+.yotzr .corner.br{bottom:-6px; left:-6px; border-right:none; border-top:none}
+.yotzr .label-mock-top{position:absolute; top:-26px; right:0; font-family:var(--mono); font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-3)}
+.yotzr .label-mock-top .accent{color:var(--pink); text-shadow:0 0 6px var(--pink)}
+.yotzr .label-mock-bot{position:absolute; bottom:-26px; left:0; font-family:var(--mono); font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-3)}
+
+/* ============== FLOW SECTION ============== */
+.yotzr .flow-section{padding:60px 40px 160px; position:relative; overflow:hidden}
+.yotzr .flow-section .ambient{z-index:0}
+.yotzr .flow-header{max-width:1000px; margin:0 auto 40px; text-align:center; position:relative; z-index:5}
+.yotzr .flow-title{font-family:var(--display); font-weight:900; font-size:clamp(56px,8vw,108px); line-height:.95; letter-spacing:-.045em; margin-bottom:24px}
+.yotzr .flow-title .accent{background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; filter:drop-shadow(0 0 22px var(--pink-soft))}
+.yotzr .flow-title .stroke{-webkit-text-stroke:2px var(--ink); color:transparent}
+.yotzr .flow-lede{font-size:20px; color:var(--ink-2); max-width:580px; margin:0 auto; line-height:1.5}
+
+/* premium product tabs */
+.yotzr .tabs{display:flex; gap:14px; justify-content:center; margin:48px auto 60px; flex-wrap:wrap; position:relative; z-index:5; max-width:1000px}
+.yotzr .tab{position:relative; padding:18px 26px; border-radius:14px; background:rgba(255,255,255,.025); border:1px solid var(--line-2); color:var(--ink-2); font-family:var(--display); font-weight:600; font-size:15px; min-height:64px;
+  display:inline-flex; align-items:center; gap:14px; cursor:pointer; transition:transform .4s cubic-bezier(.16,1,.3,1), border-color .4s, background .4s, box-shadow .4s, color .4s; backdrop-filter:blur(20px); overflow:hidden}
+.yotzr .tab::before{content:""; position:absolute; inset:0; background:var(--grad-soft); opacity:0; transition:opacity .4s; pointer-events:none}
+.yotzr .tab .tab-num{font-family:var(--mono); font-size:10px; color:var(--ink-3); font-weight:600; letter-spacing:.16em}
+.yotzr .tab .tab-emoji{font-size:22px; filter:drop-shadow(0 0 10px var(--pink-soft))}
+.yotzr .tab .tab-label{display:flex; flex-direction:column; gap:2px; align-items:flex-start}
+.yotzr .tab .tab-cat{font-family:var(--mono); font-size:9px; letter-spacing:.2em; color:var(--ink-3); text-transform:uppercase}
+.yotzr .tab:hover:not(.active){border-color:rgba(255,20,147,.55); color:var(--ink); transform:translateY(-3px) scale(1.02); box-shadow:0 18px 36px -12px rgba(255,20,147,.4)}
+.yotzr .tab:hover:not(.active)::before{opacity:.4}
+.yotzr .tab.active{background:rgba(0,0,0,.55); border-color:transparent; color:var(--ink); transform:translateY(-2px) scale(1.04); box-shadow:0 0 0 1.5px var(--pink), 0 18px 50px -10px var(--pink), 0 0 60px var(--pink-soft), inset 0 1px 0 rgba(255,255,255,.08)}
+.yotzr .tab.active::before{opacity:.18}
+.yotzr .tab.active .tab-num,.yotzr .tab.active .tab-cat{color:var(--pink)}
+.yotzr .tab.active .tab-cat{text-shadow:0 0 6px var(--pink-soft)}
+
+/* branched timeline */
+.yotzr .flow-branch{max-width:1100px; margin:0 auto; position:relative; z-index:5}
+.yotzr .branch-line{position:absolute; top:0; bottom:0; right:50%; width:2px; background:var(--line); transform:translateX(1px); z-index:0}
+.yotzr .branch-line-fill{position:absolute; top:0; right:0; width:100%; background:linear-gradient(to bottom, var(--pink-red), var(--pink), var(--magenta)); height:0; transition:height 1s cubic-bezier(.2,.8,.2,1); box-shadow:0 0 20px var(--pink-glow)}
+.yotzr .step{position:relative; padding:70px 0; display:grid; grid-template-columns:1fr 100px 1fr; align-items:center; gap:40px; opacity:0; transform:translateY(30px); transition:opacity .9s cubic-bezier(.2,.8,.2,1), transform .9s cubic-bezier(.2,.8,.2,1)}
+.yotzr .step.in{opacity:1; transform:none}
+.yotzr .step-node{position:relative; z-index:2; justify-self:center; width:88px; height:88px; border-radius:50%; background:#000; border:2px solid var(--line); display:flex; align-items:center; justify-content:center; font-family:var(--display); font-weight:900; font-size:30px; color:var(--ink-3); transition:all .5s cubic-bezier(.2,.8,.2,1); letter-spacing:-.03em}
+.yotzr .step-node::before{content:""; position:absolute; inset:-6px; border-radius:50%; border:1px dashed var(--line-2); transform:rotate(0deg); transition:.6s}
+.yotzr .step.active .step-node{background:var(--grad); border-color:transparent; color:#fff; box-shadow:0 0 50px var(--pink-glow), 0 0 0 2px var(--pink); transform:scale(1.12)}
+.yotzr .step.active .step-node::before{border-color:var(--pink); transform:rotate(45deg)}
+.yotzr .step-info{text-align:right}
+.yotzr .step.right-side .step-info{text-align:left}
+.yotzr .step .step-info{grid-column:1; grid-row:1}
+.yotzr .step.right-side .step-info{grid-column:3; grid-row:1}
+.yotzr .step .step-visual{grid-column:3; grid-row:1}
+.yotzr .step.right-side .step-visual{grid-column:1; grid-row:1}
+.yotzr .step-label{font-family:var(--mono); font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--pink); margin-bottom:14px; font-weight:700; text-shadow:0 0 8px var(--pink-soft); display:inline-flex; align-items:center; gap:8px}
+.yotzr .step-label::before{content:""; width:18px; height:1px; background:var(--pink); box-shadow:0 0 6px var(--pink)}
+.yotzr .step-title{font-family:var(--display); font-weight:900; font-size:38px; line-height:1.05; letter-spacing:-.03em; margin-bottom:14px}
+.yotzr .step-desc{color:var(--ink-2); font-size:16px; line-height:1.55; max-width:340px}
+.yotzr .step.right-side .step-desc{margin-right:auto; margin-left:0}
+.yotzr .step:not(.right-side) .step-desc{margin-left:auto; margin-right:0}
+.yotzr .step-visual{position:relative; background:linear-gradient(180deg, rgba(255,20,147,.04), transparent), var(--bg-2); border:1px solid rgba(255,20,147,.15); border-radius:14px; padding:28px; min-height:280px; box-shadow:0 30px 80px -20px rgba(255,20,147,.18), inset 0 1px 0 rgba(255,255,255,.04); overflow:hidden}
+.yotzr .step.active .step-visual{border-color:rgba(255,20,147,.4); box-shadow:0 30px 80px -10px rgba(255,20,147,.4), inset 0 1px 0 rgba(255,255,255,.06)}
+.yotzr .step-visual .cap{font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-3); margin-bottom:14px; display:inline-flex; align-items:center; gap:8px}
+.yotzr .step-visual .cap .bullet{color:var(--pink); text-shadow:0 0 8px var(--pink)}
+
+/* Step 1 — typing */
+.yotzr .demo-textbox-label{font-family:var(--mono); font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-3); margin-bottom:10px}
+.yotzr .demo-textbox{background:rgba(0,0,0,.5); border:1px solid var(--line-2); border-radius:8px; padding:22px; font-size:16px; line-height:1.6; color:var(--ink); min-height:140px; position:relative; backdrop-filter:blur(8px)}
+.yotzr .demo-textbox.typing::after{content:""; display:inline-block; width:2px; height:18px; background:var(--pink); margin-inline-start:2px; vertical-align:middle; box-shadow:0 0 6px var(--pink); animation:caret 1s steps(2) infinite}
+@keyframes caret{0%,50%{opacity:1}51%,100%{opacity:0}}
+
+/* Step 2 — dropzone */
+.yotzr .demo-dropzone{background:rgba(0,0,0,.4); border:1.5px dashed var(--line-2); border-radius:8px; padding:18px; display:flex; align-items:center; justify-content:center; min-height:240px; position:relative; overflow:hidden; transition:.4s}
+.yotzr .step.active .demo-dropzone{border-color:var(--pink); box-shadow:inset 0 0 30px rgba(255,20,147,.1)}
+.yotzr .demo-dropzone img{max-width:100%; max-height:220px; object-fit:contain; opacity:0; transform:scale(.85) translateY(-20px); transition:.6s cubic-bezier(.2,.8,.2,1); border-radius:6px}
+.yotzr .demo-dropzone.has-image img{opacity:1; transform:none}
+.yotzr .demo-dropzone-placeholder{color:var(--ink-3); font-family:var(--mono); font-size:11px; letter-spacing:.18em; text-align:center; line-height:1.6; text-transform:uppercase}
+.yotzr .demo-dropzone-placeholder.hidden{display:none}
+.yotzr .demo-dropzone-check{position:absolute; top:14px; right:14px; padding:5px 10px; border-radius:99px; background:rgba(34,197,94,.18); border:1px solid rgba(34,197,94,.4); color:#22c55e; font-family:var(--mono); font-size:10px; letter-spacing:.1em; opacity:0; transition:.4s}
+.yotzr .demo-dropzone.has-image .demo-dropzone-check{opacity:1}
+
+/* Step 3 — avatars */
+.yotzr .demo-avatars{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:18px}
+.yotzr .demo-avatar{position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; border:1.5px solid var(--line); transition:.4s; background:linear-gradient(135deg, #2a0a1a, #08040a)}
+.yotzr .demo-avatar.selected{border-color:var(--pink); box-shadow:0 0 0 2px var(--pink), 0 0 30px var(--pink-glow)}
+.yotzr .demo-avatar .ph{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--ink-2)}
+.yotzr .demo-avatar .ph .face-glyph{width:50px; height:50px; border-radius:50%; background:radial-gradient(circle at 35% 35%, #f0c4ad, #b06070 70%, #4a0826); margin-bottom:8px; box-shadow:0 0 20px rgba(255,20,147,.3)}
+.yotzr .demo-avatar .ph .face-glyph.b{background:radial-gradient(circle at 35% 35%, #d8a888, #8a4838 70%, #2a0a14)}
+.yotzr .demo-avatar .ph .face-glyph.c{background:radial-gradient(circle at 35% 35%, #f8d4b8, #c47a78 70%, #5a182a)}
+.yotzr .demo-avatar .name-badge{position:absolute; bottom:6px; left:6px; right:6px; padding:5px 8px; background:rgba(0,0,0,.7); border-radius:6px; backdrop-filter:blur(6px); display:flex; flex-direction:column; gap:1px; text-align:right}
+.yotzr .demo-avatar .name-badge .name{font-size:11px; font-weight:700; color:var(--ink)}
+.yotzr .demo-avatar .name-badge .voice{font-family:var(--mono); font-size:8px; letter-spacing:.1em; color:var(--ink-3)}
+.yotzr .demo-avatar.selected .name-badge{background:linear-gradient(90deg, rgba(255,20,147,.5), rgba(0,0,0,.7))}
+.yotzr .voice-picker-label{font-family:var(--mono); font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-3); margin-bottom:8px}
+.yotzr .voice-options{display:grid; grid-template-columns:repeat(3,1fr); gap:6px}
+.yotzr .voice-option{padding:8px; border:1px solid var(--line); border-radius:6px; background:rgba(255,255,255,.02); display:flex; align-items:center; gap:6px; font-size:11px; color:var(--ink-2); transition:.3s}
+.yotzr .voice-option:hover:not(.locked){border-color:var(--pink); color:var(--ink)}
+.yotzr .voice-option.active{background:linear-gradient(135deg, rgba(255,20,147,.2), rgba(217,70,239,.1)); border-color:var(--pink); color:var(--ink); box-shadow:0 0 16px rgba(255,20,147,.25)}
+.yotzr .voice-option .voice-icon{font-size:13px}
+.yotzr .voice-option .voice-tag{font-family:var(--mono); font-size:8px; letter-spacing:.12em; color:var(--ink-3); margin-inline-start:auto}
+.yotzr .voice-option.active .voice-tag{color:var(--pink)}
+.yotzr .voice-option.locked{opacity:.5; cursor:not-allowed}
+
+/* Step 4 — REVEAL — dramatic */
+.yotzr .step[data-step="4"]{padding:90px 0 30px}
+.yotzr .step[data-step="4"] .step-visual{padding:36px; background:linear-gradient(180deg, rgba(255,20,147,.1), transparent 60%), #0a0608; border:1.5px solid rgba(255,20,147,.3); box-shadow:0 50px 120px -20px rgba(255,20,147,.5), 0 0 0 1px rgba(255,20,147,.2), inset 0 1px 0 rgba(255,255,255,.06)}
+.yotzr .step[data-step="4"] .step-visual::before{content:""; position:absolute; inset:0; background:radial-gradient(ellipse at top, rgba(255,20,147,.18), transparent 60%); pointer-events:none}
+.yotzr .step[data-step="4"] .step-title{font-size:48px; background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; filter:drop-shadow(0 0 20px var(--pink-soft))}
+.yotzr .step[data-step="4"] .corner-glow{position:absolute; width:14px; height:14px; border:1.5px solid var(--pink)}
+.yotzr .step[data-step="4"] .corner-glow.tl{top:8px; right:8px; border-left:none; border-bottom:none}
+.yotzr .step[data-step="4"] .corner-glow.tr{top:8px; left:8px; border-right:none; border-bottom:none}
+.yotzr .step[data-step="4"] .corner-glow.bl{bottom:8px; right:8px; border-left:none; border-top:none}
+.yotzr .step[data-step="4"] .corner-glow.br{bottom:8px; left:8px; border-right:none; border-top:none}
+.yotzr .demo-result{display:flex; flex-direction:column; align-items:center; gap:18px; position:relative; z-index:2}
+.yotzr .demo-result .reveal-label{font-family:var(--mono); font-size:10px; letter-spacing:.3em; color:var(--pink); text-transform:uppercase; text-shadow:0 0 10px var(--pink-soft)}
+.yotzr .demo-video{position:relative; width:200px; aspect-ratio:9/16; border-radius:16px; overflow:hidden; background:#000; border:2px solid #1a0a14; box-shadow:0 30px 80px -10px rgba(255,20,147,.5), 0 0 0 4px #0a0508, 0 0 60px var(--pink-soft)}
+.yotzr .demo-video video{width:100%; height:100%; object-fit:cover; display:block}
+.yotzr .sound-toggle{position:absolute; top:10px; left:10px; width:32px; height:32px; border-radius:50%; background:rgba(0,0,0,.7); border:1px solid rgba(255,255,255,.2); color:#fff; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(6px); font-size:13px}
+.yotzr .demo-result-meta{display:flex; gap:14px; font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-3); flex-wrap:wrap; justify-content:center}
+.yotzr .demo-result-meta span .accent{color:var(--pink); text-shadow:0 0 8px var(--pink)}
+.yotzr .demo-result-actions{display:flex; gap:10px}
+
+/* ============== MID CTA ============== */
+.yotzr .mid-cta{padding:80px 40px; position:relative; overflow:hidden}
+.yotzr .mid-cta-inner{max-width:1200px; margin:0 auto; padding:60px 60px; border-radius:24px; background:linear-gradient(135deg, rgba(255,0,110,.18) 0%, rgba(255,20,147,.08) 50%, rgba(217,70,239,.18) 100%); border:1px solid rgba(255,20,147,.3); position:relative; overflow:hidden; display:grid; grid-template-columns:1fr auto; gap:60px; align-items:center; box-shadow:0 30px 100px -20px rgba(255,20,147,.4)}
+.yotzr .mid-cta-inner::before{content:""; position:absolute; top:-300px; left:-200px; width:600px; height:600px; border-radius:50%; background:radial-gradient(circle, var(--pink), transparent 65%); opacity:.4; filter:blur(70px); animation:blobpulse 9s infinite}
+.yotzr .mid-cta-inner::after{content:""; position:absolute; bottom:-300px; right:-200px; width:600px; height:600px; border-radius:50%; background:radial-gradient(circle, var(--pink-red), transparent 65%); opacity:.4; filter:blur(70px); animation:blobpulse 11s infinite -3s}
+.yotzr .mid-cta-text{position:relative; z-index:5}
+.yotzr .mid-cta-eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--pink); text-shadow:0 0 8px var(--pink-soft); margin-bottom:14px; font-weight:600}
+.yotzr .mid-cta-title{font-family:var(--display); font-weight:900; font-size:clamp(40px,5vw,72px); line-height:1; letter-spacing:-.04em; margin-bottom:14px}
+.yotzr .mid-cta-accent{background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; filter:drop-shadow(0 0 20px var(--pink-soft))}
+.yotzr .mid-cta-sub{font-size:18px; color:var(--ink-2); max-width:520px; line-height:1.5}
+.yotzr .mid-cta-btn{position:relative; z-index:5}
+
+/* ============== FINAL CTA ============== */
+.yotzr .final-cta{padding:140px 40px 100px; position:relative; overflow:hidden; text-align:center}
+.yotzr .final-cta::before{content:""; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:1100px; height:1100px; border-radius:50%; background:radial-gradient(circle, rgba(255,20,147,.15) 0%, rgba(255,0,110,.08) 35%, transparent 65%); pointer-events:none; animation:blobpulse 8s infinite}
+.yotzr .final-cta-content{position:relative; z-index:5; max-width:900px; margin:0 auto}
+.yotzr .final-cta-eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.3em; text-transform:uppercase; color:var(--pink); text-shadow:0 0 8px var(--pink); margin-bottom:24px; display:inline-flex; align-items:center; gap:10px}
+.yotzr .final-cta-eyebrow::before,.yotzr .final-cta-eyebrow::after{content:""; width:36px; height:1px; background:var(--pink); box-shadow:0 0 8px var(--pink)}
+.yotzr .final-cta-title{font-family:var(--display); font-weight:900; font-size:clamp(64px,10vw,140px); line-height:.95; letter-spacing:-.045em; margin-bottom:20px}
+.yotzr .final-cta-title .accent{background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; filter:drop-shadow(0 0 30px var(--pink-glow))}
+.yotzr .final-cta-sub{font-size:22px; color:var(--ink-2); max-width:600px; margin:0 auto 40px; line-height:1.5}
+.yotzr .final-cta-micro{margin-top:20px; font-family:var(--mono); font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-3)}
+.yotzr .final-cta-micro .check{color:var(--pink); margin-left:4px; text-shadow:0 0 6px var(--pink)}
+
+/* ============== FOOTER ============== */
+.yotzr .footer{position:relative; padding:80px 40px 30px; border-top:1px solid var(--line); overflow:hidden; background:linear-gradient(180deg, transparent, rgba(255,20,147,.03))}
+.yotzr .footer::before{content:""; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg, transparent, var(--pink), transparent); box-shadow:0 0 12px var(--pink-soft)}
+.yotzr .footer-grid{max-width:1300px; margin:0 auto; display:grid; grid-template-columns:1.4fr 1fr 1fr 1fr; gap:60px; padding-bottom:50px; border-bottom:1px solid var(--line)}
+.yotzr .footer-brand-block{display:flex; flex-direction:column; gap:16px}
+.yotzr .footer-logo{display:flex; align-items:center; gap:10px; font-family:var(--display); font-weight:900; font-size:24px; letter-spacing:-.03em}
+.yotzr .footer-logo-dot{width:10px; height:10px; border-radius:2px; background:var(--pink); box-shadow:0 0 18px var(--pink); animation:pdot 2s infinite}
+.yotzr .footer-logo-version{font-family:var(--mono); font-size:10px; letter-spacing:.22em; color:var(--ink-3); font-weight:500; margin-inline-start:8px}
+.yotzr .footer-tagline{font-size:14px; color:var(--ink-2); line-height:1.6; max-width:340px}
+.yotzr .footer-made{font-family:var(--mono); font-size:10px; letter-spacing:.22em; color:var(--ink-3); text-transform:uppercase; display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid var(--line-2); border-radius:99px; background:rgba(255,20,147,.04); width:fit-content}
+.yotzr .footer-made .footer-flag{color:var(--pink); text-shadow:0 0 8px var(--pink)}
+.yotzr .footer-col{display:flex; flex-direction:column; gap:10px}
+.yotzr .footer-col-title{font-family:var(--mono); font-size:10px; letter-spacing:.24em; color:var(--pink); text-transform:uppercase; font-weight:700; margin-bottom:4px; text-shadow:0 0 6px var(--pink-soft)}
+.yotzr .footer-link{font-size:14px; color:var(--ink-2); transition:.3s; display:inline-flex; align-items:center; gap:8px; padding:2px 0; position:relative; width:fit-content}
+.yotzr .footer-link::before{content:""; position:absolute; right:0; bottom:-2px; width:0; height:1px; background:var(--pink); transition:width .3s; box-shadow:0 0 6px var(--pink)}
+.yotzr .footer-link:hover{color:var(--ink)}
+.yotzr .footer-link:hover::before{width:100%}
+.yotzr .footer-bottom{max-width:1300px; margin:30px auto 0; display:flex; align-items:center; gap:20px; font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-3)}
+.yotzr .footer-bottom-spacer{flex:1; height:1px; background:var(--line)}
+
+/* ============================================================
+   PRICING — three distinct identities
+   ============================================================ */
+.yotzr .pricing-section { padding: 60px 40px 120px; position: relative; }
+.yotzr .pricing-header { max-width: 1200px; margin: 0 auto 56px; text-align: center; }
+.yotzr .pricing-title { font-family: var(--display); font-weight: 900; font-size: clamp(56px, 7vw, 100px); letter-spacing: -.04em; line-height: 1; margin: 0; }
+.yotzr .pricing-title .accent { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 24px var(--pink-soft)); }
+.yotzr .pricing-lede { font-size: 18px; color: var(--ink-2); max-width: 600px; margin: 22px auto 0; line-height: 1.55; }
+.yotzr .pricing-grid { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; align-items: stretch; }
+
+.yotzr .price-card { position: relative; padding: 40px 28px; border-radius: 18px; display: flex; flex-direction: column; gap: 14px; text-align: center; isolation: isolate; overflow: hidden; transition: transform .35s cubic-bezier(.2,.8,.2,1), box-shadow .35s; }
+.yotzr .price-card:hover { transform: translateY(-4px); }
+
+.yotzr .price-icon { font-size: 32px; line-height: 1; }
+.yotzr .price-label { font-family: var(--mono); font-size: 10px; letter-spacing: .22em; color: var(--ink-3); text-transform: uppercase; }
+.yotzr .price-name { font-family: var(--display); font-weight: 900; font-size: 28px; letter-spacing: -.02em; }
+.yotzr .price-amount { font-family: var(--display); font-weight: 900; font-size: 64px; letter-spacing: -.04em; line-height: 1; }
+.yotzr .price-amount .cur { font-size: 24px; margin-inline-start: 4px; color: var(--ink-2); }
+.yotzr .price-period { font-family: var(--mono); font-size: 10px; letter-spacing: .18em; color: var(--ink-3); text-transform: uppercase; }
+.yotzr .price-features { list-style: none; display: flex; flex-direction: column; gap: 10px; padding: 0; margin: 14px 0; text-align: right; }
+.yotzr .price-features li { font-size: 14px; color: var(--ink-2); display: flex; align-items: center; gap: 10px; }
+.yotzr .price-features .check { font-weight: 900; }
+
+.yotzr .price-btn { width: 100%; padding: 14px 18px; border-radius: 12px; font-family: var(--display); font-weight: 800; font-size: 15px; letter-spacing: -.01em; cursor: pointer; border: 1px solid transparent; transition: transform .2s, box-shadow .2s, background .2s, color .2s; }
+.yotzr .price-btn:hover { transform: translateY(-1px); }
+.yotzr .price-note { font-size: 11px; color: var(--ink-3); font-family: var(--mono); letter-spacing: .1em; margin-top: auto; }
+
+.yotzr .price-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); padding: 6px 16px; font-size: 11px; font-weight: 700; border-radius: 99px; font-family: var(--mono); letter-spacing: .1em; white-space: nowrap; z-index: 3; }
+
+/* TRIAL — dark minimal */
+.yotzr .price-trial { background: rgba(12, 8, 14, .55); border: 1px solid rgba(255, 255, 255, .07); box-shadow: none; }
+.yotzr .price-trial .price-name { color: rgba(255,255,255,.92); }
+.yotzr .price-trial .price-amount { color: rgba(255,255,255,.85); }
+.yotzr .price-trial .price-features .check { color: var(--pink); }
+.yotzr .price-btn-trial { background: transparent; color: rgba(255,255,255,.85); border: 1px solid rgba(255,255,255,.18); }
+.yotzr .price-btn-trial:hover { border-color: rgba(255,255,255,.35); background: rgba(255,255,255,.04); }
+
+/* BASIC — pink magenta */
+.yotzr .price-basic { background: linear-gradient(180deg, rgba(217,70,239,.10), rgba(255,20,147,.04) 60%, rgba(255,255,255,.02)); border: 1px solid rgba(217, 70, 239, .35); box-shadow: 0 30px 80px -20px rgba(217, 70, 239, .35), inset 0 1px 0 rgba(255,255,255,.06); }
+.yotzr .price-basic .price-name { background: linear-gradient(135deg, #ff8ad6, #d946ef); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.yotzr .price-basic .price-amount { color: #fff; }
+.yotzr .price-basic .price-features .check { color: #d946ef; text-shadow: 0 0 8px rgba(217,70,239,.7); }
+.yotzr .price-basic .price-badge { background: linear-gradient(135deg, #ff8ad6, #d946ef); color: #fff; box-shadow: 0 6px 22px -4px rgba(217,70,239,.7); }
+.yotzr .price-btn-basic { background: linear-gradient(135deg, #ff8ad6, #d946ef); color: #fff; box-shadow: 0 14px 30px -10px rgba(217,70,239,.65); }
+.yotzr .price-btn-basic:hover { box-shadow: 0 18px 38px -8px rgba(217,70,239,.85); }
+
+/* PRO — green neon flagship */
+.yotzr .price-pro { background: radial-gradient(ellipse at top, rgba(0,255,136,.10), transparent 60%), linear-gradient(180deg, rgba(4, 22, 14, .9), rgba(2, 10, 6, .95)); border: 1px solid #00ff88; box-shadow: 0 0 0 1px rgba(0,255,136,.25), 0 30px 80px -10px rgba(0,255,136,.35), 0 0 60px -10px rgba(0,255,136,.45), inset 0 1px 0 rgba(0,255,136,.18), inset 0 0 60px -20px rgba(0,255,136,.18); transform: translateY(-8px); }
+.yotzr .price-pro:hover { transform: translateY(-12px); }
+.yotzr .price-pro .price-icon { filter: drop-shadow(0 0 12px rgba(0,255,136,.7)); }
+.yotzr .price-pro .price-label { color: rgba(0,255,136,.7); }
+.yotzr .price-pro .price-name { color: #00ff88; text-shadow: 0 0 10px rgba(0,255,136,.8), 0 0 24px rgba(0,255,136,.5), 0 0 48px rgba(0,255,136,.3); }
+.yotzr .price-pro .price-amount { color: #fff; text-shadow: 0 0 24px rgba(0,255,136,.4); }
+.yotzr .price-pro .price-amount .cur { color: #00ff88; }
+.yotzr .price-pro .price-features li { color: rgba(255,255,255,.88); }
+.yotzr .price-pro .price-features .check { color: #00ff88; text-shadow: 0 0 8px rgba(0,255,136,.9); }
+.yotzr .price-pro .price-badge { background: linear-gradient(135deg, #ff1493, #d946ef); color: #fff; box-shadow: 0 6px 22px -4px rgba(255,20,147,.7), 0 0 0 1px rgba(255,255,255,.15); }
+.yotzr .price-pro .price-note { color: rgba(0,255,136,.55); }
+.yotzr .price-btn-pro { background: linear-gradient(135deg, #00ff88, #00d973); color: #03130a; font-weight: 900; border: 1px solid rgba(0,255,136,.6); box-shadow: 0 14px 30px -8px rgba(0,255,136,.6), 0 0 24px -4px rgba(0,255,136,.5), inset 0 1px 0 rgba(255,255,255,.4); }
+.yotzr .price-btn-pro:hover { box-shadow: 0 18px 38px -6px rgba(0,255,136,.8), 0 0 36px -2px rgba(0,255,136,.7), inset 0 1px 0 rgba(255,255,255,.5); }
+
+/* PRO ambient flames */
+.yotzr .price-pro .flame { position: absolute; pointer-events: none; z-index: 0; border-radius: 50%; filter: blur(28px); opacity: .55; background: radial-gradient(circle, #00ff88 0%, rgba(0,255,136,.3) 40%, transparent 70%); animation: proFlame 3.6s ease-in-out infinite; }
+.yotzr .price-pro .flame.f1 { width: 180px; height: 180px; top: -60px; left: -50px; animation-delay: 0s; }
+.yotzr .price-pro .flame.f2 { width: 140px; height: 140px; bottom: -40px; right: -40px; animation-delay: 1.2s; opacity: .45; }
+.yotzr .price-pro .flame.f3 { width: 90px; height: 90px; top: 40%; right: 20%; animation-delay: 2.1s; opacity: .35; }
+@keyframes proFlame { 0%,100% { transform: scale(1) translateY(0); opacity: .55; } 50% { transform: scale(1.18) translateY(-6px); opacity: .8; } }
+
+/* PRO grid texture */
+.yotzr .price-pro .pro-grid { position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  background-image: linear-gradient(rgba(0,255,136,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,136,.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .5;
+}
+
+.yotzr .price-card > *:not(.flame):not(.pro-grid) { position: relative; z-index: 1; }
+
+/* ============== RESPONSIVE ============== */
+@media (max-width: 1100px) {
+  .yotzr .hero{grid-template-columns:1fr; padding:120px 30px 60px; gap:40px}
+  .yotzr .hero .right-stage{order:2; max-width:560px; margin:0 auto; width:100%}
+  .yotzr .studio-mock{transform:none}
+  .yotzr .float-chip.c1{left:6px}
+  .yotzr .float-chip.c2{right:6px}
+  .yotzr .float-chip.c3{right:6px; top:54%}
+}
+@media (max-width: 900px) {
+  .yotzr .nav{padding:14px 20px}
+  .yotzr .nav-links{display:none}
+  .yotzr .nav-cta .btn-ghost{display:none}
+  .yotzr .hero .h1{font-size:clamp(54px,12vw,86px)}
+  .yotzr .hero .sub{font-size:17px}
+  .yotzr .studio-grid{grid-template-columns:1fr}
+  .yotzr .studio-side, .yotzr .studio-right{display:none}
+  .yotzr .flow-section{padding:60px 18px 120px}
+  .yotzr .flow-branch{max-width:100%}
+  .yotzr .branch-line{right:24px; transform:none}
+  .yotzr .step{grid-template-columns:60px 1fr; gap:18px; padding:36px 0}
+  .yotzr .step-node{width:54px; height:54px; font-size:18px; grid-column:1; justify-self:start}
+  .yotzr .step-info, .yotzr .step.right-side .step-info{grid-column:2; grid-row:1; text-align:right}
+  .yotzr .step-visual, .yotzr .step.right-side .step-visual{grid-column:1 / -1; grid-row:2; margin-top:14px}
+  .yotzr .step-title{font-size:26px}
+  .yotzr .step-desc{font-size:15px; max-width:none}
+  .yotzr .step.right-side .step-desc, .yotzr .step:not(.right-side) .step-desc{margin:0}
+  .yotzr .mid-cta-inner{grid-template-columns:1fr; padding:40px 28px; gap:24px; text-align:center}
+  .yotzr .mid-cta-sub{margin:0 auto}
+  .yotzr .pricing-grid{grid-template-columns:1fr; gap:32px}
+  .yotzr .price-pro{transform:none}
+  .yotzr .price-pro:hover{transform:translateY(-4px)}
+  .yotzr .footer-grid{grid-template-columns:1fr 1fr; gap:36px}
+  .yotzr .footer-brand-block{grid-column:1 / -1}
+  .yotzr .section-divider{padding:0 20px; margin:60px 0 24px}
+  .yotzr .final-cta{padding:90px 20px 70px}
+}
+@media (max-width: 560px) {
+  .yotzr .footer-grid{grid-template-columns:1fr}
+  .yotzr .demo-avatars{gap:6px}
+  .yotzr .voice-options{grid-template-columns:1fr 1fr}
+  .yotzr .voice-options .locked{grid-column:1 / -1}
+}
