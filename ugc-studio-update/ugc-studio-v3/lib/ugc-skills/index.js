@@ -282,6 +282,11 @@ export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
   negatives.push('no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays');
   parts.push(`NEGATIVES: ${negatives.join(', ')}.`);
 
+  // Audio + iPhone-footage aesthetic. Kept as a trailing tail so it's the last
+  // thing Kling sees — biases the generator toward silent, low-contrast,
+  // amateur smartphone capture instead of cinematic / scored output.
+  parts.push('silent footage, no audio, no sound, video only, low contrast, flat color grading, desaturated tones, soft natural lighting, no dramatic shadows, iPhone camera profile, amateur smartphone footage look, slightly washed out.');
+
   const finalPrompt = parts.filter(Boolean).join(' ');
 
   // Bodyguard: Kling v3 pro rejects prompts longer than 2500 chars. If we are
@@ -295,16 +300,19 @@ export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
     const productLockShort = productName
       ? `PRODUCT LOCK: ${productName} — identical color, shape, texture, embroidery to source image across all scenes. No morphing, no drift.`
       : '';
+    // Keep the aesthetic tail even in trim mode — this is the whole point of
+    // the iPhone-vibe pass. Shorten heavily but never drop it.
+    const minimalAesthetic = 'silent footage, no audio, low contrast, flat color, desaturated, iPhone amateur look, slightly washed out.';
 
-    const trimmed = [raw, minimalRealism, minimalNegatives, productLockShort]
+    const trimmed = [raw, minimalRealism, minimalNegatives, productLockShort, minimalAesthetic]
       .filter(Boolean)
       .join(' ');
 
     if (trimmed.length > KLING_HARD_LIMIT) {
       const overhead = minimalRealism.length + minimalNegatives.length
-        + productLockShort.length + 20;
+        + productLockShort.length + minimalAesthetic.length + 20;
       const truncatedRaw = raw.slice(0, KLING_HARD_LIMIT - overhead);
-      const truncatedFinal = [truncatedRaw, minimalRealism, minimalNegatives, productLockShort]
+      const truncatedFinal = [truncatedRaw, minimalRealism, minimalNegatives, productLockShort, minimalAesthetic]
         .filter(Boolean)
         .join(' ');
       console.log(`[buildKlingPrompt] TRIMMED PROMPT (${truncatedFinal.length} chars):`);

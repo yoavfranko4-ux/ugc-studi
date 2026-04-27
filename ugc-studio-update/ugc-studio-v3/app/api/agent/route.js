@@ -11,7 +11,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import { prewarmVideos } from '../../../lib/video-cache.js'
-import { generateNBFrame, buildKlingPrompt, mapAvatarToActorId, mapAvatarToActorInfo, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
+import { generateNBFrame, buildKlingPrompt, mapAvatarToActorId, mapAvatarToActorInfo, applyFlatColorGrading, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -1206,10 +1206,17 @@ async function runJob(jobId, body) {
       const v = await validateKlingVideo(videoUrl);
       if (!v.valid) {
         console.error(`[Kling] Scene ${i+1} FAILED validation: ${v.reason}  url=${videoUrl.slice(0, 100)}`);
-      } else {
-        console.log(`[Kling] Scene ${i+1} validated OK: ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s, size=${v.size}B`);
+        return { videoUrl, valid: v.valid, reason: v.reason };
       }
-      return { videoUrl, valid: v.valid, reason: v.reason };
+      console.log(`[Kling] Scene ${i+1} validated OK: ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s, size=${v.size}B`);
+
+      // Post-process: drop contrast/saturation, lift mids — make Kling's
+      // output read like an iPhone capture. On failure the helper returns
+      // the original URL, so the scene never gets blocked on grading.
+      console.log(`[Scene ${i+1}] Applying flat color grading...`);
+      const processedUrl = await applyFlatColorGrading(videoUrl, `Scene ${i+1}`);
+      console.log(`[Scene ${i+1}] Post-process complete`);
+      return { videoUrl: processedUrl, valid: true, reason: null };
     };
 
     const videos = await Promise.all(frames.map(async (frameUrl, i) => {

@@ -14,6 +14,14 @@
 // load from process.env.FAL_API_KEY, so nothing to do here.
 
 import { fal } from '@fal-ai/client'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import { writeFile, readFile, unlink } from 'fs/promises'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
+import { randomUUID } from 'crypto'
+import { createRequire } from 'module'
 import {
   generateUGCPrompt,
   buildPrompt,
@@ -30,6 +38,66 @@ import {
   PRODUCT_LOCK as SKILL_PRODUCT_LOCK,
   BUSINESS_CRAFT_LOCK as SKILL_BUSINESS_CRAFT_LOCK
 } from './ugc-skills/index.js'
+
+const _require = createRequire(import.meta.url)
+let _ffmpegStaticPath = null
+try { _ffmpegStaticPath = _require('ffmpeg-static') } catch {}
+const _execFileAsync = promisify(execFile)
+
+// Knock contrast/saturation down a notch and raise mid-tones so Kling's
+// glossy AI footage feels like an iPhone capture. Runs after Kling, before
+// we hand the URL back to the editor pipeline.
+//   contrast=0.85 → 15% less contrast
+//   saturation=0.80 → 20% less saturation
+//   brightness=0.02 → mids slightly lifted
+// On any failure we return the original Kling URL — post-process is
+// best-effort, never a blocker for finishing the job.
+export async function applyFlatColorGrading(videoUrl, label = '') {
+  if (!videoUrl) return videoUrl;
+  if (!_ffmpegStaticPath || !fs.existsSync(_ffmpegStaticPath)) {
+    console.warn(`[post-process${label ? ' ' + label : ''}] ffmpeg-static not available — returning original`);
+    return videoUrl;
+  }
+  const tmpDir = os.tmpdir();
+  const stamp = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const inputPath = path.join(tmpDir, `kling-in-${stamp}.mp4`);
+  const outputPath = path.join(tmpDir, `kling-out-${stamp}.mp4`);
+  try {
+    const res = await fetch(videoUrl);
+    if (!res.ok) throw new Error(`download failed HTTP ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    await writeFile(inputPath, buf);
+
+    await _execFileAsync(_ffmpegStaticPath, [
+      '-y',
+      '-i', inputPath,
+      '-vf', 'eq=contrast=0.85:saturation=0.80:brightness=0.02',
+      '-c:v', 'libx264',
+      '-preset', 'fast',
+      '-crf', '23',
+      '-an',
+      '-movflags', '+faststart',
+      outputPath
+    ], { timeout: 90000, maxBuffer: 50 * 1024 * 1024 });
+
+    const stats = fs.statSync(outputPath);
+    if (stats.size < 10 * 1024) throw new Error(`processed mp4 too small (${stats.size}B)`);
+
+    const processedBuf = await readFile(outputPath);
+    const blob = new Blob([processedBuf], { type: 'video/mp4' });
+    const uploadedUrl = await fal.storage.upload(blob);
+    if (!uploadedUrl) throw new Error('fal.storage.upload returned empty');
+
+    console.log(`[post-process${label ? ' ' + label : ''}] OK — ${processedBuf.length}B → ${uploadedUrl.slice(0, 80)}`);
+    return uploadedUrl;
+  } catch (err) {
+    console.error(`[post-process${label ? ' ' + label : ''}] failed, falling back to original:`, err.message);
+    return videoUrl;
+  } finally {
+    unlink(inputPath).catch(() => {});
+    unlink(outputPath).catch(() => {});
+  }
+}
 
 export const SCENE_DURATIONS = [5, 5, 5, 5];
 

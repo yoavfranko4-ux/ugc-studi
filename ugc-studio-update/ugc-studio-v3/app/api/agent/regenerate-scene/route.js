@@ -21,7 +21,7 @@
 
 import { fal } from '@fal-ai/client'
 import { supabase } from '../../../../lib/supabase'
-import { generateNBFrame, buildKlingPrompt, mapAvatarToActorId, mapAvatarToActorInfo } from '../../../../lib/agent-pipeline.js'
+import { generateNBFrame, buildKlingPrompt, mapAvatarToActorId, mapAvatarToActorInfo, applyFlatColorGrading } from '../../../../lib/agent-pipeline.js'
 
 export const maxDuration = 300;
 export const runtime = 'nodejs';
@@ -246,8 +246,8 @@ export async function POST(req) {
     isBusinessCraft: videoType === 'business',
     scene4Context,
   });
-  const newVideoUrl = await runKlingForScene(wrappedKlingPrompt, newFrameUrl);
-  if (!newVideoUrl) {
+  const rawVideoUrl = await runKlingForScene(wrappedKlingPrompt, newFrameUrl);
+  if (!rawVideoUrl) {
     // NB frame succeeded but Kling failed 3x. Persist the new frame anyway
     // so the client can at least show the updated still while the user
     // decides whether to retry.
@@ -261,6 +261,12 @@ export async function POST(req) {
       newVideoUrl: null,
     }, { status: 502 });
   }
+
+  // Post-process: same flat-color iPhone grading the main /api/agent flow
+  // applies. Best-effort — falls back to the raw Kling URL on any failure.
+  console.log(`[regenerate-scene] Scene ${sceneNumber}: applying flat color grading...`);
+  const newVideoUrl = await applyFlatColorGrading(rawVideoUrl, `regen scene ${sceneNumber}`);
+  console.log(`[regenerate-scene] Scene ${sceneNumber}: post-process complete`);
 
   // 3) Write both the new frame and new video into the job result
   const framesCopy = Array.isArray(result.frames) ? [...result.frames] : [null, null, null, null];
