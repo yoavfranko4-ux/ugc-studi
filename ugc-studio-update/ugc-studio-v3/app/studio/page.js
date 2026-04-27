@@ -11,13 +11,15 @@ const SUBTITLE_STYLES = [
   { id: 'neon', label: 'Neon', desc: 'לבן עם glow סגול' },
 ]
 
-// === Background Music Tracks — local 20s drops from public/music/ ===
+// === Background Music Tracks — local drops from public/music/ ===
 const MUSIC_TRACKS = [
-  { id: 'none',                 label: 'ללא מוזיקה',           emoji: '🔇', url: null },
-  { id: 'deep-house-energetic', label: '🎵 Deep House אנרגטי', emoji: '🎵', url: '/music/deep-house-energetic.mp3' },
-  { id: 'fashion-beat',         label: '✨ Fashion Beat',       emoji: '✨', url: '/music/fashion-beat.mp3' },
-  { id: 'deep-house-classic',   label: '🏛️ Deep House קלאסי',  emoji: '🏛️', url: '/music/deep-house-classic.mp3' },
-  { id: 'deep-house-lounge',    label: '🍸 Deep House Lounge',  emoji: '🍸', url: '/music/deep-house-lounge.mp3' },
+  { id: 'none',    label: 'ללא מוזיקה', emoji: '🔇', url: null },
+  { id: 'music-1', label: 'מוזיקה 1',   emoji: '🎵', url: '/music/music-1.mp3' },
+  { id: 'music-2', label: 'מוזיקה 2',   emoji: '🎶', url: '/music/music-2.mp3' },
+  { id: 'music-3', label: 'מוזיקה 3',   emoji: '🎼', url: '/music/music-3.mp3' },
+  { id: 'music-4', label: 'מוזיקה 4',   emoji: '🎧', url: '/music/music-4.mp3' },
+  { id: 'music-5', label: 'מוזיקה 5',   emoji: '🎷', url: '/music/music-5.mp3' },
+  { id: 'music-6', label: 'מוזיקה 6 (בקרוב)', emoji: '⏳', url: '/music/music-1.mp3', placeholder: true },
 ]
 
 // === Scene Transitions ===
@@ -1788,8 +1790,9 @@ export default function Home() {
             <div style={{ ...secTitle, marginBottom: 10, fontSize: 12, color: '#22c55e' }}>מוזיקת רקע</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {MUSIC_TRACKS.map(t => (
-                <button key={t.id} onClick={() => setBgMusic(t.id)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px', background: bgMusic === t.id ? 'rgba(34,197,94,0.06)' : 'transparent', border: `1px solid ${bgMusic === t.id ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 12, color: bgMusic === t.id ? '#86efac' : '#71717a', fontFamily: 'Heebo,sans-serif', transition: 'all 0.2s' }}>
+                <button key={t.id} onClick={() => { if (!t.placeholder) setBgMusic(t.id) }}
+                  title={t.placeholder ? 'מוזיקה זו תהיה זמינה בקרוב' : undefined}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px', background: bgMusic === t.id ? 'rgba(34,197,94,0.06)' : 'transparent', border: `1px solid ${bgMusic === t.id ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, cursor: t.placeholder ? 'not-allowed' : 'pointer', fontSize: 12, color: bgMusic === t.id ? '#86efac' : '#71717a', fontFamily: 'Heebo,sans-serif', transition: 'all 0.2s', opacity: t.placeholder ? 0.5 : 1 }}>
                   <span>{t.emoji}</span>
                   <span style={{ flex: 1, textAlign: 'right' }}>{t.label}</span>
                 </button>
