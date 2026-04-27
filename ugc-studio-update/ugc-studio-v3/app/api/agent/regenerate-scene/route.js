@@ -35,22 +35,44 @@ fal.config({ credentials: FAL_KEY });
 // regenerations_used column is live and we want tier gating.
 const MAX_REGENS_PER_SCENE = 3;
 
-// Minimal Kling call — 3 attempts, basic "is it a URL" check. We do NOT
+// Mirror of route.js — reference-to-video needs http(s) URLs in image_urls,
+// so any user-uploaded data: payload has to round-trip through fal.storage.
+async function ensureFalUrl(u) {
+  if (!u || typeof u !== 'string') return null;
+  if (u.startsWith('http://') || u.startsWith('https://')) return u;
+  if (!u.startsWith('data:')) return u;
+  try {
+    const m = u.match(/^data:([^;]+);base64,(.+)$/);
+    if (!m) throw new Error('malformed data url');
+    const buf = Buffer.from(m[2], 'base64');
+    const blob = new Blob([buf], { type: m[1] || 'image/png' });
+    const uploaded = await fal.storage.upload(blob);
+    if (!uploaded) throw new Error('fal.storage.upload returned empty');
+    console.log('[regenerate-scene][ensureFalUrl] uploaded data URL:', uploaded.slice(0, 80));
+    return uploaded;
+  } catch (e) {
+    console.warn('[regenerate-scene][ensureFalUrl] failed:', e.message);
+    return u;
+  }
+}
+
+// Minimal Seedance call — 3 attempts, basic "is it a URL" check. We do NOT
 // run ffprobe validation here (unlike the main /api/agent flow) because
-// the user can just click regenerate again if Kling returns garbage,
+// the user can just click regenerate again if Seedance returns garbage,
 // which is cheaper than carrying the ffprobe dependency into this route.
-async function runKlingForScene(klingPrompt, frameUrl) {
+async function runKlingForScene(klingPrompt, referenceImages, sceneNumber) {
   console.log(`[Kling regenerate-scene] FINAL prompt length: ${klingPrompt?.length ?? 0}`);
   if ((klingPrompt?.length ?? 0) > 2500) {
     console.error(`[Kling regenerate-scene] ⚠️ STILL TOO LONG: ${klingPrompt.length}`);
   }
+  console.log(`[Seedance regenerate-scene Scene ${sceneNumber}] sending ${referenceImages.length} reference images`);
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      console.log(`[regenerate-scene] Kling attempt ${attempt}/3`);
-      const result = await fal.subscribe('bytedance/seedance-2.0/fast/image-to-video', {
+      console.log(`[regenerate-scene] Seedance attempt ${attempt}/3`);
+      const result = await fal.subscribe('bytedance/seedance-2.0/fast/reference-to-video', {
         input: {
           prompt: klingPrompt,
-          image_url: frameUrl,
+          image_urls: referenceImages,
           duration: '5',
           resolution: '720p',
           aspect_ratio: '9:16',
@@ -71,7 +93,7 @@ async function runKlingForScene(klingPrompt, frameUrl) {
       if (videoUrl) return videoUrl;
     } catch (e) {
       const status = e.status || e.statusCode || 'unknown';
-      console.error(`[regenerate-scene] Kling attempt ${attempt} failed — status: ${status}, body:`, JSON.stringify(e.body || e.message || String(e)).slice(0, 500));
+      console.error(`[regenerate-scene] Seedance attempt ${attempt} failed — status: ${status}, body:`, JSON.stringify(e.body || e.message || String(e)).slice(0, 500));
     }
     if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
   }
@@ -247,14 +269,36 @@ export async function POST(req) {
     return Response.json({ error: 'NanoBanana frame generation returned no URL' }, { status: 502 });
   }
 
-  // 2) Re-run Kling on the new frame — wrap the raw kling_prompt with the
-  // skill layers (PRODUCT_LOCK + realism + negatives) so the regenerated
-  // scene matches the same vibe the main /api/agent flow now produces.
+  // 2) Re-run Seedance — reference-to-video this time, with the same per-scene
+  // reference list the main /api/agent flow uses. Resolve any data: URLs to
+  // fal.storage first because reference-to-video rejects base64 payloads.
+  const [seedanceAvatar, seedanceProduct, seedanceBusiness] = await Promise.all([
+    ensureFalUrl(preparedAvatar),
+    ensureFalUrl(preparedProduct),
+    Promise.all(preparedBusinessPhotos.map(ensureFalUrl)).then(arr => arr.filter(Boolean))
+  ]);
+
+  const referenceImages = (() => {
+    if (videoType === 'business') {
+      if (isScene2) return seedanceBusiness.slice(0, 3);
+      if (sceneIdx === 0) return [seedanceAvatar].filter(Boolean);
+      return [seedanceAvatar, seedanceBusiness[0]].filter(Boolean);
+    }
+    switch (sceneNumber) {
+      case 1: return [seedanceAvatar].filter(Boolean);
+      case 2: return [seedanceProduct].filter(Boolean);
+      case 3:
+      case 4: return [seedanceAvatar, seedanceProduct].filter(Boolean);
+      default: return [];
+    }
+  })();
+
   const wrappedKlingPrompt = buildKlingPrompt(klingPrompt, sceneNumber, productName, {
     isBusinessCraft: videoType === 'business',
     scene4Context,
+    productOnly,
   });
-  const rawVideoUrl = await runKlingForScene(wrappedKlingPrompt, newFrameUrl);
+  const rawVideoUrl = await runKlingForScene(wrappedKlingPrompt, referenceImages, sceneNumber);
   if (!rawVideoUrl) {
     // NB frame succeeded but Kling failed 3x. Persist the new frame anyway
     // so the client can at least show the updated still while the user

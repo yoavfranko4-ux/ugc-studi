@@ -1005,6 +1005,28 @@ async function frameToStaticVideo(frameUrl, durationSec = 5) {
 // mapAvatarToActorId moved to lib/agent-pipeline.js so the regenerate-scene
 // route can share the same mapping. Imported above.
 
+// reference-to-video requires real http(s) URLs in image_urls — data: payloads
+// from product uploads aren't accepted. Upload them to fal.storage on demand
+// and pass through anything that's already an http(s) URL.
+async function ensureFalUrl(u) {
+  if (!u || typeof u !== 'string') return null;
+  if (u.startsWith('http://') || u.startsWith('https://')) return u;
+  if (!u.startsWith('data:')) return u;
+  try {
+    const m = u.match(/^data:([^;]+);base64,(.+)$/);
+    if (!m) throw new Error('malformed data url');
+    const buf = Buffer.from(m[2], 'base64');
+    const blob = new Blob([buf], { type: m[1] || 'image/png' });
+    const uploaded = await fal.storage.upload(blob);
+    if (!uploaded) throw new Error('fal.storage.upload returned empty');
+    console.log('[ensureFalUrl] uploaded data URL to fal.storage:', uploaded.slice(0, 80));
+    return uploaded;
+  } catch (e) {
+    console.warn('[ensureFalUrl] failed, returning original:', e.message);
+    return u;
+  }
+}
+
 async function runJob(jobId, body) {
   try {
     const {
@@ -1023,6 +1045,16 @@ async function runJob(jobId, body) {
       ? businessPhotos.map(prepareUrl).filter(Boolean)
       : [];
     console.log(`[Job ${jobId}] videoType=${videoType} Prepared URLs:`, { avatar: preparedAvatar?.slice(0, 80), product: preparedProduct?.slice(0, 80), businessPhotos: preparedBusinessPhotos.length });
+
+    // Seedance reference-to-video only accepts real http(s) URLs. NB image
+    // generation tolerates data: URLs but the video path doesn't, so resolve
+    // any user-uploaded base64 product/business photos to fal.storage URLs up
+    // front and reuse the resolved values for the Seedance call below.
+    const [seedanceAvatarUrl, seedanceProductUrl, seedanceBusinessPhotos] = await Promise.all([
+      ensureFalUrl(preparedAvatar),
+      ensureFalUrl(preparedProduct),
+      Promise.all(preparedBusinessPhotos.map(ensureFalUrl)).then(arr => arr.filter(Boolean))
+    ]);
 
     const voiceGender = voiceId === 'nBiC8Jexp2XGyIxATg9S' ? 'male' : 'female';
 
@@ -1161,37 +1193,63 @@ async function runJob(jobId, body) {
       const beat = i + 1;
       const klingScene4Context = i === 3;
       const klingIsBusinessCraft = videoType === 'business';
+      const klingProductOnly = (i === 1) && !klingIsBusinessCraft;
+
+      // Per-scene reference list. Reference-to-video doesn't accept the NB
+      // still as a starting frame — it composes from the references plus the
+      // prompt — so each scene gets only the identities it actually needs.
+      // Scene 2 deliberately ships ONLY the product reference so Seedance can't
+      // hallucinate a random woman to fill an avatar slot.
+      const referenceImages = (() => {
+        if (klingIsBusinessCraft) {
+          if (i === 1) return seedanceBusinessPhotos.slice(0, 3);
+          if (i === 0) return [seedanceAvatarUrl].filter(Boolean);
+          return [seedanceAvatarUrl, seedanceBusinessPhotos[0]].filter(Boolean);
+        }
+        switch (i + 1) {
+          case 1: return [seedanceAvatarUrl].filter(Boolean);
+          case 2: return [seedanceProductUrl].filter(Boolean);
+          case 3:
+          case 4: return [seedanceAvatarUrl, seedanceProductUrl].filter(Boolean);
+          default: return [];
+        }
+      })();
+
       // Wrap Claude's kling_prompt with the same skill layers we use for the
-      // NanoBanana frame: PRODUCT_LOCK + realism + negatives. This was the
-      // missing piece that let Kling drift the kippah and skip the realism
-      // anchors (handheld wobble, no AI feel, etc.).
+      // NanoBanana frame: PRODUCT_LOCK + realism + negatives. The wrapper now
+      // also injects per-scene tag declarations that match the references.
       const wrappedKlingPrompt = buildKlingPrompt(
         scenes[i].kling_prompt,
         beat,
         productName,
-        { isBusinessCraft: klingIsBusinessCraft, scene4Context: klingScene4Context }
+        {
+          isBusinessCraft: klingIsBusinessCraft,
+          scene4Context: klingScene4Context,
+          productOnly: klingProductOnly
+        }
       );
       console.log(`[Kling Scene ${i+1}] FINAL prompt length: ${wrappedKlingPrompt.length}`);
       if (wrappedKlingPrompt.length > 2500) {
         console.error(`[Kling Scene ${i+1}] ⚠️ STILL TOO LONG: ${wrappedKlingPrompt.length}`);
       }
+      console.log(`[Seedance Scene ${i+1}] sending ${referenceImages.length} reference images`);
       // Scene 1 is the "hook" — if it keeps failing we want the full request
-      // dumped so we can see whether the frame URL or prompt is what's making
+      // dumped so we can see whether the references or prompt is what's making
       // Seedance unhappy.
       if (i === 0) {
         console.log(`[Seedance] Scene 1 REQUEST:`, JSON.stringify({
           prompt: wrappedKlingPrompt?.slice(0, 300),
-          image_url: frameUrl?.slice(0, 120),
+          image_urls: referenceImages.map(u => u?.slice(0, 120)),
           duration: '5',
           aspect_ratio: '9:16',
           resolution: '720p',
         }));
       }
 
-      const result = await fal.subscribe('bytedance/seedance-2.0/fast/image-to-video', {
+      const result = await fal.subscribe('bytedance/seedance-2.0/fast/reference-to-video', {
         input: {
           prompt: wrappedKlingPrompt,
-          image_url: frameUrl,
+          image_urls: referenceImages,
           duration: '5',
           resolution: '720p',
           aspect_ratio: '9:16',

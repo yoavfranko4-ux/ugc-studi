@@ -266,14 +266,17 @@ const SEEDANCE_HARD_LIMIT = 2400;
 
 const SEEDANCE_CAMERA_PHYSICS = {
   1: "Phone held in her right hand at arm's length, selfie angle, slightly below eye level, tilted ~10 degrees off-axis. Constant low-level hand tremor — micro-shakes from holding the phone stationary. Occasional very slight framing drift as hand adjusts grip. No walking bob — she's seated.",
-  2: "The phone is propped on a small dresser/shelf facing the scene. The camera is completely still — no movement, no shake, no drift. Both hands free to interact with the product.",
+  2: "The phone is propped on a small dresser/shelf facing the scene. The camera is completely still — no movement, no shake, no drift. Product alone in frame, no person, no hands.",
   3: "Phone in her left hand at arm's length, selfie angle. Hand tremor from the phone-hand throughout, right hand free to use the product. Slight reframe when product moves — phone-hand tilts ~5 degrees to fit action in shot. Brief focus hunting between her face and the product when it enters frame.",
   4: "Phone in her right hand at arm's length, selfie angle, slightly below eye level. Tremor only, no walking bob. Marginal drift as arm relaxes. Slight auto-exposure adjustment when product comes into frame."
 };
 
 const SEEDANCE_EXPRESSION_DIRECTION = {
   1: "Expression direction: eyes drift off-camera then back, brow furrows lightly, lips pressed thin between phrases, occasional small head shakes, free hand brushes hair back, shoulders sag slightly, single defeated half-shrug.",
-  2: "Expression direction: eyes track the product as she lifts it, then widen suddenly with visible white above iris, eyebrows shoot up, mouth drops open slightly transitioning to small open smile, head pulls back micro-recoil then leans forward, free hand touches own collarbone.",
+  // Scene 2 has no person at all — drop the expression block. Anything that
+  // mentions "she", "her face", or "free hand" pulls Seedance back toward
+  // generating a random woman to fill the avatar slot.
+  2: '',
   3: "Expression direction: eyes track the product carefully, eyebrows neutral concentrated, mouth slightly open in concentration, eyes close briefly during application, small satisfied exhale, soft 'mm' expression with slightly parted lips, single small nod when result is felt.",
   4: "Expression direction: calm steady gaze on the lens, soft genuine smile with lips pulled back at corners, eyes crinkle slightly at corners, slow blinks, eyebrows lift on key word, slow deliberate nods, occasional broader smile showing teeth briefly."
 };
@@ -287,10 +290,34 @@ const SEEDANCE_NEGATIVES = "NEGATIVES: no AI artifacts, no face distortion, stab
 export function buildSeedancePrompt(rawPromptIn, beat, productName, opts = {}) {
   const raw = (rawPromptIn || '').trim();
   const beatKey = (beat >= 1 && beat <= 4) ? beat : 2;
+  const isBusinessCraft = opts.isBusinessCraft === true;
+  // productOnly is the scene-2 UGC case: only the product is in frame, no
+  // person, no hands. Default it from the beat so older callers don't need to
+  // be updated, but let route.js force it explicitly for safety.
+  const productOnly = opts.productOnly === true || (!isBusinessCraft && beatKey === 2);
 
-  const tagDeclarations = beatKey === 1
-    ? "@image1 is the woman (character reference and starting frame)."
-    : "@image1 is the woman (character reference). @image2 is the product.";
+  // reference-to-video reads `@Image1` / `@Image2` (capital I) tokens to bind
+  // each prompt mention to a specific reference image. The tag set must match
+  // the actual references the route is sending — never declare an @Image2 we
+  // didn't pass, or Seedance will invent something to fill it.
+  const tagDeclarations = (() => {
+    if (isBusinessCraft) {
+      if (beatKey === 1) return "@Image1 is the person (character reference for identity consistency).";
+      if (beatKey === 2) return "@Image1 references show the business setting (the only subjects in this scene — no person should appear).";
+      return "@Image1 is the person (character reference for identity consistency). @Image2 references the business setting.";
+    }
+    switch (beatKey) {
+      case 1:
+        return "@Image1 is the woman (character reference for identity consistency).";
+      case 2:
+        return "@Image1 is the product (the only subject in this scene — no person should appear).";
+      case 3:
+      case 4:
+        return "@Image1 is the woman (character reference for identity consistency). @Image2 is the product she holds.";
+      default:
+        return "@Image1 is the woman (character reference). @Image2 is the product.";
+    }
+  })();
 
   const cameraPhysics = SEEDANCE_CAMERA_PHYSICS[beatKey];
   const expression = SEEDANCE_EXPRESSION_DIRECTION[beatKey];
@@ -305,9 +332,17 @@ export function buildSeedancePrompt(rawPromptIn, beat, productName, opts = {}) {
 
   // Per-scene negative tweak: scene 4 may legitimately show a vehicle for car
   // products; otherwise add the no-vehicle rule onto the base negatives line.
-  const negatives = opts.scene4Context
+  // For product-only beats, layer on hard "no person" cues so Seedance can't
+  // hallucinate a random body to fill an unreferenced avatar slot.
+  let negatives = opts.scene4Context
     ? SEEDANCE_NEGATIVES
     : SEEDANCE_NEGATIVES.replace(/\.$/, ', NEVER in a vehicle.');
+  if (productOnly) {
+    negatives = negatives.replace(
+      /\.$/,
+      ', no person, no woman, no man, no hands, no fingers, no arms, no body parts, no face, no avatar, no model, no human silhouette, no holding, no hands entering frame.'
+    );
+  }
 
   const parts = [
     tagDeclarations,
