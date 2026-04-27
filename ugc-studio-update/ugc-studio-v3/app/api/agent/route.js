@@ -1175,38 +1175,34 @@ async function runJob(jobId, body) {
       if (wrappedKlingPrompt.length > 2500) {
         console.error(`[Kling Scene ${i+1}] ⚠️ STILL TOO LONG: ${wrappedKlingPrompt.length}`);
       }
-      const klingInput = {
-        prompt: wrappedKlingPrompt,
-        image_url: frameUrl,
-        duration: '5',
-        aspect_ratio: '9:16',
-        cfg_scale: 0.45,
-        negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
-      };
       // Scene 1 is the "hook" — if it keeps failing we want the full request
       // dumped so we can see whether the frame URL or prompt is what's making
-      // Kling unhappy.
+      // Seedance unhappy.
       if (i === 0) {
-        console.log(`[Kling] Scene 1 REQUEST:`, JSON.stringify({
-          prompt: klingInput.prompt?.slice(0, 300),
+        console.log(`[Seedance] Scene 1 REQUEST:`, JSON.stringify({
+          prompt: wrappedKlingPrompt?.slice(0, 300),
           image_url: frameUrl?.slice(0, 120),
-          duration: klingInput.duration,
-          aspect_ratio: klingInput.aspect_ratio,
-          cfg_scale: klingInput.cfg_scale,
+          duration: '5',
+          aspect_ratio: '9:16',
+          resolution: '720p',
         }));
       }
 
-      const result = await fal.subscribe('fal-ai/kling-video/v3/pro/image-to-video', {
-        input: klingInput,
+      const result = await fal.subscribe('fal-ai/bytedance/seedance-2.0/fast/image-to-video', {
+        input: {
+          prompt: wrappedKlingPrompt,
+          image_url: frameUrl,
+          duration: '5',
+          resolution: '720p',
+          aspect_ratio: '9:16',
+          generate_audio: false
+        },
         pollInterval: 5000
       });
       const videoUrl = result.data.video?.url || null;
       const videoMeta = result.data.video || null;
 
-      // Log the full Kling response shape so we can compare working vs broken
-      // outputs. `video.file_size`, `video.content_type`, `video.duration`
-      // are the fields that matter; `url` is what we hand back.
-      console.log(`[Agent] Scene ${i+1} Kling response:`, JSON.stringify({
+      console.log(`[Seedance Scene ${i+1}] response:`, JSON.stringify({
         url: videoUrl ? videoUrl.slice(0, 100) : null,
         content_type: videoMeta?.content_type,
         file_size: videoMeta?.file_size,
@@ -1217,7 +1213,7 @@ async function runJob(jobId, body) {
         seed: result.data?.seed,
       }));
       if (i === 0) {
-        console.log(`[Kling] Scene 1 RAW RESPONSE (first 500):`, JSON.stringify(result.data).slice(0, 500));
+        console.log(`[Seedance] Scene 1 RAW RESPONSE (first 500):`, JSON.stringify(result.data).slice(0, 500));
       }
 
       if (!videoUrl) return { videoUrl: null, valid: false, reason: 'no url returned by fal.ai' };

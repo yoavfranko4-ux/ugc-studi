@@ -251,103 +251,107 @@ export function generateUGCPrompt({
   });
 }
 
-// Wrap a Claude-authored kling_prompt with the same skill layers we apply to
-// the NanoBanana side: PRODUCT_LOCK (when a product is present), realism
-// anchors that fight the polished AI feel, and the standard motion / anatomy
-// negatives. The Claude prompt is preserved verbatim — we only append; we
-// never rewrite the caller's intent.
+// Wrap a Claude-authored scene prompt with the Seedance 2.0 layered structure:
+// tag declarations, per-beat camera physics, expression framework, auto-exposure,
+// silent video instruction, style closer, PRODUCT_LOCK, and a unified NEGATIVES
+// block. The Claude prompt is preserved verbatim — we only surround it.
 //
-//   klingPromptRaw — the kling_prompt string Claude produced for this scene
-//   beat           — 1..4; gates which negatives we add (e.g. scene 4 keeps
-//                    the no-vehicle rule for non-car products; scene 2 has
-//                    no person so person negatives are skipped)
-//   productName    — when present, append PRODUCT_LOCK + the product-specific
-//                    integration hint if we have one
-//   opts.isBusinessCraft — use BUSINESS_CRAFT_LOCK instead of PRODUCT_LOCK
-//   opts.scene4Context   — drop the no-vehicle negative for scene 4 (car
-//                          products legitimately show the car)
-export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
-  const raw = (klingPromptRaw || '').trim();
-  const parts = [raw];
+//   rawPromptIn   — the scene_prompt string Claude produced for this scene
+//   beat          — 1..4; gates camera setup, expression direction, and PRODUCT_LOCK
+//   productName   — when present and beat !== 1, append PRODUCT_LOCK
+//   opts.isBusinessCraft — passthrough (kept for symmetry; PRODUCT_LOCK string
+//                          is identical structure either way)
+//   opts.scene4Context   — drop the no-vehicle negative for scene 4 (car products)
+const SEEDANCE_HARD_LIMIT = 2400;
 
-  // Skip person-only realism for the product-only beauty shot (scene 2).
-  const hasPerson = beat !== 2;
+const SEEDANCE_CAMERA_PHYSICS = {
+  1: "Phone held in her right hand at arm's length, selfie angle, slightly below eye level, tilted ~10 degrees off-axis. Constant low-level hand tremor — micro-shakes from holding the phone stationary. Occasional very slight framing drift as hand adjusts grip. No walking bob — she's seated.",
+  2: "The phone is propped on a small dresser/shelf facing the scene. The camera is completely still — no movement, no shake, no drift. Both hands free to interact with the product.",
+  3: "Phone in her left hand at arm's length, selfie angle. Hand tremor from the phone-hand throughout, right hand free to use the product. Slight reframe when product moves — phone-hand tilts ~5 degrees to fit action in shot. Brief focus hunting between her face and the product when it enters frame.",
+  4: "Phone in her right hand at arm's length, selfie angle, slightly below eye level. Tremor only, no walking bob. Marginal drift as arm relaxes. Slight auto-exposure adjustment when product comes into frame."
+};
 
-  // PRODUCT_LOCK — every scene that contains the product (beats 2, 3, 4).
-  // Append the universal product-integration block so Kling gets the same
-  // physics-grounded rules the NB frame received.
-  if (productName && beat !== 1) {
-    parts.push(getProductLock(productName, opts.isBusinessCraft === true));
-    parts.push(getProductIntegrationForName(productName));
-  }
+const SEEDANCE_EXPRESSION_DIRECTION = {
+  1: "Expression direction: eyes drift off-camera then back, brow furrows lightly, lips pressed thin between phrases, occasional small head shakes, free hand brushes hair back, shoulders sag slightly, single defeated half-shrug.",
+  2: "Expression direction: eyes track the product as she lifts it, then widen suddenly with visible white above iris, eyebrows shoot up, mouth drops open slightly transitioning to small open smile, head pulls back micro-recoil then leans forward, free hand touches own collarbone.",
+  3: "Expression direction: eyes track the product carefully, eyebrows neutral concentrated, mouth slightly open in concentration, eyes close briefly during application, small satisfied exhale, soft 'mm' expression with slightly parted lips, single small nod when result is felt.",
+  4: "Expression direction: calm steady gaze on the lens, soft genuine smile with lips pulled back at corners, eyes crinkle slightly at corners, slow blinks, eyebrows lift on key word, slow deliberate nods, occasional broader smile showing teeth briefly."
+};
 
-  // Realism anchors — phone-native handheld framing. Tells Kling that the
-  // whole take is amateur smartphone footage in a real-world environment, not
-  // a stylized render. Same string for person + product-only shots — the
-  // language is generic enough to read either way.
-  const realism = `REALISM: ${REALISM_ANCHORS_KLING}`;
-  parts.push(realism);
+const SEEDANCE_AUTO_EXPOSURE = "Natural iPhone auto-exposure adjustment visible — slight image warming/cooling as the light shifts, no stable studio exposure.";
 
-  // Negatives — Kling-friendly list. Anatomy + product-frame hard rules +
-  // the upgraded anti-AI block (reflections, studio polish, antislop adjectives,
-  // perfect-symmetry breaker).
-  const negatives = [
-    'NEVER show a phone or mobile device in any scene',
-    'no melting hands',
-    'no extra limbs',
-    'consistent product appearance across every frame',
-  ];
-  if (!opts.scene4Context) negatives.push('NEVER in a car, NEVER in a vehicle');
-  negatives.push('no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays');
-  parts.push(`NEGATIVES: ${NEGATIVES_KLING}, ${negatives.join(', ')}.`);
+const SEEDANCE_SILENT = "Silent footage, no audio, no spoken dialogue, mouth movements minimal and natural — lips part softly between phrases but no clear words form.";
 
-  // Audio + iPhone-footage aesthetic. Kept as a trailing tail so it's the last
-  // thing Kling sees — biases the generator toward silent, low-contrast,
-  // amateur smartphone capture instead of cinematic / scored output.
-  parts.push('silent footage, no audio, no sound, video only, low contrast, flat color grading, desaturated tones, soft natural lighting, no dramatic shadows, iPhone camera profile, amateur smartphone footage look, slightly washed out.');
+const SEEDANCE_NEGATIVES = "NEGATIVES: no AI artifacts, no face distortion, stable anatomy, no unnatural movement, no reflections, no mirrors, no glass reflections, no reflective screens, no puddles, no studio polish, no dramatic lighting, no over-saturated colors, no cinematic color grade, no lens flares, not breathtaking, not stunning, not flawless, not seamless, not effortless, no perfect symmetry, no plastic skin, no AI smoothing, no uncanny valley, no melting hands, no extra limbs, NEVER show a phone or mobile device in scene, no smooth gimbal stabilization, no rack focus, no dolly zoom, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays.";
 
-  const finalPrompt = parts.filter(Boolean).join(' ');
+export function buildSeedancePrompt(rawPromptIn, beat, productName, opts = {}) {
+  const raw = (rawPromptIn || '').trim();
+  const beatKey = (beat >= 1 && beat <= 4) ? beat : 2;
 
-  // Bodyguard: Kling v3 pro rejects prompts longer than 2500 chars. If we are
-  // anywhere near that, rebuild from the raw Claude prompt + a minimal set of
-  // realism / negatives / product-lock so the API call still succeeds.
-  if (finalPrompt.length > KLING_HARD_LIMIT) {
-    console.warn(`[buildKlingPrompt] EMERGENCY TRIM: ${finalPrompt.length} → ${KLING_HARD_LIMIT}`);
+  const tagDeclarations = beatKey === 1
+    ? "@image1 is the woman (character reference and starting frame)."
+    : "@image1 is the woman (character reference). @image2 is the product.";
 
-    // On the trim path, we KEEP the full upgraded REALISM + NEGATIVES blocks —
-    // they're the entire point of the anti-AI pass. Anything that gets cut
-    // comes out of PRODUCT_LOCK / aesthetic tail / raw scene description.
-    const minimalRealism = `REALISM: ${REALISM_ANCHORS_KLING}`;
-    const minimalNegatives = `NEGATIVES: ${NEGATIVES_KLING}, NEVER show a phone or mobile device, no melting hands, no extra limbs, consistent product appearance.`;
-    const productLockShort = productName
-      ? `PRODUCT LOCK: ${productName} — identical color, shape, texture, embroidery to source image across all scenes. No morphing, no drift.`
-      : '';
-    // Keep the aesthetic tail even in trim mode — this is the whole point of
-    // the iPhone-vibe pass. Shorten heavily but never drop it.
-    const minimalAesthetic = 'silent footage, no audio, low contrast, flat color, desaturated, iPhone amateur look, slightly washed out.';
+  const cameraPhysics = SEEDANCE_CAMERA_PHYSICS[beatKey];
+  const expression = SEEDANCE_EXPRESSION_DIRECTION[beatKey];
 
-    const trimmed = [raw, minimalRealism, minimalNegatives, productLockShort, minimalAesthetic]
-      .filter(Boolean)
-      .join(' ');
+  const styleCloser = beatKey === 2
+    ? "Style: UGC, propped phone, completely static camera. Organic and real."
+    : "Style: UGC, organic, realistic phone footage. Slightly grainy phone sensor feel, no stylized color grade, low contrast, flat color grading, desaturated tones, slightly washed out, eye-level framing, real-world environment with everyday details visible.";
 
-    if (trimmed.length > KLING_HARD_LIMIT) {
-      const overhead = minimalRealism.length + minimalNegatives.length
-        + productLockShort.length + minimalAesthetic.length + 20;
-      const truncatedRaw = raw.slice(0, KLING_HARD_LIMIT - overhead);
-      const truncatedFinal = [truncatedRaw, minimalRealism, minimalNegatives, productLockShort, minimalAesthetic]
-        .filter(Boolean)
-        .join(' ');
-      console.log(`[buildKlingPrompt] TRIMMED PROMPT (${truncatedFinal.length} chars):`);
-      console.log(truncatedFinal);
-      return truncatedFinal;
-    }
+  const productLockBlock = (beatKey !== 1 && productName)
+    ? `PRODUCT LOCK: the product (${productName}) appearing in this scene is IDENTICAL to the source image — same exact color, same exact shape, same exact texture, same exact label and details. Do NOT alter product appearance. Product is anchored in frame.`
+    : '';
 
-    console.log(`[buildKlingPrompt] TRIMMED PROMPT (${trimmed.length} chars):`);
+  // Per-scene negative tweak: scene 4 may legitimately show a vehicle for car
+  // products; otherwise add the no-vehicle rule onto the base negatives line.
+  const negatives = opts.scene4Context
+    ? SEEDANCE_NEGATIVES
+    : SEEDANCE_NEGATIVES.replace(/\.$/, ', NEVER in a vehicle.');
+
+  const parts = [
+    tagDeclarations,
+    cameraPhysics,
+    raw,
+    expression,
+    SEEDANCE_AUTO_EXPOSURE,
+    productLockBlock,
+    styleCloser,
+    SEEDANCE_SILENT,
+    negatives
+  ].filter(Boolean);
+
+  const finalPrompt = parts.join('\n\n');
+
+  // Length guard. Keep the structural layers (camera/expression/negatives) and
+  // shorten the raw scene description if we run over the 2400-char buffer.
+  if (finalPrompt.length > SEEDANCE_HARD_LIMIT) {
+    console.warn(`[buildSeedancePrompt] EMERGENCY TRIM: ${finalPrompt.length} → ${SEEDANCE_HARD_LIMIT}`);
+    const overhead = parts.filter((_, i) => i !== 2).join('\n\n').length + 20;
+    const room = SEEDANCE_HARD_LIMIT - overhead;
+    const truncatedRaw = room > 0 ? raw.slice(0, room) : '';
+    const trimmed = [
+      tagDeclarations,
+      cameraPhysics,
+      truncatedRaw,
+      expression,
+      SEEDANCE_AUTO_EXPOSURE,
+      productLockBlock,
+      styleCloser,
+      SEEDANCE_SILENT,
+      negatives
+    ].filter(Boolean).join('\n\n');
+    console.log(`[buildSeedancePrompt] TRIMMED PROMPT (${trimmed.length} chars):`);
     console.log(trimmed);
     return trimmed;
   }
 
   return finalPrompt;
+}
+
+// Backward compatibility — older imports still call buildKlingPrompt.
+export function buildKlingPrompt(...args) {
+  return buildSeedancePrompt(...args);
 }
 
 // Re-exports so consumers can reach for lower-level pieces without chasing down

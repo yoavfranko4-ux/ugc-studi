@@ -47,19 +47,27 @@ async function runKlingForScene(klingPrompt, frameUrl) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       console.log(`[regenerate-scene] Kling attempt ${attempt}/3`);
-      const result = await fal.subscribe('fal-ai/kling-video/v3/pro/image-to-video', {
+      const result = await fal.subscribe('fal-ai/bytedance/seedance-2.0/fast/image-to-video', {
         input: {
           prompt: klingPrompt,
           image_url: frameUrl,
           duration: '5',
+          resolution: '720p',
           aspect_ratio: '9:16',
-          cfg_scale: 0.45,
-          negative_prompt: 'cinematic camera, smooth stabilizer, studio lighting, professional production, advertisement look, CGI, drone shot, dolly zoom, commercial quality, artificial lighting, color grading, lens flare, rack focus'
+          generate_audio: false
         },
         pollInterval: 5000
       });
       const videoUrl = result.data.video?.url || null;
-      console.log(`[regenerate-scene] Kling attempt ${attempt} returned:`, videoUrl?.slice(0, 80) || '(null)');
+      const videoMeta = result.data.video || null;
+      console.log(`[Seedance regenerate-scene] attempt ${attempt} response:`, JSON.stringify({
+        url: videoUrl ? videoUrl.slice(0, 100) : null,
+        content_type: videoMeta?.content_type,
+        duration: videoMeta?.duration,
+        width: videoMeta?.width,
+        height: videoMeta?.height,
+        seed: result.data?.seed,
+      }));
       if (videoUrl) return videoUrl;
     } catch (e) {
       const status = e.status || e.statusCode || 'unknown';
