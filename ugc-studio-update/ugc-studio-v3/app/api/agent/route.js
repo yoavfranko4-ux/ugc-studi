@@ -433,7 +433,7 @@ BEAT 4 — CTA TEMPLATE (voiceover_scene4, ~7–10 Hebrew words):
     - "תקנו את ${productName}, תסמכו עליי - {short promise}"
     - "תזמינו את ${productName} עכשיו, לא תתחרטו"
     - "תיכנסו עכשיו ותקנו את ${productName}, אני מבטיח/ה לכם"
-    - "תנסו את ${productName} ${promise}, תסמכו עליי"
+    - "תנסו את ${productName} {short promise}, תסמכו עליי"
   HARD REQUIREMENTS for Beat 4:
     - MUST contain one of: "תקנו" / "תזמינו" / "תיכנסו" / "תנסו"
     - MUST contain the exact product name "${productName}"
