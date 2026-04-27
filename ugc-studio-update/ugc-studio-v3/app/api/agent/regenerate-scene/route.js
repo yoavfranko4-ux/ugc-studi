@@ -47,7 +47,7 @@ async function runKlingForScene(klingPrompt, frameUrl) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       console.log(`[regenerate-scene] Kling attempt ${attempt}/3`);
-      const result = await fal.subscribe('fal-ai/bytedance/seedance-2.0/fast/image-to-video', {
+      const result = await fal.subscribe('bytedance/seedance-2.0/fast/image-to-video', {
         input: {
           prompt: klingPrompt,
           image_url: frameUrl,
