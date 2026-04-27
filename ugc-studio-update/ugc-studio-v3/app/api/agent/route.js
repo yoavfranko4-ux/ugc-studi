@@ -382,7 +382,10 @@ function logNbKlingOverlap(scenes, label = '') {
 }
 
 async function generateScript(productName, productDesc, applicationArea, hook, voiceGender) {
-  if (!ANTHROPIC_KEY) return null;
+  if (!ANTHROPIC_KEY) {
+    console.error('[generateScript] FAILED — ANTHROPIC_API_KEY is not set in env, falling back to defaults');
+    return null;
+  }
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
   const { category: detectedCategory, plural: detectedPlural } = detectProductCategory(productName, productDesc);
   console.log(`[generateScript] auto-detected category=${detectedCategory} plural=${detectedPlural} for "${productName}"`);
@@ -765,9 +768,17 @@ Return ONLY valid JSON (no markdown):
         parsed.scenes[3].subtitle = v4;
       }
       return parsed;
-    } catch { return null; }
+    } catch (parseErr) {
+      console.error('[generateScript] JSON parse FAILED:', {
+        message: parseErr?.message,
+        textPreview: text.slice(0, 400),
+        textLength: text.length,
+      });
+      return null;
+    }
   };
 
+  try {
   // First attempt
   let parsed = parseResponse(await callClaude());
   // Validate gender — regenerate once if Claude mixed male/female forms
@@ -818,6 +829,18 @@ Return ONLY valid JSON (no markdown):
   }
   if (parsed?.scenes) logNbKlingOverlap(parsed.scenes, '[generateScript]');
   return parsed;
+  } catch (error) {
+    console.error('[generateScript] FAILED — falling back to defaults:', {
+      message: error?.message,
+      status: error?.status,
+      name: error?.name,
+      type: error?.type,
+      errorType: error?.error?.type,
+      errorMessage: error?.error?.message,
+      stack: error?.stack?.slice(0, 500),
+    });
+    return null;
+  }
 }
 
 export async function POST(req) {
