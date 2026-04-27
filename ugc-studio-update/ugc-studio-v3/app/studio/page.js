@@ -1065,12 +1065,15 @@ export default function Home() {
       // would clobber hebrewVoice / audioBase64 / wordTimestamps /
       // subtitleSegments. /api/voice now syncs to DB on rerecord, but this
       // merge is defense-in-depth for the rerecord-then-regenerate race.
+      const newFrames = body.result.frames
+      const newVideos = body.result.videos
+      const newRegenCounts = body.regenerations_used || {}
       setResult(r => ({
         ...r,
-        frames: body.result.frames,
-        videos: body.result.videos,
+        frames: newFrames,
+        videos: newVideos,
       }))
-      setRegenCounts(body.regenerations_used || {})
+      setRegenCounts(newRegenCounts)
       setVideoBlobUrls(prev => {
         const next = [...prev]
         next[sceneNumber - 1] = null
@@ -1078,6 +1081,47 @@ export default function Home() {
       })
       setVideosReady(false)
       setRegenMsg(`סצנה ${sceneNumber} עודכנה ✓`)
+
+      // Sync the regenerated scene back to saved_edits when the editor was
+      // opened from the dashboard (?editId=). Without this the dashboard
+      // keeps showing the old video on next reload — regenerate updates
+      // jobs.result but saved_edits.edit_data is a separate row.
+      if (loadedEditId && supabase) {
+        try {
+          const thumbnail = newFrames?.[0] || newVideos?.[0] || null
+          const updatedEditData = {
+            product_name: productName || 'ללא שם',
+            clip_order: clipOrder,
+            subtitle_style: subtitleStyle,
+            bg_music: bgMusic,
+            sfx_enabled: sfxEnabled,
+            transition: transition,
+            videos: newVideos,
+            frames: newFrames,
+            story: result.story,
+            hebrew_voice: result.hebrewVoice,
+            audio_base64: result.audioBase64 || null,
+            word_timestamps: result.wordTimestamps || null,
+            voice_id: result?.voiceId || voiceId,
+            voice_gender: voiceGender,
+            thumbnail: thumbnail,
+            job_id: jobId,
+            last_gen_payload: lastGenPayload,
+            regenerations_used: newRegenCounts,
+          }
+          const { error: updateError } = await supabase
+            .from('saved_edits')
+            .update({ edit_data: updatedEditData })
+            .eq('id', loadedEditId)
+          if (updateError) {
+            console.error('[regenerateScene] Failed to update saved_edits:', updateError)
+          } else {
+            console.log('[regenerateScene] saved_edits updated for editId:', loadedEditId)
+          }
+        } catch (e) {
+          console.error('[regenerateScene] error updating saved_edits:', e)
+        }
+      }
     } catch (e) {
       setRegenMsg(`סצנה ${sceneNumber} נכשלה: ${e.message || 'שגיאת רשת'}`)
     } finally {
@@ -1758,7 +1802,18 @@ export default function Home() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button onClick={() => { setStep('form'); setResult(null); setCurrentScene(0); setClipOrder([0,1,2,3]); setBusinessPhotos([]); setHasRerecorded(false); setShowRerecordPanel(false); setRerecordText('') }} style={ghostBtn}>
+          <button onClick={() => {
+            setStep('form'); setResult(null); setCurrentScene(0);
+            setClipOrder([0,1,2,3]); setBusinessPhotos([]);
+            setHasRerecorded(false); setShowRerecordPanel(false);
+            setRerecordText('');
+            // CRITICAL: clear edit session state — otherwise next
+            // save will overwrite the previous saved video
+            setLoadedEditId(null);
+            setJobId(null);
+            setLastGenPayload(null);
+            setRegenCounts({});
+          }} style={ghostBtn}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             מודעה חדשה
           </button>

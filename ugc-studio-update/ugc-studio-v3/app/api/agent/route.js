@@ -1667,6 +1667,25 @@ function getCategoryVenue(cat) {
     default: return 'professional business interior';
   }
 }
+// Scene-2 venue description for BUSINESS mode — the business "alive" with
+// customers + staff in action. Replaces the old hands-only close-up. Used in
+// generateBusinessScript scene-2 nb_prompt and kling_prompt.
+function getBusinessVenueDesc(cat) {
+  switch (cat) {
+    case 'salon':
+      return 'the salon/barbershop interior with styling chairs, mirrors and stations, 2-3 customers being served by stylists, natural conversation, branded signage visible';
+    case 'restaurant':
+      return 'the restaurant/cafe with tables of customers eating, staff serving plates, kitchen activity in soft focus, branded signage visible';
+    case 'fitness':
+      return 'the gym floor with members training on equipment, a trainer coaching, energy and movement in the space, branded signage visible';
+    case 'fashion':
+      return 'the boutique interior with customers browsing the racks, staff helping at the counter, garments on mannequins, branded signage visible';
+    case 'clinic':
+      return 'the clinic interior with the reception or treatment-room doorway visible, a client being greeted or seated by staff, calm professional activity, branded signage visible';
+    default:
+      return 'the business venue with 2-3 customers being served by staff, real activity in the space, branded signage visible';
+  }
+}
 
 // Beat-1 hook for BUSINESS mode. First-person recollection of bad prior
 // experiences with competing businesses — never names the current business.
@@ -1745,6 +1764,7 @@ async function generateBusinessScript(name, desc, hook, voiceGender) {
   const closeUp = getCategoryCloseUp(cat);
   const scene3Action = getCategoryScene3Action(cat);
   const venue = getCategoryVenue(cat);
+  const businessVenue = getBusinessVenueDesc(cat);
   const categoryHints = {
     restaurant: 'Focus on the craft of the food, freshness, the kitchen energy, what customers taste and feel.',
     fashion: 'Focus on the boutique vibe, the pieces, the feel of the fabric, the personal touch.',
@@ -1831,7 +1851,7 @@ SANITY CHECK before returning:
 
 VISUAL 4-SCENE STRUCTURE (matches the 4 voiceover beats):
 - Scene 1 (👋 הכנסה): avatar wearing ${uniform}, inside the ${venue}, starting their workday — putting on apron / standing behind the counter / arriving at the workspace. Mouth closed. Voiceover HOOK.
-- Scene 2 (✨ פעולה): EXTREME CLOSE-UP of ${closeUp}. NO face, NO full person — only hands and tools/products. Uses business/product reference photos for authenticity. Voiceover describes the craft.
+- Scene 2 (🏪 העסק והלקוחות): MEDIUM/WIDE shot of the business in action — storefront with signage visible, OR interior with 2-3 customers being served, employees working, ambient activity. Uses business reference photos to lock the actual venue. The space FEELS alive — not empty, not staged. Voiceover introduces the business value proposition.
 - Scene 3 (🏪 בפעולה): avatar ${scene3Action} inside the ${venue}. Mouth closed, focused professional expression. Voiceover describes the story / unique value of ${name}.
 - Scene 4 (🚀 הזמנה — BUSINESS-SUCCESS CONTEXTUAL RESULT): NOT just the avatar standing by the sign. Show the BUSINESS ALIVE AND THRIVING — the lifestyle/moment the business delivers to its customers, with the owner/employee happy IN that moment. Category → business-success context:
   * restaurant → peak-service dining room with happy customers at tables in soft-focus background, owner at the pass with a quiet satisfied smile and a finished plate visible / outdoor terrace packed at sunset
@@ -1856,7 +1876,7 @@ SENTENCE COMPLETENESS (CRITICAL):
 HOOK (voiceover_scene1) — PRE-SET:
 voiceover_scene1 is already: "${hook}" — use this EXACT text.
 
-EVERY nb_prompt for scenes 1 and 3 MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". Scene 4 follows the same anatomy rule BUT its ending must OMIT "NEVER in a car, NEVER in a vehicle" — service businesses may legitimately show a branded vehicle in the success-result context. The no-phone rule stays for scene 4. Scene 2 (hands-only close-up) must explicitly say "NO face visible, NO full person, only hands and tools".
+EVERY nb_prompt for scenes 1 and 3 MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". Scene 4 follows the same anatomy rule BUT its ending must OMIT "NEVER in a car, NEVER in a vehicle" — service businesses may legitimately show a branded vehicle in the success-result context. The no-phone rule stays for scene 4. Scene 2 (business showcase) must explicitly include 2-3 customers/employees in the frame — NOT empty, NOT just tools. The business venue (storefront or interior) must be the dominant element.
 
 EVERY nb_prompt for scenes with the avatar MUST include: "silent, NOT speaking, NOT looking like talking, mouth closed or natural relaxed smile, no open-mouth expression, no lip movement implied".
 
@@ -1926,9 +1946,9 @@ Return ONLY valid JSON (no markdown):
       "subtitle": "same as voiceover_scene1"
     },
     {
-      "type": "פעולה",
-      "nb_prompt": "extreme close-up of ${closeUp}, NO face visible, NO full person, only hands and tools, cinematic shallow depth of field, warm natural lighting, professional documentary close-up, preserve exact appearance from reference images",
-      "kling_prompt": "Slow cinematic motion of ${closeUp}, hands working smoothly with clear purpose, NO person visible. PRODUCT/CRAFT LOCK: the tools and the finished craft are the anchor of the shot — camera and light may shift, but the tools and item NEVER do. The tools, dish, garment, or finished work maintain EXACT same appearance throughout the entire video — same shape, color, logo, text, materials, position. Every frame is visually identical in product identity to the reference. no tool or product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no dish/garment/finished-work becoming a different object, no identity drift. silent smooth natural motion only, business appearance unchanged from reference",
+      "type": "הכרות",
+      "nb_prompt": "Wide/medium shot of ${businessVenue} — storefront with branded signage clearly visible OR interior view showing 2-3 customers being served by staff. Real activity in the space — people in motion, natural conversations, work happening. Warm natural lighting matching scene 1, authentic documentary style, preserve exact venue appearance from reference images. Customers should look like real clients, not models — diverse, natural, mid-action.",
+      "kling_prompt": "Phone-native handheld shot of ${businessVenue} alive with real activity — visible signage, 2-3 customers being served, staff working naturally, ambient conversation, gentle camera drift showing the space. The venue is the hero of the shot, not any single person. VENUE LOCK: the business space must be IDENTICAL to the reference photos — same storefront design, same interior layout, same signage text, same color palette, same furniture. Realistic daylight, no studio polish. silent no talking no lip movement, smooth natural motion only, no sudden jumps, business appearance unchanged from reference",
       "subtitle": "same as voiceover_scene2"
     },
     {
