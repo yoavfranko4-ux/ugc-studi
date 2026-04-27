@@ -1128,6 +1128,16 @@ async function runJob(jobId, body) {
       voiceover = script?.voiceover || getDefaultVoiceover(productName, applicationArea, hook, voiceGender);
     }
 
+    // DEBUG — dump exactly what scenes the pipeline is about to feed into NB
+    // and Seedance. If scene 1 carries a product-only kling_prompt, the
+    // mismatch is visible here BEFORE we burn any inference time.
+    console.log(`[Job ${jobId}] [DEBUG] scenes source: ${script ? 'Claude' : 'defaults-fallback'}`);
+    (scenes || []).forEach((s, i) => {
+      console.log(`  Scene ${i+1} type="${s?.type || ''}":`);
+      console.log(`    nb_prompt    (first 150): ${(s?.nb_prompt || '').slice(0, 150)}`);
+      console.log(`    kling_prompt (first 150): ${(s?.kling_prompt || '').slice(0, 150)}`);
+    });
+
     // Voice + Frames in parallel (voice doesn't depend on frames)
     const generateAllFrames = async () => {
       const frames = [];
