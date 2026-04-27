@@ -199,129 +199,138 @@ function scriptHasForeignWords(fullText) {
 
 // Enforce the strict 4-beat UGC structure and return ALL violations found, so
 // the regeneration step can show Claude the complete list of what to fix.
-// - Scene 1 (BEAT 1): specific category-anchored pain; no generic filler
-//   phrases ("ניסיתי הכל" / "כלום לא עזר" etc.); no product name.
-// - Scene 2 (BEAT 2): short discovery bridge opening with "עד ש..." /
-//   "ואז גיליתי...", naming the product.
-// - Scene 3 (BEAT 3): benefits + emotional payoff; MUST NOT contain any
-//   discovery phrase ("עד שגיליתי" / "ואז גיליתי" / "גיליתי את" / "מצאתי את")
-//   anywhere — not just at the start.
-// Returns [] when the structure is clean.
-const DISCOVERY_OPENERS = /^(עד\s+ש|ואז\s+גיליתי|ואז\s+מצאתי|עד\s+שמצאתי|עד\s+שגיליתי)/u;
-const BEAT_2_REQUIRED_PHRASES = ['עד שגיליתי', 'ואז גיליתי', 'גיליתי את'];
-const BEAT_4_CTA_VERBS = ['תקנו', 'תזמינו', 'תיכנסו לאתר', 'תנסו'];
-// BEAT 1 generic-vibe phrases — let through "ad-speak" lines that pass the
-// forbidden-phrase list but still feel like a stock generic ad opener.
-const BEAT_1_GENERIC_WORDS = [
+//
+// PRODUCT mode templates (canonical 4-beat):
+// - Beat 1: "ניסיתי כבר מלא {Hebrew plural} ו{negative outcome}"
+// - Beat 2: "עד שגיליתי את {productName} שפשוט שינה/שינתה (לי) הכל"
+// - Beat 3: 2-3 concrete benefits tied to the Beat-1 pain
+// - Beat 4: "תקנו/תזמינו/תיכנסו/תנסו את {productName}" + trust phrase
+//
+// BUSINESS mode templates:
+// - Beat 1: opens with one of "הלכתי / הייתי / ניסיתי / אכלתי / התאמנתי",
+//   never names the business
+// - Beat 2: opens with "עד שהגעתי ל..." / "עד שגיליתי את..." / "ואז הגעתי ל...",
+//   names the business
+// - Beat 4: contains "תקבעו תור" / "תבואו" / "תיכנסו" + business name
+const BEAT_1_GENERIC_PHRASES = [
   'משהו חסר',
   'משהו קטן',
   'הבדל גדול',
   'פתרון חכם',
-  'יעשה הבדל',
   'פתרון מושלם',
-  'מה שחיפשתי',
-  'בדיוק מה ש',
-];
-// BEAT 1 must START with a concrete sensory / situational opener. Without one
-// of these, the line tends to drift into generic ad-speak.
-const BEAT_1_SPECIFIC_PAIN_OPENERS = [
-  'התעוררתי',
-  'הרגשתי ש',
-  'התביישתי',
-  'כל פעם ש',
-  'בכל יום',
-  'כל בוקר',
-  'כל ערב',
-  'תמיד הסתכלתי',
-  'לא הצלחתי',
-];
-const BEAT_1_FORBIDDEN_PHRASES = [
-  'מנסה כל פתרון',
-  'ניסיתי כל פתרון',
-  'שום דבר לא עבד',
-  'שום פתרון לא עבד',
-  'שום פתרון',
-  'ניסיתי הכל',
-  'ניסיתי המון',
   'כלום לא עבד',
-  'חיפשתי פתרון',
-  'לא מצאתי משהו שמתאים',
-  'כלום לא התאים',
-  'כלום לא עזר',
+  'שום פתרון',
 ];
-// BEAT 3 forbidden — discovery openers belong to BEAT 2. We narrowed this list
-// to just the two opener phrases per the latest spec: "גיליתי את"/"מצאתי את"
-// are allowed inside Beat 3 (e.g. "גיליתי את עצמי מחייכת שוב") because they
-// can describe the emotional payoff rather than the product discovery itself.
+// PRODUCT-mode Beat-1 fixed opener.
+const BEAT_1_PRODUCT_REQUIRED_PHRASE = 'ניסיתי כבר מלא';
+// BUSINESS-mode Beat-1 verb whitelist (one must appear).
+const BEAT_1_BUSINESS_REQUIRED_VERBS = ['הלכתי', 'הייתי', 'ניסיתי', 'אכלתי', 'התאמנתי'];
+
+// Beat 2 — required openers (must start with one of these).
+const BEAT_2_PRODUCT_OPENER = 'עד שגיליתי את';
+const BEAT_2_PRODUCT_TAIL_PHRASES = [
+  'שפשוט שינה הכל',
+  'שפשוט שינתה הכל',
+  'שפשוט שינה לי הכל',
+  'שפשוט שינתה לי הכל',
+];
+const BEAT_2_BUSINESS_OPENERS = ['עד שהגעתי ל', 'עד שגיליתי את', 'ואז הגעתי ל'];
+
+// Beat 3 — discovery openers belong to Beat 2 only; ad-clichés banned.
 const BEAT_3_FORBIDDEN_PHRASES = [
   'עד שגיליתי',
   'ואז גיליתי',
+  'פתרון חכם',
+  'פתרון מושלם',
+  'התוצאות מטורפות',
 ];
-function beatStructureViolations(scenes, productName) {
+
+// Beat 4 — CTA verb + trust phrase.
+const BEAT_4_PRODUCT_CTA_VERBS = ['תקנו', 'תזמינו', 'תיכנסו', 'תנסו'];
+const BEAT_4_PRODUCT_TRUST_PHRASES = ['תסמכו עליי', 'תסמכו עלי', 'אני מבטיח', 'לא תתחרטו'];
+const BEAT_4_BUSINESS_CTA_VERBS = ['תקבעו תור', 'תבואו', 'תיכנסו'];
+
+function beatStructureViolations(scenes, identityName, opts = {}) {
+  const mode = opts.mode === 'business' ? 'business' : 'product';
   const violations = [];
   if (!Array.isArray(scenes) || scenes.length < 4) return violations;
   const v1 = (scenes[0]?.subtitle || scenes[0]?.voiceover || '').trim();
   const v2 = (scenes[1]?.subtitle || scenes[1]?.voiceover || '').trim();
   const v3 = (scenes[2]?.subtitle || scenes[2]?.voiceover || '').trim();
   const v4 = (scenes[3]?.subtitle || scenes[3]?.voiceover || '').trim();
-  const productLower = productName ? productName.toLowerCase() : '';
+  const idLower = identityName ? identityName.toLowerCase() : '';
 
-  // BEAT 1: no generic filler phrases — pain must be category-specific.
-  for (const phrase of BEAT_1_FORBIDDEN_PHRASES) {
+  // BEAT 1 (shared) — no generic ad-cliché phrases.
+  for (const phrase of BEAT_1_GENERIC_PHRASES) {
     if (v1.includes(phrase)) {
-      violations.push(`Beat 1 contains generic phrase "${phrase}" — pain must be SPECIFIC to the product category (sensory or emotional language tied to the category, not a one-size-fits-all line).`);
+      violations.push(`Beat 1 contains generic ad-cliché "${phrase}" — replace with a concrete category-specific pain.`);
     }
   }
-  // BEAT 1: no generic ad-vibe phrasings ("משהו חסר ביומיום", "פתרון חכם", etc.)
-  for (const word of BEAT_1_GENERIC_WORDS) {
-    if (v1.includes(word)) {
-      violations.push(`Beat 1 too generic — contains "${word}". Replace with a concrete sensory moment (התעוררתי / התביישתי / כל פעם ש... / כל בוקר ...) tied to the product category.`);
+  // BEAT 1 — must not name the product/business.
+  if (identityName && v1 && v1.toLowerCase().includes(idLower)) {
+    const which = mode === 'business' ? 'business' : 'product';
+    violations.push(`Beat 1 contains the ${which} name "${identityName}" — ${which} name belongs in Beat 2 only.`);
+  }
+
+  if (mode === 'product') {
+    // BEAT 1 — must contain the fixed template phrase "ניסיתי כבר מלא".
+    if (!v1.includes(BEAT_1_PRODUCT_REQUIRED_PHRASE)) {
+      violations.push(`Beat 1 must contain the template phrase "${BEAT_1_PRODUCT_REQUIRED_PHRASE} {Hebrew plural} ו{negative outcome}". Got: "${v1.slice(0, 80)}"`);
     }
-  }
-  // BEAT 1: must not mention the product name — product belongs in Beat 2 only.
-  if (productName && v1 && v1.toLowerCase().includes(productLower)) {
-    violations.push(`Beat 1 contains product name "${productName}" — product name belongs in Beat 2 only.`);
-  }
-  // BEAT 1: must START with a concrete sensory / situational opener.
-  const hasSpecificOpener = BEAT_1_SPECIFIC_PAIN_OPENERS.some(o => v1.includes(o));
-  if (!hasSpecificOpener) {
-    violations.push(`Beat 1 must start with a specific pain opener like התעוררתי / הרגשתי ש / התביישתי / כל פעם ש / בכל יום / כל בוקר. Got: "${v1.slice(0, 80)}"`);
-  }
-
-  // BEAT 2: must open with a discovery phrase.
-  if (!DISCOVERY_OPENERS.test(v2)) {
-    violations.push(`Scene 2 (Beat 2) must START with "עד ש..." or "ואז גיליתי..." and name the product. Got: "${v2.slice(0, 60)}"`);
-  }
-  // BEAT 2: must contain one of the required discovery phrases verbatim.
-  if (!BEAT_2_REQUIRED_PHRASES.some(p => v2.includes(p))) {
-    violations.push(`Scene 2 (Beat 2) must contain one of: "עד שגיליתי" / "ואז גיליתי" / "גיליתי את". Got: "${v2.slice(0, 80)}"`);
-  }
-  // BEAT 2: must name the product.
-  if (productName && !v2.toLowerCase().includes(productLower)) {
-    violations.push(`Scene 2 (Beat 2) must explicitly name the product "${productName}". Got: "${v2.slice(0, 80)}"`);
-  }
-  // BEAT 2: must be short (≤ 10 words) — discovery bridge only, not benefits.
-  const v2Words = v2.split(/\s+/).filter(Boolean).length;
-  if (v2Words > 10) {
-    violations.push(`Scene 2 (Beat 2) must be short (4-6 words). Got ${v2Words} words — move benefits to scene 3.`);
-  }
-
-  // BEAT 3: must NOT contain the Beat-2 discovery openers anywhere.
-  // Catches both "עד שגיליתי ..." at the start AND buried phrases like
-  // "היא נוחה, עד שגיליתי שהיא גם קלה".
-  for (const phrase of BEAT_3_FORBIDDEN_PHRASES) {
-    if (v3.includes(phrase)) {
-      violations.push(`Beat 3 contains discovery phrase "${phrase}" — that belongs in Beat 2 ONLY. Beat 3 must describe how the product solves the Beat-1 pain, not re-introduce it.`);
+    // BEAT 2 — must START with "עד שגיליתי את" + name the product + end with one of the tail phrases.
+    if (!v2.startsWith(BEAT_2_PRODUCT_OPENER)) {
+      violations.push(`Beat 2 must START with "${BEAT_2_PRODUCT_OPENER} ${identityName} ...". Got: "${v2.slice(0, 80)}"`);
     }
-  }
-
-  // BEAT 4: must contain a clear CTA verb AND name the product.
-  const v4HasCta = BEAT_4_CTA_VERBS.some(verb => v4.includes(verb));
-  if (!v4HasCta) {
-    violations.push(`Scene 4 (Beat 4) must contain a direct CTA — one of: "תקנו" / "תזמינו" / "תיכנסו לאתר" / "תנסו". Got: "${v4.slice(0, 80)}"`);
-  }
-  if (productName && !v4.toLowerCase().includes(productLower)) {
-    violations.push(`Scene 4 (Beat 4) must reference the product "${productName}" by name (e.g. "תקנו את ${productName}"). Got: "${v4.slice(0, 80)}"`);
+    if (identityName && !v2.toLowerCase().includes(idLower)) {
+      violations.push(`Beat 2 must explicitly name the product "${identityName}". Got: "${v2.slice(0, 80)}"`);
+    }
+    const v2Stripped = v2.replace(/[.!?…\s"')\]]+$/u, '');
+    const hasValidTail = BEAT_2_PRODUCT_TAIL_PHRASES.some(p => v2Stripped.endsWith(p));
+    if (!hasValidTail) {
+      violations.push(`Beat 2 must end with one of: ${BEAT_2_PRODUCT_TAIL_PHRASES.map(p => `"${p}"`).join(' / ')}. Got: "${v2.slice(-80)}"`);
+    }
+    // BEAT 3 — no discovery / ad-cliché phrases anywhere.
+    for (const phrase of BEAT_3_FORBIDDEN_PHRASES) {
+      if (v3.includes(phrase)) {
+        violations.push(`Beat 3 contains forbidden phrase "${phrase}" — that belongs in Beat 2 only, or it's an ad-cliché. Beat 3 should list concrete benefits that resolve the Beat-1 pain.`);
+      }
+    }
+    // BEAT 4 — CTA verb + product name + trust phrase.
+    if (!BEAT_4_PRODUCT_CTA_VERBS.some(verb => v4.includes(verb))) {
+      violations.push(`Beat 4 must contain a direct CTA verb — one of: ${BEAT_4_PRODUCT_CTA_VERBS.map(v => `"${v}"`).join(' / ')}. Got: "${v4.slice(0, 80)}"`);
+    }
+    if (identityName && !v4.toLowerCase().includes(idLower)) {
+      violations.push(`Beat 4 must reference the product "${identityName}" by name. Got: "${v4.slice(0, 80)}"`);
+    }
+    if (!BEAT_4_PRODUCT_TRUST_PHRASES.some(p => v4.includes(p))) {
+      violations.push(`Beat 4 must include a trust phrase — one of: ${BEAT_4_PRODUCT_TRUST_PHRASES.map(p => `"${p}"`).join(' / ')}. Got: "${v4.slice(0, 80)}"`);
+    }
+  } else {
+    // BUSINESS mode.
+    if (!BEAT_1_BUSINESS_REQUIRED_VERBS.some(verb => v1.includes(verb))) {
+      violations.push(`Beat 1 must contain one of: ${BEAT_1_BUSINESS_REQUIRED_VERBS.map(v => `"${v}"`).join(' / ')} (recounting a previous bad customer experience). Got: "${v1.slice(0, 80)}"`);
+    }
+    // BEAT 2 — must start with one of the discovery openers + name the business.
+    const v2HasOpener = BEAT_2_BUSINESS_OPENERS.some(o => v2.startsWith(o));
+    if (!v2HasOpener) {
+      violations.push(`Beat 2 must START with one of: ${BEAT_2_BUSINESS_OPENERS.map(o => `"${o}..."`).join(' / ')}. Got: "${v2.slice(0, 80)}"`);
+    }
+    if (identityName && !v2.toLowerCase().includes(idLower)) {
+      violations.push(`Beat 2 must name the business "${identityName}". Got: "${v2.slice(0, 80)}"`);
+    }
+    // BEAT 3 — same forbidden cliché list.
+    for (const phrase of BEAT_3_FORBIDDEN_PHRASES) {
+      if (v3.includes(phrase)) {
+        violations.push(`Beat 3 contains forbidden phrase "${phrase}" — Beat 3 should describe what makes the business special.`);
+      }
+    }
+    // BEAT 4 — CTA verb + business name.
+    if (!BEAT_4_BUSINESS_CTA_VERBS.some(verb => v4.includes(verb))) {
+      violations.push(`Beat 4 must contain one of: ${BEAT_4_BUSINESS_CTA_VERBS.map(v => `"${v}"`).join(' / ')}. Got: "${v4.slice(0, 80)}"`);
+    }
+    if (identityName && !v4.toLowerCase().includes(idLower)) {
+      violations.push(`Beat 4 must reference the business "${identityName}" by name. Got: "${v4.slice(0, 80)}"`);
+    }
   }
 
   return violations;
@@ -352,6 +361,8 @@ function scenesHaveBrokenSentences(scenes) {
 async function generateScript(productName, productDesc, applicationArea, hook, voiceGender) {
   if (!ANTHROPIC_KEY) return null;
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
+  const { category: detectedCategory, plural: detectedPlural } = detectProductCategory(productName, productDesc);
+  console.log(`[generateScript] auto-detected category=${detectedCategory} plural=${detectedPlural} for "${productName}"`);
   const genderInstruction = voiceGender === 'male'
     ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'/'מובכת'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר. אל תערבב לשון נקבה.`
     : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה. אל תערבב לשון זכר.`;
@@ -360,111 +371,79 @@ async function generateScript(productName, productDesc, applicationArea, hook, v
     messages: [{ role: 'user', content: `You are a UGC ad expert writing scripts in Hebrew. Create a viral 4-scene ad for: "${productName}".
 Description: ${productDesc}
 How to use: ${applicationArea}
+mode: product
+auto_detected_category: ${detectedCategory}
+auto_detected_hebrew_plural: ${detectedPlural}
 
-⚡ STRICT 4-BEAT UGC STRUCTURE — THE SINGLE MOST IMPORTANT RULE ⚡
+STEP 0 — CATEGORY DETECTION (REQUIRED OUTPUT FIELD):
+Before writing the script, classify the product into EXACTLY ONE of these categories:
+  - "accessory" — כיפה, שרשרת, צמיד, שעון, משקפיים, טבעת, תיק, חגורה, כובע, צעיף, עניבה
+  - "beauty"    — קרם, בושם, איפור, סרום, מסכה, שמפו, מרכך, ליפסטיק, לק, מייבש שיער
+  - "health"    — אבקת הלבנה, ויטמינים, תוספים, משחת שיניים, דאודורנט, מי פה
+  - "fashion"   — חולצה, מכנסיים, נעליים, שמלה, ז'קט, חליפה, פיג'מה, גרביים
+  - "home"      — סיר, מטבח, מזרון, כרית, שמיכה, מנורה, מארגן
+  - "food"      — חטיף, משקה, תוסף תזונה, אוכל ארוז
 
-Every script MUST follow these 4 beats, in this exact order. Each beat = one voiceover_sceneN. DO NOT reorder, DO NOT merge, DO NOT skip a beat. Benefits NEVER come before the product is introduced. "עד שגיליתי" NEVER appears after the benefits — it is the discovery bridge between pain and benefits.
+Pick the closest one — DO NOT invent a new category. Return the chosen value in a top-level "category" JSON field. Default to the auto-detected one above unless you're confident it's wrong.
 
-BEAT 1 — SPECIFIC PAIN (voiceover_scene1, ~5 sec, ~12-15 Hebrew words) — HARD REQUIREMENT:
-  - One Hebrew sentence in story-time first-person — the speaker is venting to a friend about a SPECIFIC MOMENT they remember
-  - The pain must be SPECIFIC to the product's category — name the body part / domain / situation (hair, teeth, kippah, skin, sleep, dessert, etc.)
-  - Use SENSORY or EMOTIONAL language tied to the category (smell, taste, look in the mirror, embarrassment, weight, dryness, etc.)
-  - Describe a CONCRETE MOMENT the listener can vividly picture happening to them
-  - Sounds like a real story being told, NOT an ad copy line
-  - MUST NOT mention the product name, brand name, or any benefit
+⚡ STRICT 4-BEAT TEMPLATE — PRODUCT MODE — DO NOT DEVIATE ⚡
 
-  ✅ STORY-TIME EXAMPLES BY CATEGORY (match the spirit, write your own line):
-    - Fashion: "כל פעם שיצאתי מהקניון הרגשתי שלא מצאתי את המראה שלי"
-    - Beauty (teeth): "התעוררתי כל בוקר עם שיניים צהובות שהתביישתי בהן"
-    - Religious: "הרגשתי שחסרה לי כיפה שמתאימה לי באמת"
-    - Food: "כל ארוחה הסתיימה בתחושה כבדה ובחרטה"
+Each beat is one voiceover_sceneN. DO NOT reorder, merge, or skip beats. Benefits NEVER appear before the product is introduced.
 
-  ⛔ FORBIDDEN GENERIC PHRASES in Beat 1 (these make the pain interchangeable and kill emotional resonance — Beat 1 must NOT contain ANY of these, literally or paraphrased):
-    - "מנסה כל פתרון"
-    - "ניסיתי כל פתרון"
-    - "שום דבר לא עבד"
-    - "שום פתרון לא עבד"
-    - "שום פתרון"
-    - "ניסיתי הכל"
-    - "ניסיתי המון"
-    - "כלום לא עבד"
-    - "חיפשתי פתרון"
-    - "לא מצאתי משהו שמתאים"
-    - "כלום לא התאים"
-    - "כלום לא עזר"
-  If you were about to write any of these, STOP and write a category-specific story-time pain instead.
+BEAT 1 — CATEGORY-ANCHORED PRIOR-FRUSTRATION TEMPLATE (voiceover_scene1, ~10–14 Hebrew words):
+  TEMPLATE — copy this structure exactly: "ניסיתי כבר מלא {Hebrew_plural} {negative outcome tail for the category}"
+  • {Hebrew_plural} = the Hebrew plural form of the product type (e.g. כיפות, קרמים, אבקות הלבנה, חולצות, סירים, חטיפים). Use "${detectedPlural}" unless the auto-detection is clearly wrong.
+  • Negative-outcome tail by category — copy the matching one VERBATIM:
+      - accessory: "ושום דבר לא התאים לי ולא ידעתי מה לעשות"
+      - beauty:    "ושום דבר לא עבד לי באמת"
+      - health:    "ופשוט לא ראיתי תוצאות"
+      - fashion:   "ושום דבר לא נראה עליי טוב"
+      - home:      "ושום דבר לא עבד לי כמו שצריך"
+      - food:      "ושום דבר לא היה מספיק טעים"
+  HARD REQUIREMENTS for Beat 1:
+    - MUST contain "ניסיתי כבר מלא" verbatim
+    - MUST be in first person
+    - MUST NOT contain the specific product name "${productName}" (mentioning the category — "כיפות" — is allowed; the brand/model name is not)
+    - MUST NOT contain ANY of: "משהו חסר" / "משהו קטן" / "הבדל גדול" / "פתרון חכם" / "פתרון מושלם" / "כלום לא עבד" / "שום פתרון"
+  Final reminder — the EXACT pre-set Beat-1 line you'll be given in rule 4 below already follows this template. Use it verbatim.
 
-  📋 PRODUCT-CATEGORY-TO-PAIN CHEATSHEET (draw from the closest match — adapt the exact wording to the specific product):
-    • Religious / spiritual (kippah, tzitzit, mezuzah, head covering): "הרגשתי שאני עובר את היום בלי חיבור רוחני" / "רציתי משהו שיזכיר לי מי אני באמת" / "הכיפות שלי תמיד היו לא נוחות ולא מיוחדות"
-    • Beauty — teeth: "הייתי מתבייש לחייך בתמונות" / "הלכתי עם ביטחון עצמי נמוך בגלל השיניים שלי"
-    • Beauty — skin/face: "העור שלי תמיד היה יבש בבוקר, זה הפריע לי להרגיש יפה" / "הרגשתי מבוכה כל בוקר כשהסתכלתי במראה"
-    • Beauty — hair: "השיער שלי היה נשבר כל בוקר מחדש ולא משנה מה עשיתי"
-    • Food / drink / dessert / ice cream: "כל פעם שרציתי משהו מתוק מצאתי רק ממתקים מלאי סוכר" / "ילדיי ביקשו גלידה אבל רציתי משהו בריא"
-    • Fashion / clothing: "בכל אירוע הרגשתי שאני לא מספיק מיוחד" / "הבגדים שלי תמיד נראו רגילים, בלי ייחוד"
-    • Tech / app / service: "בכל פעם שניסיתי לעשות את זה, זה לקח לי שעות" / "איבדתי שעות כל שבוע על משימה שצריכה לקחת דקות"
-    • Home / kitchen / cleaning: "המטבח שלי היה תמיד מבולגן, לא מצאתי כלום" / "ניקיתי את הבית כל יום ועדיין הרגיש לא נקי"
-    • Cars / automotive: "בכל נסיעה ארוכה התעייפתי מהפרטים הקטנים"
-    • Pets: "הכלב שלי תמיד לכלך את הרכב שלי" / "החתול שלי שרט את הרהיטים כל לילה"
-    • Sleep: "כל לילה הייתי מתהפך במיטה שעות בלי להירדם"
-    • Fitness / weight: "הבגדים שלי לא ישבו טוב, הרגשתי לא נוח עם הגוף שלי"
+BEAT 2 — PRODUCT DISCOVERY TEMPLATE (voiceover_scene2, ~5–7 Hebrew words):
+  TEMPLATE — copy this structure exactly: "עד שגיליתי את ${productName} {tail}"
+  Where {tail} is one of (match grammatical gender to "${productName}"):
+    - "שפשוט שינה הכל"        (masculine product)
+    - "שפשוט שינתה הכל"        (feminine product)
+    - "שפשוט שינה לי הכל"     (masculine, "for me")
+    - "שפשוט שינתה לי הכל"     (feminine, "for me")
+  HARD REQUIREMENTS for Beat 2:
+    - MUST START with "עד שגיליתי את"
+    - MUST contain the exact product name "${productName}"
+    - MUST END with one of the four tail phrases above (no other tail is allowed)
+    - Do NOT list benefits here — Beat 2 is the discovery bridge only
 
-  If the product category doesn't match the list, describe one of: (a) a specific physical/emotional discomfort, (b) a moment of frustration during a normal day, (c) something the listener can vividly picture happening to them. The test: a stranger reading only Beat 1 should be able to guess the product CATEGORY within 2 seconds.
+BEAT 3 — BENEFITS THAT SOLVE THE BEAT-1 PAIN (voiceover_scene3, ~16–22 Hebrew words):
+  - One sentence (or two short ones) listing 2–3 SPECIFIC benefits drawn from the product description above
+  - Each benefit must connect back to the Beat-1 pain (cause → mechanism → relief)
+  - Benefits must be concrete (size, comfort, effect, ingredient, time-to-result, build quality) — NOT vague claims
+  HARD REQUIREMENTS for Beat 3:
+    - MUST NOT START with "עד שגיליתי" / "ואז גיליתי" — those belong to Beat 2 ONLY
+    - MUST NOT contain the phrases "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות" anywhere
 
-  Examples (full sentences):
-    * Kippah: "הרגשתי שאני עובר את היום בלי חיבור רוחני, שוכח מי שומר עלי"
-    * Teeth whitening: "הייתי מתבייש לחייך בתמונות, השיניים שלי היו צהובות וזה הפריע לי כל יום"
-    * Ice cream / dessert: "כל פעם שהיה לי חם רציתי גלידה איכותית אבל תמיד מצאתי רק חטיפים מלאים בסוכר"
+BEAT 4 — CTA TEMPLATE (voiceover_scene4, ~7–10 Hebrew words):
+  TEMPLATE — pick one of these structures:
+    - "תקנו את ${productName}, תסמכו עליי - {short promise}"
+    - "תזמינו את ${productName} עכשיו, לא תתחרטו"
+    - "תיכנסו עכשיו ותקנו את ${productName}, אני מבטיח/ה לכם"
+    - "תנסו את ${productName} ${promise}, תסמכו עליי"
+  HARD REQUIREMENTS for Beat 4:
+    - MUST contain one of: "תקנו" / "תזמינו" / "תיכנסו" / "תנסו"
+    - MUST contain the exact product name "${productName}"
+    - MUST contain one of these trust phrases: "תסמכו עליי" / "אני מבטיח" / "לא תתחרטו"
 
-BEAT 2 — DISCOVERY OF PRODUCT (voiceover_scene2, ~2-3 sec, ~4-6 Hebrew words, SHORT AND PUNCHY):
-  - MUST start with "עד ש" or "ואז גיליתי" — no other opening is allowed
-  - MUST name the product: ${productName}
-  - DO NOT list benefits here — this is a pure discovery bridge, that's all
-  - DO NOT describe the product visually, DO NOT say "this is made of...", DO NOT start listing features
-  - Keep it to one short clause, 4-6 words maximum
-  - Examples:
-    * "עד שגיליתי את ${productName}"
-    * "ואז גיליתי את ${productName}"
-    * "עד שמצאתי את ${productName}"
-
-BEAT 3 — EXPLAIN THE PRODUCT + HOW IT SOLVES BEAT-1 PAIN (voiceover_scene3, ~7-8 sec, ~18-22 Hebrew words) — HARD REQUIREMENT:
-  - Explain what ${productName} actually does and HOW it directly resolves the SPECIFIC pain stated in Beat 1
-  - Make a clear cause-and-effect link: pain → mechanism → relief
-  - State 2-3 concrete things the product does, then close with a line that pays off the Beat-1 emotion
-  - Beat 3 should flow naturally from Beat 2 (which already introduced the product) — go DIRECTLY into mechanism + payoff, do not re-introduce it
-
-  ⛔ FORBIDDEN DISCOVERY OPENERS in Beat 3 (these belong in Beat 2 ONLY — Beat 3 must NOT contain ANY of these, not even buried mid-sentence):
-    - "עד שגיליתי"
-    - "ואז גיליתי"
-  If you find yourself writing one of these in Beat 3, STOP — the discovery was already made in Beat 2. Replace with a direct mechanism / benefit sentence.
-
-  GOOD example (kippah):
-    Beat 1: "הרגשתי שחסרה לי כיפה שמתאימה לי באמת"
-    Beat 2: "עד שגיליתי את ${productName}"
-    Beat 3: "היא עשויה מחומרים איכותיים וקלה לחבישה, וכל פעם שאני חובש אותה אני נזכר שיש מי שמעלי"
-    ✓ Beat 3 starts with a benefit, closes with an emotional line resolving Beat 1's pain. No discovery opener.
-
-  BAD example (DO NOT PRODUCE THIS):
-    Beat 2: "עד שגיליתי את ${productName}"
-    Beat 3: "היא נוחה, עד שגיליתי שהיא גם קלה..."
-    ✗ "עד שגיליתי" appears twice — a structural error.
-
-  Example (teeth): "היא מלבינה את השיניים תוך ימים ולא פוגעת באמייל, ולראשונה אני מחייך בתמונות בלי להרגיש לא בנוח"
-
-BEAT 4 — CTA REFERENCING THE PRODUCT BY NAME (voiceover_scene4, ~3-4 sec, ~8-10 Hebrew words) — HARD REQUIREMENT:
-  - Direct call to action that REFERENCES "${productName}" by name
-  - MUST contain at least one of these CTA verbs (verbatim): "תקנו" / "תזמינו" / "תיכנסו לאתר" / "תנסו"
-  - Optionally add a short emotional close ("זה שווה כל שקל" / "אי אפשר להתחרט" / "זה שינה לי את היום")
-  - Examples:
-    * "תקנו את ${productName} עכשיו, זה שווה כל שקל"
-    * "תזמינו את ${productName} באתר, אי אפשר להתחרט"
-    * "תיכנסו לאתר ותזמינו את ${productName} היום"
-    * "תנסו את ${productName}, זה שינה לי את היום"
-
-SANITY CHECK before returning — read the 4 voiceovers in order and confirm:
-  1. Scene 1 is a SENSORY, story-time pain specific to the product category and does NOT name the product. None of the forbidden generic phrases appear.
-  2. Scene 2 contains "עד שגיליתי" / "ואז גיליתי" / "גיליתי את" AND names ${productName}.
-  3. Scene 3 explains how ${productName} resolves the Beat-1 pain AND does NOT contain "עד שגיליתי" or "ואז גיליתי".
-  4. Scene 4 contains one of "תקנו" / "תזמינו" / "תיכנסו לאתר" / "תנסו" AND names ${productName}.
+SANITY CHECK before returning:
+  1. Beat 1 contains "ניסיתי כבר מלא" and does NOT mention "${productName}".
+  2. Beat 2 STARTS with "עד שגיליתי את ${productName}" and ENDS with "שפשוט שינה הכל" / "שפשוט שינתה הכל" / "שפשוט שינה לי הכל" / "שפשוט שינתה לי הכל".
+  3. Beat 3 does NOT contain "עד שגיליתי" / "ואז גיליתי" / "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות".
+  4. Beat 4 contains one of "תקנו" / "תזמינו" / "תיכנסו" / "תנסו" + "${productName}" + one of "תסמכו עליי" / "אני מבטיח" / "לא תתחרטו".
 If any of these fail, rewrite before returning.
 
 SCENE 2 VISUAL NOTE:
@@ -672,10 +651,12 @@ NEVER describe smiles, laughs, or reactions that open the mouth.
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "BEAT 1 — SPECIFIC SENSORY STORY-TIME PAIN, ~12-15 Hebrew words. First-person story-time line tied to the product CATEGORY (names the body part/domain/situation). Never the product name, never a benefit. Must NOT contain any of: 'ניסיתי הכל' / 'ניסיתי המון' / 'כלום לא עבד' / 'שום פתרון'.",
-  "voiceover_scene2": "BEAT 2 — DISCOVERY, ~4-6 Hebrew words. MUST contain one of 'עד שגיליתי' / 'ואז גיליתי' / 'גיליתי את' AND include the product name ${productName}. NO benefits listed. Deliberately short and punchy.",
-  "voiceover_scene3": "BEAT 3 — EXPLAIN PRODUCT + HOW IT SOLVES THE PAIN, ~18-22 Hebrew words. Describe what ${productName} does and tie it directly to the Beat-1 pain (cause-and-effect). Do NOT use 'עד שגיליתי' or 'ואז גיליתי' — discovery already happened in BEAT 2.",
-  "voiceover_scene4": "BEAT 4 — CTA NAMING THE PRODUCT, ~8-10 Hebrew words. MUST contain one of 'תקנו' / 'תזמינו' / 'תיכנסו לאתר' / 'תנסו' AND must reference '${productName}' by name. Example: 'תקנו את ${productName} עכשיו, זה שווה כל שקל'.",
+  "category": "one of: accessory / beauty / health / fashion / home / food (the value you chose in STEP 0)",
+  "mode": "product",
+  "voiceover_scene1": "BEAT 1 — TEMPLATE 'ניסיתי כבר מלא {Hebrew_plural} {category-specific tail}'. Must contain 'ניסיתי כבר מלא'. Must NOT contain '${productName}'. Must NOT contain 'משהו חסר' / 'משהו קטן' / 'הבדל גדול' / 'פתרון חכם' / 'פתרון מושלם' / 'כלום לא עבד' / 'שום פתרון'.",
+  "voiceover_scene2": "BEAT 2 — TEMPLATE 'עד שגיליתי את ${productName} שפשוט שינה/שינתה (לי) הכל'. Must START with 'עד שגיליתי את' + the product name. Must END with 'שפשוט שינה הכל' / 'שפשוט שינתה הכל' / 'שפשוט שינה לי הכל' / 'שפשוט שינתה לי הכל' (match grammatical gender to the product).",
+  "voiceover_scene3": "BEAT 3 — 2-3 concrete benefits of ${productName} that solve the Beat-1 pain. ~16-22 Hebrew words. Must NOT contain 'עד שגיליתי' / 'ואז גיליתי' / 'פתרון חכם' / 'פתרון מושלם' / 'התוצאות מטורפות'.",
+  "voiceover_scene4": "BEAT 4 — CTA template 'תקנו את ${productName}, תסמכו עליי - {short promise}' (or use 'תזמינו' / 'תיכנסו' / 'תנסו'). Must contain '${productName}' + a CTA verb + a trust phrase ('תסמכו עליי' / 'אני מבטיח' / 'לא תתחרטו').",
   "setting": "one-line description of the setting",
   "scenes": [
     {
@@ -740,30 +721,27 @@ Return ONLY valid JSON (no markdown):
     const retry = parseResponse(await callClaude(extraInstruction));
     if (retry) parsed = retry;
   }
-  // Validate scene-1 opener quality — if Claude dropped the pre-set hook and
-  // fell back to a bare "ניסיתי ..." style opener, force a regen with an
-  // explicit rule about emotional framing.
-  if (parsed && sceneOneIsWeakOpener(parsed.voiceover_scene1)) {
-    console.warn('[generateScript] Weak scene-1 opener, regenerating...', parsed.voiceover_scene1?.slice(0, 40));
-    const extraInstruction = `\n\nPREVIOUS ATTEMPT OPENED SCENE 1 WITH A BARE ACTION VERB (e.g. "ניסיתי ..."/"חיפשתי ..." as the first word). REWRITE voiceover_scene1 to open with an EMOTIONAL STATE or RECURRING SITUATION, using "כל פעם ש..." / "הייתי מרגישה ש..." / "הרגשתי ש..." / "תמיד היה לי ש...". The first word must NOT be ניסיתי/חיפשתי/רציתי. Keep the exact pre-set hook "${hook}" as the voiceover_scene1 text.`;
-    const retry = parseResponse(await callClaude(extraInstruction));
-    if (retry) parsed = retry;
-  }
-  // Validate the strict 4-beat structure. Collect ALL violations so the regen
-  // instruction shows Claude every issue at once (rather than fixing one and
-  // surfacing the next on a second pass). Regenerate up to 2 times before
-  // giving up and returning whatever Claude last produced.
+  // Validate the strict 4-beat structure (PRODUCT mode). Collect ALL
+  // violations so the regen instruction shows Claude every issue at once.
+  // Regenerate up to 2 times before giving up and returning whatever Claude
+  // last produced (the spec calls this "log warning and pass through").
   if (parsed) {
     const MAX_BEAT_REGEN = 2;
-    for (let attempt = 1; attempt <= MAX_BEAT_REGEN; attempt++) {
-      const violations = beatStructureViolations(parsed.scenes, productName);
+    let lastViolations = [];
+    for (let attempt = 0; attempt <= MAX_BEAT_REGEN; attempt++) {
+      const violations = beatStructureViolations(parsed.scenes, productName, { mode: 'product' });
+      lastViolations = violations;
       if (violations.length === 0) break;
-      console.warn(`[generateScript] 4-beat structure violations (attempt ${attempt}/${MAX_BEAT_REGEN}):`, violations);
+      if (attempt === MAX_BEAT_REGEN) break;
+      console.warn(`[generateScript] 4-beat structure violations (regen ${attempt + 1}/${MAX_BEAT_REGEN}):`, violations);
       const bullets = violations.map((v, i) => `  ${i + 1}. ${v}`).join('\n');
-      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules:\n- voiceover_scene1 = BEAT 1 (SPECIFIC sensory pain tied to the product CATEGORY, told as a story-time first-person memory; NEVER a generic "ניסיתי הכל" / "ניסיתי המון" / "כלום לא עבד" / "שום פתרון" phrase; never names the product)\n- voiceover_scene2 = BEAT 2 (SHORT 4-6 words, MUST contain one of "עד שגיליתי" / "ואז גיליתי" / "גיליתי את" AND include "${productName}", NO benefits here)\n- voiceover_scene3 = BEAT 3 (explain what ${productName} does and HOW it solves the Beat-1 pain — direct cause-and-effect; MUST NOT contain "עד שגיליתי" or "ואז גיליתי")\n- voiceover_scene4 = BEAT 4 (clear CTA — must contain one of "תקנו" / "תזמינו" / "תיכנסו לאתר" / "תנסו" — AND must name "${productName}", e.g. "תקנו את ${productName} עכשיו")`;
+      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules:\n- voiceover_scene1 = BEAT 1 — must contain "ניסיתי כבר מלא {Hebrew plural} ו{negative outcome}", never names "${productName}".\n- voiceover_scene2 = BEAT 2 — must START with "עד שגיליתי את ${productName}" and END with "שפשוט שינה הכל" / "שפשוט שינתה הכל" / "שפשוט שינה לי הכל" / "שפשוט שינתה לי הכל".\n- voiceover_scene3 = BEAT 3 — 2-3 concrete benefits resolving the Beat-1 pain. NEVER contains "עד שגיליתי" / "ואז גיליתי" / "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות".\n- voiceover_scene4 = BEAT 4 — CTA verb ("תקנו" / "תזמינו" / "תיכנסו" / "תנסו") + product name + trust phrase ("תסמכו עליי" / "אני מבטיח" / "לא תתחרטו").`;
       const retry = parseResponse(await callClaude(extraInstruction));
       if (retry) parsed = retry;
       else break;
+    }
+    if (lastViolations.length > 0) {
+      console.warn(`[generateScript] 4-beat structure still violated after ${MAX_BEAT_REGEN} regens — passing through with violations:`, lastViolations);
     }
   }
   // Validate authentic Hebrew — if Claude used borrowed/transliterated words
@@ -1349,64 +1327,91 @@ function toMasculine(text) {
   return out;
 }
 
+// Auto-detect product category and Hebrew plural for the Beat-1 template
+// "ניסיתי כבר מלא {plural} ו{negative outcome}". Categories: accessory, beauty,
+// health, fashion, home, food. Each match returns the Hebrew plural to drop
+// into the template; unmatched products fall back to the closest category and
+// a generic plural ("מוצרים").
+function detectProductCategory(productName, productDesc) {
+  const text = ((productName || '') + ' ' + (productDesc || '')).toLowerCase();
+  const m = (re, category, plural) => re.test(text) ? { category, plural } : null;
+
+  return (
+    // accessory
+    m(/כיפה|כיפת|kipah|yarmulke/, 'accessory', 'כיפות') ||
+    m(/שרשרת|necklace/, 'accessory', 'שרשראות') ||
+    m(/צמיד|bracelet/, 'accessory', 'צמידים') ||
+    m(/שעון|watch/, 'accessory', 'שעונים') ||
+    m(/משקפיים|glasses|sunglasses/, 'accessory', 'משקפיים') ||
+    m(/טבעת|ring/, 'accessory', 'טבעות') ||
+    m(/תיק|bag|handbag/, 'accessory', 'תיקים') ||
+    m(/חגורה|belt/, 'accessory', 'חגורות') ||
+    m(/כובע|hat|cap/, 'accessory', 'כובעים') ||
+    m(/צעיף|scarf/, 'accessory', 'צעיפים') ||
+    m(/עניבה|necktie\b|\btie\b/, 'accessory', 'עניבות') ||
+    // beauty
+    m(/קרם|cream|moisturizer/, 'beauty', 'קרמים') ||
+    m(/בושם|perfume|fragrance/, 'beauty', 'בשמים') ||
+    m(/איפור|makeup/, 'beauty', 'מוצרי איפור') ||
+    m(/סרום|serum/, 'beauty', 'סרומים') ||
+    m(/מסכת פנים|מסכה|face mask|mask/, 'beauty', 'מסכות') ||
+    m(/שמפו|shampoo/, 'beauty', 'שמפו') ||
+    m(/מרכך|conditioner/, 'beauty', 'מרככים') ||
+    m(/ליפסטיק|שפתון|lipstick/, 'beauty', 'ליפסטיקים') ||
+    m(/לק לציפורניים|לק|nail polish/, 'beauty', 'לקים') ||
+    m(/אקדח שיער|מייבש שיער|hair ?dryer/, 'beauty', 'מייבשי שיער') ||
+    // health
+    m(/אבקת הלבנה|הלבנת שיניים|teeth whitening|whitening powder/, 'health', 'אבקות הלבנה') ||
+    m(/ויטמין|vitamin/, 'health', 'ויטמינים') ||
+    m(/משחת שיניים|toothpaste/, 'health', 'משחות שיניים') ||
+    m(/דאודורנט|deodorant/, 'health', 'דאודורנטים') ||
+    m(/מי פה|mouthwash/, 'health', 'מי פה') ||
+    m(/תוסף תזונה|dietary supplement/, 'food', 'תוספי תזונה') ||
+    m(/תוסף|supplement/, 'health', 'תוספים') ||
+    // fashion
+    m(/חולצה|חולצות|t-?shirt|shirt/, 'fashion', 'חולצות') ||
+    m(/מכנסיים|מכנס|pants|trousers/, 'fashion', 'מכנסיים') ||
+    m(/נעליים|נעל|shoes|sneakers/, 'fashion', 'נעליים') ||
+    m(/שמלה|שמלות|dress/, 'fashion', 'שמלות') ||
+    m(/ז.קט|jacket/, 'fashion', "ז'קטים") ||
+    m(/חליפה|suit/, 'fashion', 'חליפות') ||
+    m(/פיג.מה|pajama/, 'fashion', "פיג'מות") ||
+    m(/גרביים|socks/, 'fashion', 'גרביים') ||
+    // home
+    m(/סיר|pot/, 'home', 'סירים') ||
+    m(/מטבח|kitchenware/, 'home', 'מוצרי מטבח') ||
+    m(/מזרון|מזרן|mattress/, 'home', 'מזרונים') ||
+    m(/כרית|pillow/, 'home', 'כריות') ||
+    m(/שמיכה|blanket|duvet/, 'home', 'שמיכות') ||
+    m(/מנורה|lamp|lighting/, 'home', 'מנורות') ||
+    m(/מארגן|organizer/, 'home', 'מארגנים') ||
+    // food
+    m(/חטיף|snack/, 'food', 'חטיפים') ||
+    m(/משקה|drink|beverage/, 'food', 'משקאות') ||
+    m(/אוכל ארוז|packaged food/, 'food', 'מוצרי אוכל') ||
+    // fallback
+    { category: 'beauty', plural: 'מוצרים' }
+  );
+}
+
+// Beat-1 template "ניסיתי כבר מלא {plural} ו{negative outcome}" — the
+// negative-outcome tail is fixed per category.
+function buildProductBeat1(category, plural) {
+  const tailByCategory = {
+    accessory: 'ושום דבר לא התאים לי ולא ידעתי מה לעשות',
+    beauty: 'ושום דבר לא עבד לי באמת',
+    health: 'ופשוט לא ראיתי תוצאות',
+    fashion: 'ושום דבר לא נראה עליי טוב',
+    home: 'ושום דבר לא עבד לי כמו שצריך',
+    food: 'ושום דבר לא היה מספיק טעים',
+  };
+  const tail = tailByCategory[category] || tailByCategory.beauty;
+  return `ניסיתי כבר מלא ${plural} ${tail}`;
+}
+
 function getHook(productName, productDesc, voiceGender = 'female') {
-  const desc = ((productDesc || '') + ' ' + (productName || '')).toLowerCase();
-  // Default fallback — concrete moment of frustration, no forbidden generic
-  // filler phrases ("ניסיתי הכל" / "מנסה כל פתרון" / "כלום לא עזר").
-  let raw = 'הרגשתי שמשהו חסר לי ביומיום, משהו קטן שיעשה הבדל גדול';
-
-  // Head covering / kipah / yarmulke (spiritual/emotional pain, not just comfort)
-  if (/כיפה|כיפות|יארמולקה|כיסוי ראש|מטפחת|kipah|yarmulke|head cover/.test(desc))
-    raw = 'הרגשתי שאני עובר את היום בלי חיבור רוחני, שוכח מי שומר עליי';
-  // Fashion / clothing
-  else if (/שמלה|בגד|חולצה|מכנס|נעל|תיק|אופנה|dress|shirt|clothes|fashion|pants|shoes|bag/.test(desc))
-    raw = 'בכל אירוע הרגשתי שאני לא מספיק מיוחדת, הבגדים שלי נראו רגילים';
-  // Dental / teeth
-  else if (/שינ|דנטל|לבן|משחת|teeth|dental|whiten/.test(desc))
-    raw = 'הייתי מתביישת לחייך בתמונות, השיניים שלי היו צהובות וזה הפריע לי כל יום';
-  // Skincare
-  else if (/קרם|פנים|אקנה|עור|סרום|skincare|cream|serum|acne|face/.test(desc))
-    raw = 'העור שלי היה יבש בבוקר וזה הפריע לי להרגיש יפה כשיצאתי מהבית';
-  // Hair
-  else if (/שיער|hair|שמפו/.test(desc))
-    raw = 'השיער שלי היה נשבר כל בוקר מחדש, לא משנה איך סידרתי אותו';
-  // Jewelry / accessories
-  else if (/שעון|תכשיט|צמיד|שרשרת|watch|jewelry|bracelet|necklace/.test(desc))
-    raw = 'האביזרים שלי תמיד נראו זולים ולא הרגשתי בנוח איתם';
-  // Sleep
-  else if (/שינה|לישון|כרית|מזרון|sleep|pillow|mattress/.test(desc))
-    raw = 'כל לילה הייתי מתהפכת במיטה שעות בלי להצליח להירדם';
-  // Ice cream / dessert / sweet (must come BEFORE general food)
-  else if (/גלידה|קינוח|ממתק|שוקולד|מתוק|ice\s*cream|gelato|dessert|sweet|chocolate/.test(desc))
-    raw = 'כל פעם שהיה לי חם רציתי גלידה איכותית, אבל מצאתי רק חטיפים מלאים בסוכר';
-  // Food / restaurant / meal kit
-  else if (/אוכל|מסעדה|ארוחה|מזון|תזונה|food|meal|restaurant|diet/.test(desc))
-    raw = 'הייתי כל כך עייפה מלבשל כל יום ולא ידעתי מה לעשות';
-  // Supplement / vitamin
-  else if (/ויטמין|תוסף|חלבון|supplement|vitamin|protein/.test(desc))
-    raw = 'הרגשתי עייפה כל היום וכלום לא נתן לי באמת אנרגיה';
-  // Fitness / workout
-  else if (/כושר|אימון|ספורט|הרזיה|דיאטה|fitness|workout|gym|weight|exercise/.test(desc))
-    raw = 'הבגדים שלי לא ישבו טוב, הרגשתי לא נוח עם הגוף שלי';
-  // Tech / gadget / app
-  else if (/אפליקציה|גאדג׳ט|טכנולוגיה|מכשיר|app|tech|gadget|device|software/.test(desc))
-    raw = 'בזבזתי שעות כל יום על משהו שהיה אמור להיות פשוט';
-  // Cleaning
-  else if (/ניקוי|ניקיון|כביסה|cleaning|detergent|clean/.test(desc))
-    raw = 'ניקיתי את הבית כל יום ובכל זאת הרגיש לא נקי באמת';
-  // Baby / kids
-  else if (/תינוק|ילד|baby|kid|child/.test(desc))
-    raw = 'הילדים שלי לא היו מפסיקים להתעצבן ולא ידעתי מה לעשות';
-  // Home / furniture / decor / kitchen
-  else if (/בית|ריהוט|עיצוב|מטבח|home|furniture|decor|kitchen/.test(desc))
-    raw = 'המטבח שלי היה תמיד מבולגן, לא מצאתי כלום כשהייתי צריכה';
-  // Pet
-  else if (/כלב|חתול|חיית|pet|dog|cat/.test(desc))
-    raw = 'הכלב שלי תמיד לכלך לי את הרכב, וחזרתי הביתה מותשת';
-  // Car accessories
-  else if (/רכב|אוטו|מכונית|car|vehicle/.test(desc))
-    raw = 'בכל נסיעה ארוכה התעייפתי מהפרטים הקטנים שהפריעו לי';
-
+  const { category, plural } = detectProductCategory(productName, productDesc);
+  const raw = buildProductBeat1(category, plural);
   return voiceGender === 'male' ? toMasculine(raw) : raw;
 }
 
@@ -1462,12 +1467,25 @@ function getDefaultScenes(productName, applicationArea, productDesc) {
 
 function getBusinessCategory(desc) {
   const d = (desc || '').toLowerCase();
-  if (/מסעד|קפה|פיצרי|בר|אוכל|שף|מטבח|restaurant|cafe|bar|food|kitchen|pizza|sushi|burger/.test(d)) return 'restaurant';
+  // Order matters: barbershop must beat the generic salon/hair regex below.
+  if (/ברבר\s*שופ|ברברשופ|barbershop|barber\s*shop/.test(d)) return 'barbershop';
+  if (/קוסמטיק|לייזר|טיפולי פנים|טיפול פנים|aesthetic|laser|cosmetic|botox/.test(d)) return 'beauty_clinic';
+  if (/קליניק|מרפא|רופא|אסתטי|שיני|clinic|dental|doctor|therapy|spa|massage/.test(d)) return 'beauty_clinic';
+  if (/מסעד|קפה|פיצרי|בר\b|אוכל|שף|מטבח|restaurant|cafe|bar|food|kitchen|pizza|sushi|burger/.test(d)) return 'restaurant';
   if (/אופנה|בוטיק|בגד|חולצ|שמל|fashion|boutique|clothing|apparel|shop|store/.test(d)) return 'fashion';
-  if (/קליניק|מרפא|רופא|טיפול|אסתטי|שיני|קוסמטיק|clinic|dental|doctor|therapy|aesthetic|beauty|spa|massage/.test(d)) return 'clinic';
   if (/מספר|תסרוק|ספר|salon|hair|barber/.test(d)) return 'salon';
   if (/כושר|חדר כושר|אימון|יוגה|פילאטיס|gym|fitness|yoga|pilates|trainer/.test(d)) return 'fitness';
-  return 'generic';
+  return 'service';
+}
+
+// Map new business-category keys to the legacy ones used by the
+// uniform/closeUp/scene3 helpers below (which were authored before the
+// barbershop/beauty_clinic split). Keeps those helpers intact.
+function legacyBusinessCategoryKey(cat) {
+  if (cat === 'barbershop') return 'salon';
+  if (cat === 'beauty_clinic') return 'clinic';
+  if (cat === 'service') return 'generic';
+  return cat;
 }
 
 // Category-driven wardrobe / close-up action / scene-3 activity / venue.
@@ -1513,21 +1531,23 @@ function getCategoryVenue(cat) {
   }
 }
 
-// New business hook — third-person / customer-perspective narration.
-// The avatar is the SILENT employee; the voiceover describes the business
-// from an outside narrator's POV (never "היי אני" from the avatar).
+// Beat-1 hook for BUSINESS mode. First-person recollection of bad prior
+// experiences with competing businesses — never names the current business.
+// Each option opens with one of the required verbs ("הלכתי / הייתי / ניסיתי /
+// אכלתי / התאמנתי") so the validator passes.
 function getBusinessHook(desc, name, voiceGender = 'female') {
   const cat = getBusinessCategory(desc);
   const hooks = {
-    restaurant: `${name || 'המסעדה הזאת'} — המקום שכולם מדברים עליו`,
-    fashion: `${name || 'הבוטיק הזה'} — מוצאים כאן חתיכות שלא תמצאו בשום מקום`,
-    clinic: `${name || 'הקליניקה הזאת'} — כאן מקבלים יחס אמיתי ותוצאות`,
-    salon: `${name || 'המספרה הזאת'} — יוצאים מכאן אחרים`,
-    fitness: `${name || 'הסטודיו הזה'} — מתאמנים כאן אחרת`,
-    generic: `${name || 'העסק הזה'} — זה לא סתם עוד עסק בשכונה`,
+    barbershop: 'הלכתי לכבר מלא מספרות והתספורת אף פעם לא יצאה כמו שרציתי',
+    salon: 'הייתי בכבר מלא סלונים ושום פעם לא יצאתי מרוצה מהתוצאה',
+    beauty_clinic: 'ניסיתי כבר מלא קליניקות ולא ראיתי שינוי אמיתי בעור',
+    restaurant: 'אכלתי בכבר מלא מסעדות ושום מקום לא הרגיש כמו בית',
+    fitness: 'התאמנתי בכבר מלא חדרי כושר ולא הרגשתי שמתקדמת',
+    fashion: 'הסתובבתי בכבר מלא חנויות ושום בגד לא דיבר אליי',
+    service: 'ניסיתי כבר מלא מקומות ושום אחד לא נתן לי את מה שחיפשתי',
   };
-  // Third-person narration works for any gender; keep consistent.
-  return hooks[cat] || hooks.generic;
+  const raw = hooks[cat] || hooks.service;
+  return voiceGender === 'male' ? toMasculine(raw) : raw;
 }
 
 function getBusinessDefaultVoiceover(name, desc, hook, voiceGender = 'female') {
@@ -1538,7 +1558,7 @@ function getBusinessDefaultVoiceover(name, desc, hook, voiceGender = 'female') {
 
 function getBusinessDefaultScenes(name, desc) {
   const hook = getBusinessHook(desc, name);
-  const cat = getBusinessCategory(desc);
+  const cat = legacyBusinessCategoryKey(getBusinessCategory(desc));
   const uniform = getCategoryUniform(cat);
   const closeUp = getCategoryCloseUp(cat);
   const scene3Action = getCategoryScene3Action(cat);
@@ -1582,7 +1602,8 @@ async function generateBusinessScript(name, desc, hook, voiceGender) {
     ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'/'מובכת'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר. אל תערבב לשון נקבה.`
     : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה. אל תערבב לשון זכר.`;
 
-  const cat = getBusinessCategory(desc);
+  const detectedCategory = getBusinessCategory(desc);
+  const cat = legacyBusinessCategoryKey(detectedCategory);
   const uniform = getCategoryUniform(cat);
   const closeUp = getCategoryCloseUp(cat);
   const scene3Action = getCategoryScene3Action(cat);
@@ -1602,7 +1623,8 @@ async function generateBusinessScript(name, desc, hook, voiceGender) {
 
 Business name: "${name}"
 Business description: ${desc}
-Auto-detected category: ${cat}
+mode: business
+auto_detected_category: ${detectedCategory}
 Venue: ${venue}
 Uniform: ${uniform}
 Close-up action: ${closeUp}
@@ -1611,18 +1633,66 @@ Category guidance: ${categoryHints[cat]}
 
 ${genderInstruction}
 
-CRITICAL ROLE RULES — THE AVATAR PLAYS THE SILENT EMPLOYEE/OWNER:
-- The avatar represents the employee or owner of "${name}" — NOT a customer.
-- The avatar NEVER talks, NEVER appears to talk, NEVER opens the mouth wide.
-- The avatar's mouth must be closed or a natural relaxed smile in every scene with the avatar.
-- Voiceover plays OVER the 4 scenes as background narration — it is NOT spoken by the avatar.
+STEP 0 — BUSINESS CATEGORY DETECTION (REQUIRED OUTPUT FIELD):
+Classify the business into EXACTLY ONE of:
+  - "barbershop"     — מספרה, ברבר שופ
+  - "salon"          — מספרת נשים, סלון יופי
+  - "beauty_clinic"  — קוסמטיקה, טיפולי פנים, לייזר
+  - "restaurant"     — מסעדה, בית קפה
+  - "fitness"        — חדר כושר, קרוספיט, יוגה
+  - "service"        — שירות אחר (קליניקה, תיקונים וכו')
+Return the chosen value in a top-level "category" JSON field. Default to the auto-detected one (${detectedCategory}) unless clearly wrong.
 
-NARRATION STYLE (CRITICAL — NOT FIRST PERSON FROM THE AVATAR):
-- The voiceover is third-person or customer-perspective narration ABOUT "${name}".
-- NEVER write "היי אני ..." or anything that sounds like the avatar speaking.
-- Natural Israeli narration like: "במסעדה הזאת כל מנה מוכנה טריה", "אם אתם מחפשים ...", "הסוד של ${name} זה ...", "כל מי שמגיע ל${name} מבין מיד ...".
+CRITICAL ROLE RULES — THE AVATAR ON SCREEN PLAYS THE SILENT EMPLOYEE/OWNER:
+- The avatar visually represents the employee or owner of "${name}" — silent in every shot, mouth closed or natural relaxed smile.
+- Voiceover plays OVER the 4 scenes as a CUSTOMER TESTIMONIAL — the spoken voice is a satisfied customer recounting their journey, NOT the avatar.
 
-NEW 4-SCENE STRUCTURE:
+⚡ STRICT 4-BEAT TEMPLATE — BUSINESS MODE — DO NOT DEVIATE ⚡
+
+BEAT 1 — CUSTOMER'S PRIOR BAD EXPERIENCE (voiceover_scene1, ~10–14 Hebrew words):
+  TEMPLATE — first person, customer recounting prior bad experiences at COMPETING businesses (never names "${name}"):
+  • barbershop:    "הלכתי לכבר מלא מספרות והתספורת אף פעם לא יצאה כמו שרציתי"
+  • salon:         "הייתי בכבר מלא סלונים ושום פעם לא יצאתי מרוצה מהתוצאה"
+  • beauty_clinic: "ניסיתי כבר מלא קליניקות ולא ראיתי שינוי אמיתי בעור"
+  • restaurant:    "אכלתי בכבר מלא מסעדות ושום מקום לא הרגיש כמו בית"
+  • fitness:       "התאמנתי בכבר מלא חדרי כושר ולא הרגשתי שמתקדם/ת"
+  • service:       "ניסיתי כבר מלא מקומות ושום אחד לא נתן לי את מה שחיפשתי"
+  HARD REQUIREMENTS for Beat 1:
+    - MUST contain ONE of: "הלכתי" / "הייתי" / "ניסיתי" / "אכלתי" / "התאמנתי"
+    - MUST NOT contain "${name}"
+    - MUST recount a prior bad experience at competing businesses (the customer's pain)
+
+BEAT 2 — DISCOVERY OF THIS BUSINESS (voiceover_scene2, ~6–9 Hebrew words):
+  TEMPLATE — pick one and adapt:
+    - "עד שהגעתי ל${name} ופשוט הבנתי שמצאתי את המקום"
+    - "עד שגיליתי את ${name} ופשוט הכל היה שונה"
+    - "ואז הגעתי ל${name} ופתאום הבנתי איך אמור להיות"
+  HARD REQUIREMENTS for Beat 2:
+    - MUST START with one of: "עד שהגעתי ל" / "עד שגיליתי את" / "ואז הגעתי ל"
+    - MUST contain "${name}"
+
+BEAT 3 — WHAT MAKES ${name} SPECIAL (voiceover_scene3, ~14–20 Hebrew words):
+  - One sentence on 2-3 specific things ${name} does well (professionalism, atmosphere, results) that resolve the Beat-1 pain
+  - Concrete and specific — drawn from the business description, not generic praise
+  HARD REQUIREMENTS for Beat 3:
+    - MUST NOT contain "עד שגיליתי" / "ואז גיליתי" / "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות"
+
+BEAT 4 — CTA TEMPLATE (voiceover_scene4, ~8–11 Hebrew words):
+  TEMPLATE — pick one:
+    - "תיכנסו ל${name}, תקבעו תור עכשיו - {short promise}"
+    - "תבואו ל${name}, תסמכו עליי - לא תתחרטו"
+    - "תקבעו תור ב${name} עכשיו, אני מבטיח/ה לכם"
+  HARD REQUIREMENTS for Beat 4:
+    - MUST contain ONE of: "תקבעו תור" / "תבואו" / "תיכנסו"
+    - MUST contain "${name}"
+
+SANITY CHECK before returning:
+  1. Beat 1 contains "הלכתי" / "הייתי" / "ניסיתי" / "אכלתי" / "התאמנתי", does NOT mention "${name}".
+  2. Beat 2 STARTS with "עד שהגעתי ל" / "עד שגיליתי את" / "ואז הגעתי ל" AND contains "${name}".
+  3. Beat 3 lists concrete special qualities; no forbidden phrases.
+  4. Beat 4 contains "תקבעו תור" / "תבואו" / "תיכנסו" + "${name}".
+
+VISUAL 4-SCENE STRUCTURE (matches the 4 voiceover beats):
 - Scene 1 (👋 הכנסה): avatar wearing ${uniform}, inside the ${venue}, starting their workday — putting on apron / standing behind the counter / arriving at the workspace. Mouth closed. Voiceover HOOK.
 - Scene 2 (✨ פעולה): EXTREME CLOSE-UP of ${closeUp}. NO face, NO full person — only hands and tools/products. Uses business/product reference photos for authenticity. Voiceover describes the craft.
 - Scene 3 (🏪 בפעולה): avatar ${scene3Action} inside the ${venue}. Mouth closed, focused professional expression. Voiceover describes the story / unique value of ${name}.
@@ -1635,11 +1705,11 @@ NEW 4-SCENE STRUCTURE:
   * generic service → the OUTCOME moment — finished work handed to a satisfied customer (customer from behind or partial), branded van / signage / tools visible, golden-hour exterior
 The lighting for scene 4 comes from the context (golden-hour terrace, warm dining-room pendants, mid-day natural daylight through the shopfront) — NOT generic "warm interior". The avatar may appear alongside their customers/workspace being USED, not alone by the sign.
 
-VOICEOVER TIMING — STRICT:
-- Scene 1: ~10 Hebrew words — hook about ${name}, third-person narration.
-- Scene 2: ~12 Hebrew words — describe the craft/action shown in the close-up.
-- Scene 3: ~16 Hebrew words — unique value / story of ${name}, what customers get.
-- Scene 4: ~10 Hebrew words — direct CTA: "בואו ל${name}", "תזמינו עכשיו", "אתם חייבים לנסות".
+VOICEOVER TIMING — STRICT (matches the BEAT word budgets above):
+- Scene 1 / BEAT 1: ~10–14 Hebrew words — customer prior-experience template.
+- Scene 2 / BEAT 2: ~6–9 Hebrew words — discovery of ${name}.
+- Scene 3 / BEAT 3: ~14–20 Hebrew words — what makes ${name} special.
+- Scene 4 / BEAT 4: ~8–11 Hebrew words — CTA naming ${name}.
 
 SENTENCE COMPLETENESS (CRITICAL):
 כל משפט חייב להסתיים בתוך הסצנה שלו. כל סצנה = משפט שלם או שניים שלמים.
@@ -1664,10 +1734,12 @@ Kling has an "object drift" failure mode where the signature item (the dish bein
 
 Return ONLY valid JSON (no markdown):
 {
-  "voiceover_scene1": "~10 Hebrew words — third-person hook about ${name}",
-  "voiceover_scene2": "~12 Hebrew words — describe the craft/action shown in the hands-only close-up",
-  "voiceover_scene3": "~16 Hebrew words — unique value / story of ${name}, what customers experience",
-  "voiceover_scene4": "~10 Hebrew words — direct CTA to visit ${name}",
+  "category": "one of: barbershop / salon / beauty_clinic / restaurant / fitness / service (the value you chose in STEP 0)",
+  "mode": "business",
+  "voiceover_scene1": "BEAT 1 — TEMPLATE 'הלכתי / הייתי / ניסיתי / אכלתי / התאמנתי לכבר מלא {category-plural} {negative outcome}'. ~10–14 Hebrew words. Must NOT contain '${name}'.",
+  "voiceover_scene2": "BEAT 2 — TEMPLATE 'עד שהגעתי ל${name}...' / 'עד שגיליתי את ${name}...' / 'ואז הגעתי ל${name}...'. Must START with one of those openers and contain '${name}'.",
+  "voiceover_scene3": "BEAT 3 — 2-3 specific things ${name} does well that resolve the Beat-1 pain. ~14–20 Hebrew words. Must NOT contain 'עד שגיליתי' / 'ואז גיליתי' / 'פתרון חכם' / 'פתרון מושלם' / 'התוצאות מטורפות'.",
+  "voiceover_scene4": "BEAT 4 — CTA template 'תקבעו תור ב${name}' / 'תבואו ל${name}' / 'תיכנסו ל${name}'. Must contain '${name}' + a CTA verb.",
   "setting": "one-line description of the ${venue}",
   "scenes": [
     {
@@ -1728,6 +1800,27 @@ Return ONLY valid JSON (no markdown):
     const extraInstruction = `\n\nPREVIOUS ATTEMPT HAD SENTENCES SPLIT ACROSS SCENES. REWRITE so each voiceover_sceneN is a SELF-CONTAINED grammatically complete Hebrew sentence ending with . ? or ! — and no scene starts with a word that depends on the previous scene.`;
     const retry = parseResponse(await callClaude(extraInstruction));
     if (retry) parsed = retry;
+  }
+  // Validate the strict 4-beat structure (BUSINESS mode). Up to 2 retries,
+  // then log a warning and pass through whatever was last produced.
+  if (parsed) {
+    const MAX_BEAT_REGEN = 2;
+    let lastViolations = [];
+    for (let attempt = 0; attempt <= MAX_BEAT_REGEN; attempt++) {
+      const violations = beatStructureViolations(parsed.scenes, name, { mode: 'business' });
+      lastViolations = violations;
+      if (violations.length === 0) break;
+      if (attempt === MAX_BEAT_REGEN) break;
+      console.warn(`[generateBusinessScript] 4-beat structure violations (regen ${attempt + 1}/${MAX_BEAT_REGEN}):`, violations);
+      const bullets = violations.map((v, i) => `  ${i + 1}. ${v}`).join('\n');
+      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT BUSINESS STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules:\n- voiceover_scene1 = BEAT 1 — must contain "הלכתי" / "הייתי" / "ניסיתי" / "אכלתי" / "התאמנתי" describing prior bad experiences at COMPETING businesses, never names "${name}".\n- voiceover_scene2 = BEAT 2 — must START with "עד שהגעתי ל" / "עד שגיליתי את" / "ואז הגעתי ל" AND contain "${name}".\n- voiceover_scene3 = BEAT 3 — 2-3 concrete special qualities of "${name}". NEVER contains "עד שגיליתי" / "ואז גיליתי" / "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות".\n- voiceover_scene4 = BEAT 4 — CTA verb ("תקבעו תור" / "תבואו" / "תיכנסו") + "${name}".`;
+      const retry = parseResponse(await callClaude(extraInstruction));
+      if (retry) parsed = retry;
+      else break;
+    }
+    if (lastViolations.length > 0) {
+      console.warn(`[generateBusinessScript] 4-beat structure still violated after ${MAX_BEAT_REGEN} regens — passing through with violations:`, lastViolations);
+    }
   }
   return parsed;
 }
