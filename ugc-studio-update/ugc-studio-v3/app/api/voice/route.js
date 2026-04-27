@@ -1,4 +1,5 @@
 import { prepareHebrewForTTS, remapWordTimestamps } from '../../../lib/hebrew-tts.js'
+import { supabase } from '../../../lib/supabase'
 
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY
 
@@ -38,7 +39,7 @@ export async function POST(req) {
     if (!ELEVEN_KEY) {
       return Response.json({ error: 'ElevenLabs key missing' }, { status: 500 })
     }
-    const { text, voiceId } = await req.json()
+    const { text, voiceId, jobId } = await req.json()
     if (!text || typeof text !== 'string') {
       return Response.json({ error: 'text required' }, { status: 400 })
     }
@@ -49,7 +50,7 @@ export async function POST(req) {
       return Response.json({ error: 'voiceId required' }, { status: 400 })
     }
     const voice = voiceId
-    console.log('[/api/voice] using voiceId:', voice)
+    console.log('[/api/voice] using voiceId:', voice, 'jobId:', jobId || '(none)')
 
     // Hebrew preprocessing — produce TWO versions:
     //   ttsText: goes to ElevenLabs (includes Latin transliterations for
@@ -93,6 +94,45 @@ export async function POST(req) {
     const ttsWordTimestamps = buildWordTimestamps(alignment)
     const wordTimestamps = remapWordTimestamps(ttsWordTimestamps, subtitleText)
     const duration = durationFromAlignment(alignment)
+
+    // Persist the new voiceover into jobs.result so a subsequent
+    // /api/agent/regenerate-scene call (which reads job.result and spreads it)
+    // sees the updated narration instead of the original. The frontend mirrors
+    // the same fields into React state — this just keeps the DB in sync so
+    // regenerate-scene and saved_edits flows don't revert to the old voice.
+    // Backward compatible: when jobId is omitted the route behaves as before.
+    if (jobId && supabase) {
+      try {
+        const { data: job, error: loadErr } = await supabase
+          .from('jobs')
+          .select('result')
+          .eq('id', jobId)
+          .single()
+        if (loadErr || !job) {
+          console.warn('[/api/voice] DB sync skipped — job not found:', jobId, loadErr?.message)
+        } else {
+          const prevResult = (job.result && typeof job.result === 'object') ? job.result : {}
+          const newResult = {
+            ...prevResult,
+            hebrewVoice: subtitleText,
+            audioBase64: base64,
+            wordTimestamps,
+            voiceDuration: duration,
+          }
+          const { error: updateErr } = await supabase
+            .from('jobs')
+            .update({ result: newResult })
+            .eq('id', jobId)
+          if (updateErr) {
+            console.warn('[/api/voice] DB sync failed (non-fatal):', updateErr.message)
+          } else {
+            console.log('[/api/voice] DB sync OK for job', jobId)
+          }
+        }
+      } catch (e) {
+        console.warn('[/api/voice] DB sync exception (non-fatal):', e?.message)
+      }
+    }
 
     return Response.json({
       base64,

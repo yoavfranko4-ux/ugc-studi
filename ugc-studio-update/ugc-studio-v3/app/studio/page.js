@@ -819,7 +819,10 @@ export default function Home() {
       const vRes = await fetch('/api/voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voiceId: effectiveVoiceId })
+        // Pass jobId so the route can sync the new voiceover into jobs.result
+        // — otherwise a later regenerate-scene reads stale audio/text from DB
+        // and overwrites the live React state.
+        body: JSON.stringify({ text, voiceId: effectiveVoiceId, jobId })
       })
       if (!vRes.ok) {
         const errBody = await vRes.json().catch(() => ({}))
@@ -1055,9 +1058,18 @@ export default function Home() {
         }
         return
       }
-      // Success: replace the new result, reset blob cache for this scene
-      // so the video-loading effect re-fetches just scene N.
-      setResult(body.result)
+      // Success: merge ONLY the regenerated frame/video back into result —
+      // do NOT replace the whole object with body.result. The DB-side result
+      // can lag behind the live state when the user just re-recorded the
+      // voiceover (or tweaked anything else client-side), so a full replace
+      // would clobber hebrewVoice / audioBase64 / wordTimestamps /
+      // subtitleSegments. /api/voice now syncs to DB on rerecord, but this
+      // merge is defense-in-depth for the rerecord-then-regenerate race.
+      setResult(r => ({
+        ...r,
+        frames: body.result.frames,
+        videos: body.result.videos,
+      }))
       setRegenCounts(body.regenerations_used || {})
       setVideoBlobUrls(prev => {
         const next = [...prev]
