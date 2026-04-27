@@ -649,6 +649,24 @@ NEVER describe smiles, laughs, or reactions that open the mouth.
 (d) Scene-to-gesture mapping: scene 1 (pain) leans on brow furrow + weight shift + eye drift + mid-thought hesitation; scene 3 (solution) leans on eyebrow raise + chin lift + glance down to product + grip adjustment; scene 4 (result) leans on eye-softening + subtle nod + closed-lip half-smile + brief off-screen glance.
 (e) END every kling_prompt with the phrase from rule 9 AND append: "no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays" — Kling sometimes bakes captions into output if not explicitly excluded.
 
+ACTION DESCRIPTION RULES (חשוב מאוד):
+
+1. תיאור פעולה = כוונה + תוצאה, לא ביו-מכניקה.
+   ✅ נכון: 'מסובב את הפקק, מניח את הבקבוק על השולחן'
+   ❌ שגוי: 'יד ימין מסובבת פקק נגד כיוון השעון בעוד יד שמאל מייצבת את הבסיס'
+
+2. רגשות = מיקרו-ביטוי פיזי, לא הצהרה.
+   ✅ נכון: 'עיניים נפתחות, פינת הפה מתרוממת'
+   ❌ שגוי: 'נראית נרגשת'
+
+3. תוצאה ולא רצף הרס.
+   ✅ נכון: 'הפקק קופץ, נוזל ניתז החוצה'
+   ❌ שגוי: 'הפקק משתחרר, הנוזל יוצא בזווית 30 מעלות, טיפות מתפזרות ברדיוס'
+
+4. רק מה שרואים או שומעים.
+   ❌ אסור: 'המוצר ריחני' (לא רואים ריח)
+   ✅ מותר: 'אגלי מים על הבקבוק הקר, התווית מבריקה'
+
 Return ONLY valid JSON (no markdown):
 {
   "category": "one of: accessory / beauty / health / fashion / home / food (the value you chose in STEP 0)",
@@ -1738,6 +1756,24 @@ Kling has an "object drift" failure mode where the signature item (the dish bein
 (ii) NEGATIVE LOCK: "no tool or product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no dish/garment/finished-work becoming a different object, no identity drift, no gradual transformation into a similar-but-different item."
 (iii) For scene 2 (close-up of hands+tools), emphasise: "the tools and the finished craft are the anchor — camera and light may shift, but the tools and item NEVER do."
 (iv) For scene 4 (business-success context), emphasise: "signage text and logo remain identical frame-to-frame; finished dishes/garments/tools/branded elements stay rigid."
+
+ACTION DESCRIPTION RULES (חשוב מאוד):
+
+1. תיאור פעולה = כוונה + תוצאה, לא ביו-מכניקה.
+   ✅ נכון: 'מסובב את הפקק, מניח את הבקבוק על השולחן'
+   ❌ שגוי: 'יד ימין מסובבת פקק נגד כיוון השעון בעוד יד שמאל מייצבת את הבסיס'
+
+2. רגשות = מיקרו-ביטוי פיזי, לא הצהרה.
+   ✅ נכון: 'עיניים נפתחות, פינת הפה מתרוממת'
+   ❌ שגוי: 'נראית נרגשת'
+
+3. תוצאה ולא רצף הרס.
+   ✅ נכון: 'הפקק קופץ, נוזל ניתז החוצה'
+   ❌ שגוי: 'הפקק משתחרר, הנוזל יוצא בזווית 30 מעלות, טיפות מתפזרות ברדיוס'
+
+4. רק מה שרואים או שומעים.
+   ❌ אסור: 'המוצר ריחני' (לא רואים ריח)
+   ✅ מותר: 'אגלי מים על הבקבוק הקר, התווית מבריקה'
 
 Return ONLY valid JSON (no markdown):
 {

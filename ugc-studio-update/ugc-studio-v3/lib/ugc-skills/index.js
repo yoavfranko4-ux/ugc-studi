@@ -280,6 +280,16 @@ export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
   ];
   if (!opts.scene4Context) negatives.push('NEVER in a car, NEVER in a vehicle');
   negatives.push('no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays');
+  // Reflection negatives — Kling's geometry breaks anytime a mirror, shiny
+  // floor, or glass surface tries to reflect the avatar/product. The
+  // reflection comes back warped, which is one of the strongest "AI vibe"
+  // tells. Forbid all reflective surfaces explicitly.
+  negatives.push('no reflections, no mirrors, no glass reflections, no reflective screens, no puddles, no shiny floors that mirror objects');
+  // Antislop list — these adjectives bias the generator toward a glossy
+  // commercial "AI render" aesthetic even when they aren't in the positive
+  // prompt. Stating them as negatives pulls the output back toward an
+  // amateur phone-clip feel.
+  negatives.push('not cinematic, not breathtaking, not stunning, not flawless, not seamless, not effortless, no dramatic lighting, no over-saturated colors, no studio polish');
   parts.push(`NEGATIVES: ${negatives.join(', ')}.`);
 
   // Audio + iPhone-footage aesthetic. Kept as a trailing tail so it's the last
@@ -296,7 +306,9 @@ export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
     console.warn(`[buildKlingPrompt] EMERGENCY TRIM: ${finalPrompt.length} → ${KLING_HARD_LIMIT}`);
 
     const minimalRealism = 'REALISM: handheld iPhone selfie wobble, real human texture, candid not posed, NOT AI-generated, real unretouched skin.';
-    const minimalNegatives = 'NEGATIVES: no face distortion, stable anatomy, exactly 2 arms 2 hands, no extra limbs, no floating hands, no AI artifacts, consistent product appearance.';
+    // Even on the trim path, keep the anti-reflection + antislop negatives —
+    // these are the strongest "AI vibe" tells, so they earn the budget.
+    const minimalNegatives = 'NEGATIVES: no face distortion, stable anatomy, exactly 2 arms 2 hands, no extra limbs, no floating hands, no AI artifacts, consistent product appearance, no reflections, no mirrors, no shiny floors, not cinematic, not flawless, no dramatic lighting, no studio polish.';
     const productLockShort = productName
       ? `PRODUCT LOCK: ${productName} — identical color, shape, texture, embroidery to source image across all scenes. No morphing, no drift.`
       : '';
