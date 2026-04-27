@@ -358,6 +358,29 @@ function scenesHaveBrokenSentences(scenes) {
   return false;
 }
 
+// Soft sanity check on Rule 12 (KLING/NB scene consistency). Logs the
+// percentage of 5+ char tokens shared between nb_prompt and kling_prompt for
+// each scene; <15% means Claude likely skipped Rule 12 and Seedance will
+// invent a different environment than the still frame. Non-blocking — pure
+// telemetry so we can spot drift in production logs.
+function logNbKlingOverlap(scenes, label = '') {
+  if (!Array.isArray(scenes)) return;
+  scenes.forEach((scene, i) => {
+    const nbWords = new Set(((scene?.nb_prompt) || '').toLowerCase().match(/\b\w{5,}\b/g) || []);
+    const klingWords = new Set(((scene?.kling_prompt) || '').toLowerCase().match(/\b\w{5,}\b/g) || []);
+    if (!nbWords.size || !klingWords.size) return;
+    const overlap = [...nbWords].filter(w => klingWords.has(w)).length;
+    const ratio = overlap / Math.max(nbWords.size, 1);
+    const pct = (ratio * 100).toFixed(0);
+    const tag = label ? ` ${label}` : '';
+    if (ratio < 0.15) {
+      console.warn(`[Scene ${i + 1}]${tag} ⚠️ LOW NB/KLING overlap (${pct}%) — Claude may have skipped Rule 12`);
+    } else {
+      console.log(`[Scene ${i + 1}]${tag} NB/KLING overlap: ${pct}%`);
+    }
+  });
+}
+
 async function generateScript(productName, productDesc, applicationArea, hook, voiceGender) {
   if (!ANTHROPIC_KEY) return null;
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
@@ -649,6 +672,26 @@ NEVER describe smiles, laughs, or reactions that open the mouth.
 (d) Scene-to-gesture mapping: scene 1 (pain) leans on brow furrow + weight shift + eye drift + mid-thought hesitation; scene 3 (solution) leans on eyebrow raise + chin lift + glance down to product + grip adjustment; scene 4 (result) leans on eye-softening + subtle nod + closed-lip half-smile + brief off-screen glance.
 (e) END every kling_prompt with the phrase from rule 9 AND append: "no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays" — Kling sometimes bakes captions into output if not explicitly excluded.
 
+12. KLING/NB SCENE CONSISTENCY (CRITICAL):
+The kling_prompt describes the SAME PHYSICAL SCENE as the nb_prompt. Both must lock identical environment, surface, lighting, furniture, props, and aesthetic — only the camera/motion language differs (NB = still frame composition, Kling = motion physics).
+
+Required overlap between nb_prompt and kling_prompt:
+- Same surface / floor / furniture (e.g. "wooden table with marble veining, slight dust, no seamless backdrop")
+- Same lighting source and direction (e.g. "warm window daylight from left, mixed with cool overhead")
+- Same environmental clutter (e.g. "unmade bed, shopping bags scattered, water glass on nightstand")
+- Same aesthetic anchors (e.g. "no studio softbox, no catalog look, no seamless white, no professional set dressing")
+
+For Scene 2 (PRODUCT ONLY):
+The kling_prompt MUST explicitly include the same surface description, the same "no seamless backdrop, no catalog look, no studio softbox, no sky background" anti-patterns that nb_prompt has. This prevents Seedance from inventing a poster-like sky background.
+
+For Scene 3 (using product on self):
+The kling_prompt MUST forbid the same things nb_prompt forbids — especially "no mirror, no reflection, no glass surface, no reflective screen, no second figure". Repeat the anti-mirror language verbatim.
+
+For Scenes 1 and 4 (avatar in home):
+The kling_prompt MUST repeat the same room details — the bed/couch, the wall color, the window direction, the specific clutter mentioned in nb_prompt.
+
+Test: A viewer who sees the NB still and the Kling video side-by-side should recognize them as the SAME location, SAME lighting, SAME aesthetic. Not "related but different" — SAME.
+
 ACTION DESCRIPTION RULES:
 
 1. תיאור פעולה כרצף של מיקרו-תנועות — לא פוזה סטטית.
@@ -773,6 +816,7 @@ Return ONLY valid JSON (no markdown):
     const retry = parseResponse(await callClaude(extraInstruction));
     if (retry) parsed = retry;
   }
+  if (parsed?.scenes) logNbKlingOverlap(parsed.scenes, '[generateScript]');
   return parsed;
 }
 
@@ -1806,6 +1850,26 @@ EVERY nb_prompt for scenes with the avatar MUST include: "silent, NOT speaking, 
 
 END every Kling prompt with: "silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, business appearance unchanged from reference"
 
+KLING/NB SCENE CONSISTENCY (CRITICAL):
+The kling_prompt describes the SAME PHYSICAL SCENE as the nb_prompt. Both must lock identical venue, surface, lighting, fixtures, props, signage, and aesthetic — only the camera/motion language differs (NB = still frame composition, Kling = motion physics).
+
+Required overlap between nb_prompt and kling_prompt:
+- Same venue surfaces / fixtures / floor (e.g. "marble counter, brass fixtures, exposed-brick wall")
+- Same lighting source and direction (e.g. "warm pendant lights overhead, daylight through the shopfront from left")
+- Same environmental details (e.g. "tools laid out on the station, finished work on the pass, customers softly out of focus behind")
+- Same aesthetic anchors (e.g. "no studio softbox, no catalog look, no seamless backdrop, no commercial set dressing")
+
+For Scene 2 (BUSINESS SHOWCASE — hands+tools close-up of the craft):
+The kling_prompt MUST explicitly include the same surface, the same tools, the same "no seamless backdrop, no studio softbox, no catalog look" anti-patterns the nb_prompt has. This prevents Seedance from inventing a generic stock-photo background.
+
+For Scene 3 (avatar performing the service / craft):
+The kling_prompt MUST repeat the same venue details — the station, the workspace clutter, the fixtures, the lighting source. Forbid the same things nb_prompt forbids (e.g. "no mirror reflection of the camera, no second crew member visible").
+
+For Scenes 1 and 4 (avatar in the venue):
+The kling_prompt MUST repeat the same room details — the bar/counter/station, the wall finish, the window direction, the signage / branded element, the specific props mentioned in nb_prompt.
+
+Test: A viewer who sees the NB still and the Kling video side-by-side should recognize them as the SAME venue, SAME lighting, SAME aesthetic. Not "related but different" — SAME.
+
 BUSINESS PRODUCT / CRAFT LOCK — CRITICAL (MANDATORY FOR SCENES 2, 3, 4):
 Kling has an "object drift" failure mode where the signature item (the dish being plated, the garment being styled, the tool being used, the branded signage) slowly morphs into a different object over the 5–8s video. EVERY kling_prompt for scenes 2, 3, 4 MUST include a lock block, BEFORE the ending phrase:
 (i) POSITIVE LOCK: "The signature items (tools, finished dish/garment/styling, branded signage, finished work) maintain EXACT same appearance throughout the entire video — same shape, color, logo, text, materials, position. They are rigid physical objects that do not morph. Every frame is visually identical in product identity to the reference."
@@ -1923,5 +1987,6 @@ Return ONLY valid JSON (no markdown):
       console.warn(`[generateBusinessScript] 4-beat structure still violated after ${MAX_BEAT_REGEN} regens — passing through with violations:`, lastViolations);
     }
   }
+  if (parsed?.scenes) logNbKlingOverlap(parsed.scenes, '[generateBusinessScript]');
   return parsed;
 }
