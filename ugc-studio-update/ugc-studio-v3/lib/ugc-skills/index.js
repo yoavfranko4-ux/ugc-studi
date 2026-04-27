@@ -51,6 +51,28 @@ import {
 // buffer below that for safety so the request never gets rejected.
 const KLING_HARD_LIMIT = 2400;
 
+// Realism + negatives blocks for buildKlingPrompt. Authored as multi-line
+// template literals so they read like a brief, then trim()'d before use.
+//
+// REALISM_ANCHORS_KLING — "phone-native handheld take" frames the whole
+// generation as amateur smartphone capture. The earlier wording ("handheld
+// iPhone selfie wobble") only addressed the camera shake; this version
+// addresses the *aesthetic* — sensor grain, no color grade, imperfect light,
+// real-world environment with everyday details. Kling reads this as "this is
+// a clip a person filmed", not "this is a render that should look polished".
+const REALISM_ANCHORS_KLING = `
+shot in a phone-native handheld take, authentic handheld micro-shake, slightly grainy phone sensor feel, no stylized color grade, natural imperfect light, eye-level framing, amateur smartphone footage aesthetic, real-world environment with everyday details visible, ambient room tone
+`.trim();
+
+// NEGATIVES_KLING — strongest anti-AI cues bundled together. The prior list
+// was anatomy-heavy; this version leads with the "AI vibe" tells (reflections,
+// studio polish, dramatic lighting, antislop adjectives, perfect symmetry).
+// Real human faces are mildly asymmetric, so "no perfect symmetry" pulls the
+// generator off its default centered/mirrored bias.
+const NEGATIVES_KLING = `
+no AI artifacts, no face distortion, stable anatomy, no unnatural movement, no reflections, no mirrors, no glass reflections, no reflective screens, no puddles, no studio polish, no dramatic lighting, no over-saturated colors, no cinematic color grade, no lens flares, not breathtaking, not stunning, not flawless, not seamless, not effortless, no perfect symmetry
+`.trim();
+
 // Environment dictionaries live here (rather than in their own file) because
 // they're small and only consumed by the orchestrator.
 //
@@ -259,38 +281,25 @@ export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
     parts.push(getProductIntegrationForName(productName));
   }
 
-  // Realism anchors — short, Kling-friendly versions. Person + non-person
-  // shots both get the handheld iPhone wobble + anti-AI cues.
-  const realism = hasPerson
-    ? 'REALISM: handheld iPhone selfie wobble, real human texture, candid not posed, not AI-generated feel, real unretouched skin with natural pores and asymmetry, warm natural indoor lighting, flat washed-out color, low saturation, no beauty filter, no studio lighting, no LUT, looks like a real phone clip not a render.'
-    : 'REALISM: handheld iPhone back-camera wobble, slight natural shake, ambient room lighting, flat washed-out color, real surface texture, not a render, not a catalog shot.';
+  // Realism anchors — phone-native handheld framing. Tells Kling that the
+  // whole take is amateur smartphone footage in a real-world environment, not
+  // a stylized render. Same string for person + product-only shots — the
+  // language is generic enough to read either way.
+  const realism = `REALISM: ${REALISM_ANCHORS_KLING}`;
   parts.push(realism);
 
-  // Negatives — short Kling list. Anatomy + product consistency + the two
-  // hard product-frame rules (no phone, no vehicle for non-car shots).
+  // Negatives — Kling-friendly list. Anatomy + product-frame hard rules +
+  // the upgraded anti-AI block (reflections, studio polish, antislop adjectives,
+  // perfect-symmetry breaker).
   const negatives = [
-    'no face distortion',
-    'stable face anatomy',
-    'no AI artifacts',
-    'no morphing',
+    'NEVER show a phone or mobile device in any scene',
     'no melting hands',
     'no extra limbs',
     'consistent product appearance across every frame',
-    'NEVER show a phone or mobile device in any scene',
   ];
   if (!opts.scene4Context) negatives.push('NEVER in a car, NEVER in a vehicle');
   negatives.push('no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays');
-  // Reflection negatives — Kling's geometry breaks anytime a mirror, shiny
-  // floor, or glass surface tries to reflect the avatar/product. The
-  // reflection comes back warped, which is one of the strongest "AI vibe"
-  // tells. Forbid all reflective surfaces explicitly.
-  negatives.push('no reflections, no mirrors, no glass reflections, no reflective screens, no puddles, no shiny floors that mirror objects');
-  // Antislop list — these adjectives bias the generator toward a glossy
-  // commercial "AI render" aesthetic even when they aren't in the positive
-  // prompt. Stating them as negatives pulls the output back toward an
-  // amateur phone-clip feel.
-  negatives.push('not cinematic, not breathtaking, not stunning, not flawless, not seamless, not effortless, no dramatic lighting, no over-saturated colors, no studio polish');
-  parts.push(`NEGATIVES: ${negatives.join(', ')}.`);
+  parts.push(`NEGATIVES: ${NEGATIVES_KLING}, ${negatives.join(', ')}.`);
 
   // Audio + iPhone-footage aesthetic. Kept as a trailing tail so it's the last
   // thing Kling sees — biases the generator toward silent, low-contrast,
@@ -305,10 +314,11 @@ export function buildKlingPrompt(klingPromptRaw, beat, productName, opts = {}) {
   if (finalPrompt.length > KLING_HARD_LIMIT) {
     console.warn(`[buildKlingPrompt] EMERGENCY TRIM: ${finalPrompt.length} → ${KLING_HARD_LIMIT}`);
 
-    const minimalRealism = 'REALISM: handheld iPhone selfie wobble, real human texture, candid not posed, NOT AI-generated, real unretouched skin.';
-    // Even on the trim path, keep the anti-reflection + antislop negatives —
-    // these are the strongest "AI vibe" tells, so they earn the budget.
-    const minimalNegatives = 'NEGATIVES: no face distortion, stable anatomy, exactly 2 arms 2 hands, no extra limbs, no floating hands, no AI artifacts, consistent product appearance, no reflections, no mirrors, no shiny floors, not cinematic, not flawless, no dramatic lighting, no studio polish.';
+    // On the trim path, we KEEP the full upgraded REALISM + NEGATIVES blocks —
+    // they're the entire point of the anti-AI pass. Anything that gets cut
+    // comes out of PRODUCT_LOCK / aesthetic tail / raw scene description.
+    const minimalRealism = `REALISM: ${REALISM_ANCHORS_KLING}`;
+    const minimalNegatives = `NEGATIVES: ${NEGATIVES_KLING}, NEVER show a phone or mobile device, no melting hands, no extra limbs, consistent product appearance.`;
     const productLockShort = productName
       ? `PRODUCT LOCK: ${productName} — identical color, shape, texture, embroidery to source image across all scenes. No morphing, no drift.`
       : '';
