@@ -695,6 +695,24 @@ The kling_prompt MUST repeat the same room details — the bed/couch, the wall c
 
 Test: A viewer who sees the NB still and the Kling video side-by-side should recognize them as the SAME location, SAME lighting, SAME aesthetic. Not "related but different" — SAME.
 
+14. SCENE 3 TOOL/INSTRUMENT GUARD (CRITICAL):
+When the product description mentions tools or instruments that are NOT shown in the product reference image (like toothbrush, applicator, sponge, brush, q-tip, scoop, spatula), DO NOT mention them in the kling_prompt.
+
+Seedance only has the product reference — it cannot visualize tools accurately, and forcing them creates artifacts (finger instead of toothbrush, hand morphing, product changing shape).
+
+Instead, translate the action to be product-only:
+
+❌ "uses toothbrush dipped in powder, brushes teeth"
+✅ "carefully applies the powder directly with gentle finger motions to the teeth surface"
+
+❌ "scoops cream with spatula, applies to face"
+✅ "dips fingertip into the cream, smooths it onto skin"
+
+❌ "uses applicator brush to spread serum"
+✅ "drops serum onto fingertips, dabs onto skin"
+
+The narration in the voiceover_scene3 CAN still mention the tool ("מרטיבים מברשת שיניים, טובלים באבקה") because that's audio only — but the kling_prompt visual MUST focus on what Seedance can actually render with the references it has (avatar + product only).
+
 ACTION DESCRIPTION RULES:
 
 1. תיאור פעולה כרצף של מיקרו-תנועות — לא פוזה סטטית.

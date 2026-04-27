@@ -265,14 +265,14 @@ export function generateUGCPrompt({
 const SEEDANCE_HARD_LIMIT = 2400;
 
 const SEEDANCE_CAMERA_PHYSICS = {
-  1: "Phone held in her right hand at arm's length, selfie angle, slightly below eye level, tilted ~10 degrees off-axis. Constant low-level hand tremor — micro-shakes from holding the phone stationary. Occasional very slight framing drift as hand adjusts grip. No walking bob — she's seated.",
-  2: "The phone is propped on a small dresser/shelf facing the scene. The camera is completely still — no movement, no shake, no drift. Product alone in frame, no person, no hands.",
+  1: "Phone held in her right hand at arm's length, selfie angle, slightly below eye level, tilted ~12-15 degrees off-axis (NOT centered, NOT symmetric). Constant low-level hand tremor — irregular micro-shakes (not smooth pattern). Frequent small framing drift as hand adjusts grip every 1-2 seconds. Occasional brief AUTO-FOCUS HUNT when face moves. Subtle skin texture visible — natural pores, faint under-eye shadow, slight asymmetry between left and right side of face. NO airbrushed look, NO smooth skin. Real iPhone front camera limitations: slight noise in shadows, slight chromatic edge fringing on hair, mild lens softness at edges of frame. She's seated — no walking bob.",
+  2: "The phone is propped on a small dresser/shelf facing the scene. Static phone position but VERY subtle ambient motion — gentle light shift through window, soft parallax as warm air moves the camera ~1mm, slight focus breathing. Product alone in frame, no person, no hands. The shot is ALIVE not frozen — like a real iPhone left propped recording.",
   3: "Phone in her left hand at arm's length, selfie angle. Hand tremor from the phone-hand throughout, right hand free to use the product. Slight reframe when product moves — phone-hand tilts ~5 degrees to fit action in shot. Brief focus hunting between her face and the product when it enters frame.",
   4: "Phone in her right hand at arm's length, selfie angle, slightly below eye level. Tremor only, no walking bob. Marginal drift as arm relaxes. Slight auto-exposure adjustment when product comes into frame."
 };
 
 const SEEDANCE_EXPRESSION_DIRECTION = {
-  1: "Expression direction: eyes drift off-camera then back, brow furrows lightly, lips pressed thin between phrases, occasional small head shakes, free hand brushes hair back, shoulders sag slightly, single defeated half-shrug.",
+  1: "Expression direction: eyes drift off-camera then back (not staring at lens), micro-glances down and sideways, brow furrows asymmetrically (one side more than other), lips pressed thin between phrases with slight downturn at corners, occasional small head shakes, free hand brushes hair back or rubs neck, shoulders sag slightly, single defeated half-shrug, natural blinks every 2-3 seconds, slight nostril flare on emphasized words. Real human imperfection: tiny throat-clearing motion, brief lip-bite, eye-rub mid-sentence.",
   // Scene 2 has no person at all — drop the expression block. Anything that
   // mentions "she", "her face", or "free hand" pulls Seedance back toward
   // generating a random woman to fill the avatar slot.
@@ -333,9 +333,13 @@ export function buildSeedancePrompt(rawPromptIn, beat, productName, opts = {}) {
     ? "Style: UGC, propped phone, completely static camera. Organic and real."
     : "Style: UGC, organic, realistic phone footage. Slightly grainy phone sensor feel, no stylized color grade, low contrast, flat color grading, desaturated tones, slightly washed out, eye-level framing, real-world environment with everyday details visible.";
 
-  const productLockBlock = (beatKey !== 1 && productName)
+  let productLockBlock = (beatKey !== 1 && productName)
     ? `PRODUCT LOCK: the product (${productName}) appearing in this scene is IDENTICAL to the source image — same exact color, same exact shape, same exact texture, same exact label and details. Do NOT alter product appearance. Product is anchored in frame.`
     : '';
+
+  if (beatKey === 3 && productName) {
+    productLockBlock += `\n\nSCENE 3 EXTRA LOCK: As the avatar interacts with the product, the product's shape, label text, color, and proportions must remain EXACTLY as in the reference image — no morphing during action, no label text change, no color shift mid-scene. The product is a rigid physical object that does not deform.`;
+  }
 
   // Per-scene negative tweak: scene 4 may legitimately show a vehicle for car
   // products; otherwise add the no-vehicle rule onto the base negatives line.
