@@ -76,32 +76,101 @@ function Nav() {
 }
 
 /* ---------- HERO ---------- */
-const HERO_VIDEOS = [
-  { src: '/hero-videos/perfume.mp4',    label: 'בושם שמש',         emoji: '🌸' },
-  { src: '/hero-videos/barbershop.mp4', label: 'ברבר שופ הצמרת',  emoji: '💈' },
-  { src: '/hero-videos/whitening.mp4',  label: 'אבקת הלבנה',       emoji: '✨' },
+const PHONE_VIDEOS = [
+  {
+    src: '/hero-videos/whitening.mp4',
+    label: <>אבקת <span className="accent">הלבנה</span><br />חיוך לבן ב-30 שניות</>,
+    badge: '● אבקת הלבנה',
+    layer: 'l1',
+  },
+  {
+    src: '/hero-videos/perfume.mp4',
+    label: <>בושם <span className="accent">שמש</span><br />שנשאר 12 שעות</>,
+    badge: '● בושם שמש',
+    layer: 'l2',
+  },
+  {
+    src: '/hero-videos/barbershop.mp4',
+    label: <>ברבר שופ <span className="accent">הצמרת</span><br />במרכז העיר</>,
+    badge: '● ברבר שופ הצמרת',
+    layer: 'l3',
+  },
 ]
 
-function HeroVideoGrid() {
+// Start each hero phone video at scene 3 (action shot at 10s) and loop
+// the 10s-14s window so we never show the early "pain" frames.
+const SCENE_START = 10
+const SCENE_END = 14
+
+function PhoneVideoStack() {
+  const [idx, setIdx] = useState(0)
+  const refs = useRef([])
+
+  // Seed scene-3 start on mount so the first paint is already in the action.
+  useEffect(() => {
+    const first = refs.current[0]
+    if (first) {
+      try {
+        first.currentTime = SCENE_START
+        first.play().catch(() => {})
+      } catch (_e) {}
+    }
+  }, [])
+
+  // Cycle every 4s.
+  useEffect(() => {
+    const t = setInterval(() => setIdx(i => (i + 1) % PHONE_VIDEOS.length), 4000)
+    return () => clearInterval(t)
+  }, [])
+
+  // When a new clip becomes active, jump it to scene 3 and play.
+  useEffect(() => {
+    const v = refs.current[idx]
+    if (v) {
+      try {
+        v.currentTime = SCENE_START
+        v.play().catch(() => {})
+      } catch (_e) {}
+    }
+  }, [idx])
+
+  // Manual loop within the 10s-14s window — fires for every <video> regardless
+  // of active state, so off-screen clips also rewind back to scene 3.
+  const handleTimeUpdate = (e) => {
+    const v = e.currentTarget
+    if (v.currentTime >= SCENE_END || v.currentTime < SCENE_START) {
+      v.currentTime = SCENE_START
+    }
+  }
+
   return (
-    <div className="hero-video-grid" aria-label="דוגמאות סרטונים">
-      {HERO_VIDEOS.map(v => (
-        <figure key={v.src} className="hero-video-card">
+    <>
+      <div className="video-fallback" aria-hidden="true">
+        {PHONE_VIDEOS.map((v, i) => (
+          <div key={i} className={'layer ' + v.layer + (i === idx ? ' active' : '')}>
+            <div className="vbadge">{v.badge}</div>
+            <div className="vlabel">{v.label}</div>
+          </div>
+        ))}
+      </div>
+      <div className="video-stack">
+        {PHONE_VIDEOS.map((v, i) => (
           <video
+            key={v.src}
+            ref={el => { refs.current[i] = el }}
             src={v.src}
             autoPlay
             muted
             loop
             playsInline
-            preload="metadata"
+            preload="auto"
+            onLoadedMetadata={(e) => { e.currentTarget.currentTime = SCENE_START }}
+            onTimeUpdate={handleTimeUpdate}
+            className={i === idx ? 'active' : ''}
           />
-          <figcaption className="hvc-label">
-            <span className="hvc-emoji" aria-hidden="true">{v.emoji}</span>
-            <span>{v.label}</span>
-          </figcaption>
-        </figure>
-      ))}
-    </div>
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -174,7 +243,74 @@ function Hero() {
         </div>
       </div>
       <div className="right-stage">
-        <HeroVideoGrid />
+        <span className="label-mock-top">
+          <span className="accent">● LIVE</span> · STUDIO PREVIEW · AUTO-GENERATED
+        </span>
+        <span className="label-mock-bot">YOTZR.STUDIO · BUILD 026</span>
+        <span className="corner tl" /><span className="corner tr" />
+        <span className="corner bl" /><span className="corner br" />
+        <div className="float-chip c1">
+          <span className="sparkle" /><span className="accent">RENDERING</span> · 00:14
+        </div>
+        <div className="float-chip c2">
+          <span className="accent">✓</span> ELEVENLABS · עברית טבעית
+        </div>
+        <div className="float-chip c3">
+          <span className="sparkle" /><span>SOFI · SDK · v3.2</span>
+        </div>
+        <div className="studio-mock">
+          <div className="studio-bar">
+            <span className="dot r" /><span className="dot y" /><span className="dot g" />
+            <span className="path">studio.yotzr / <span className="accent">whitening-ad</span> / preview</span>
+          </div>
+          <div className="badge"><span className="rec" />REC · 00:17</div>
+          <div className="studio-grid">
+            <div className="studio-side">
+              <h5>אווטארים</h5>
+              <div className="item active"><span className="ic" />נועה</div>
+              <div className="item"><span className="ic" />דניאל</div>
+              <div className="item"><span className="ic" />מיה</div>
+              <h5 style={{ marginTop: 14 }}>קטעים</h5>
+              <div className="item alt"><span className="ic" />פתיח</div>
+              <div className="item active"><span className="ic" />הוק</div>
+              <div className="item alt"><span className="ic" />סיום</div>
+            </div>
+            <div className="studio-canvas">
+              <div className="studio-phone">
+                <PhoneVideoStack />
+                <div className="ui-icons">
+                  <span className="ui heart" /><span className="ui" /><span className="ui" />
+                </div>
+                <div className="progress" />
+              </div>
+              <div className="timeline">
+                <span className="seg active" />
+                <span className="seg active" />
+                <span className="seg partial" />
+                <span className="seg" />
+                <span className="seg" />
+                <span className="head" />
+              </div>
+            </div>
+            <div className="studio-right">
+              <div className="panel">
+                <h5>סקריפט · AI</h5>
+                <div className="row"><span>אורך</span><b>20s</b></div>
+                <div className="row"><span>שפה</span><span className="pill">HE-IL</span></div>
+                <div className="row"><span>טון</span><b>אנרגטי</b></div>
+              </div>
+              <div className="panel">
+                <h5>ייצוא</h5>
+                <div className="row"><span>פורמט</span><b>9:16</b></div>
+                <div className="row"><span>איכות</span><b>1080p</b></div>
+                <div className="row"><span>סטטוס</span><span className="pill">READY</span></div>
+              </div>
+              <div className="render-bar">
+                <span className="pulse-rim" />RENDERING · 73%
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   )
