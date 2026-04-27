@@ -1138,112 +1138,14 @@ async function runJob(jobId, body) {
       console.log(`    kling_prompt (first 150): ${(s?.kling_prompt || '').slice(0, 150)}`);
     });
 
-    // Voice + Frames in parallel (voice doesn't depend on frames)
-    const generateAllFrames = async () => {
-      const frames = [];
-      let prevFrame = null;
-      for (let i = 0; i < 4; i++) {
-        try {
-          const imageUrls = [];
-          // Scene 2 is "product only" in both modes — strictly NO avatar reference.
-          const isScene2 = i === 1;
-          const productOnly = isScene2 && videoType !== 'business';
-          if (videoType === 'business') {
-            // Business mode frame references
-            if (isScene2) {
-              // Scene 2 — showcase business using the business photos, NO avatar
-              preparedBusinessPhotos.slice(0, 3).forEach(u => imageUrls.push(u));
-            } else {
-              if (preparedAvatar) imageUrls.push(preparedAvatar);
-              if (prevFrame) imageUrls.push(prevFrame);
-              // Include a business photo for context in solution/CTA scenes
-              if (preparedBusinessPhotos.length > 0 && (i === 2 || i === 3)) {
-                imageUrls.push(preparedBusinessPhotos[0]);
-              }
-            }
-          } else {
-            // UGC mode frame references
-            if (isScene2) {
-              // Scene 2 — PURE product beauty shot. ONLY the product image; NO
-              // avatar, NO prev frame, nothing that could leak a person into the
-              // frame.
-              if (preparedProduct) imageUrls.push(preparedProduct);
-            } else {
-              if (preparedAvatar) imageUrls.push(preparedAvatar);
-              if (prevFrame) imageUrls.push(prevFrame);
-              if (preparedProduct && (i === 2 || i === 3)) imageUrls.push(preparedProduct);
-            }
-          }
-          // Scene 4 is the aspirational-result shot — tell generateNBFrame to
-          // drop the default lighting and vehicle-negative overlays so the
-          // contextual setting (candlelight / golden hour / car / beach) isn't
-          // fought by baked-in defaults.
-          const scene4Context = i === 3 && !productOnly;
-          const beat = i + 1;
-          const isBusinessCraft = videoType === 'business';
-          const actorInfo = mapAvatarToActorInfo(avatarUrl);
-          const actorId = actorInfo?.actorId || null;
-          const isFallbackActor = actorInfo?.isFallbackActor === true;
-
-          // The skill path is now the ONLY path for non-productOnly frames.
-          // The legacy fallback was removed because it skipped the mandatory
-          // realism anchors and produced AI-vibe frames. If actorId is null
-          // here we throw a clear error so the caller fixes the avatar map
-          // instead of silently shipping a broken frame.
-          if (!productOnly && !actorId) {
-            throw new Error(`[NB] Scene ${i + 1}: avatarUrl '${avatarUrl}' did not map to a known actorId (daniel|noa|maya). Refusing to fall back to the legacy path — fix mapAvatarToActorId or the upstream avatar selection.`);
-          }
-
-          const nbOpts = {
-            productOnly,
-            scene4Context,
-            actorId,
-            isFallbackActor,
-            beat,
-            productName,
-            isBusinessCraft
-          };
-
-          console.log('[NB] path decision', {
-            scene: i + 1,
-            path: productOnly ? 'product-only' : 'skill-driven',
-            actorId,
-            isFallbackActor,
-            beat,
-            productOnly,
-            avatarUrl: avatarUrl?.slice(0, 80)
-          });
-
-          // No legacy fallback. If the skill path fails we retry once with the
-          // same skill options (NanoBanana 403/429 handled inside generateNBFrame).
-          let frameUrl = null;
-          try {
-            frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, nbOpts);
-          } catch (err) {
-            console.warn(`[NB] Scene ${i + 1} first attempt failed (${err.message}); retrying once with same skill opts.`);
-            frameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, nbOpts);
-          }
-          frames.push(frameUrl);
-          if (frameUrl) prevFrame = frameUrl;
-        } catch (e) {
-          console.error(`[Job ${jobId}] Frame ${i+1} failed:`, e.message);
-          frames.push(null);
-        }
-      }
-      return frames;
-    };
-
-    const [voiceResult, frames] = await Promise.all([
-      generateVoice(voiceover, voiceId),
-      generateAllFrames()
-    ]);
-    const audioBase64 = voiceResult?.base64 || null;
-    const wordTimestamps = voiceResult?.wordTimestamps || null;
-
-    // Kling videos — run all 4 in parallel with per-scene retry + static fallback
-    console.log(`[Job ${jobId}] Starting all 4 Kling videos in parallel...`);
-    const videoMeta = new Array(4).fill('none'); // 'kling' | 'static' | 'none'
-    const runKlingOnce = async (i, frameUrl) => {
+    // Seedance-first flow — NanoBanana frames now run ONLY when Seedance fails
+    // 3 attempts in a row. The 4 NB calls per job that used to run upfront were
+    // never sent to Seedance (it composes from references, not from a starting
+    // frame), so each successful Seedance scene was paying ~$0.20 of NB cost
+    // for nothing. Saves ~$0.80/job.
+    console.log(`[Job ${jobId}] Starting Seedance-first scene generation (NB only as fallback)...`);
+    const videoMeta = new Array(4).fill('none'); // 'kling' | 'static' | 'avatar-static' | 'none'
+    const runKlingOnce = async (i) => {
       const beat = i + 1;
       const klingScene4Context = i === 3;
       const klingIsBusinessCraft = videoType === 'business';
@@ -1347,43 +1249,120 @@ async function runJob(jobId, body) {
       return { videoUrl: processedUrl, valid: true, reason: null };
     };
 
-    const videos = await Promise.all(frames.map(async (frameUrl, i) => {
-      if (!frameUrl) { videoMeta[i] = 'none'; return null; }
-      // Try Kling up to 3 times with 3s delay between retries. Log the full
-      // error response (status + body) each time so we can debug why scene N
-      // keeps producing empty videos.
+    // tryScene — Seedance first (3 attempts). If it fails, ONLY then we spend
+    // a NanoBanana call to produce a still that frameToStaticVideo can turn
+    // into a 5-second static MP4. If NB also fails, fall back to a static
+    // built from the most relevant reference image (avatar for most scenes,
+    // product for UGC scene 2). Returns { frame, video } per scene; `frame`
+    // stays null when Seedance succeeds — we no longer pay for NB frames the
+    // user never sees.
+    const tryScene = async (i) => {
+      // 1) Seedance — 3 attempts, 3s backoff, full error logging.
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          console.log(`[Job ${jobId}] Kling scene ${i+1}: attempt ${attempt}/3...`);
-          const { videoUrl, valid, reason } = await runKlingOnce(i, frameUrl);
-          console.log(`[Kling] Scene ${i+1} attempt ${attempt} validation: valid=${valid}${reason ? `, reason=${reason}` : ''}`);
+          console.log(`[Job ${jobId}] Seedance scene ${i+1}: attempt ${attempt}/3...`);
+          const { videoUrl, valid, reason } = await runKlingOnce(i);
+          console.log(`[Seedance] Scene ${i+1} attempt ${attempt} validation: valid=${valid}${reason ? `, reason=${reason}` : ''}`);
           if (videoUrl && valid) {
-            console.log(`[Job ${jobId}] Kling scene ${i+1}: OK on attempt ${attempt}`);
+            console.log(`[Job ${jobId}] Seedance scene ${i+1}: OK on attempt ${attempt}`);
             videoMeta[i] = 'kling';
-            return videoUrl;
+            return { frame: null, video: videoUrl };
           }
-          console.error(`[Kling] Scene ${i+1} attempt ${attempt} REJECTED — url=${videoUrl ? videoUrl.slice(0, 100) : '(null)'}, reason=${reason || 'unknown'}`);
+          console.error(`[Seedance] Scene ${i+1} attempt ${attempt} REJECTED — url=${videoUrl ? videoUrl.slice(0, 100) : '(null)'}, reason=${reason || 'unknown'}`);
         } catch (e) {
           const status = e.status || e.statusCode || 'unknown';
           const body = e.body || e.message || String(e);
-          console.error(`[Kling] Scene ${i+1} attempt ${attempt} ERROR — status: ${status}, body:`, JSON.stringify(body).slice(0, 600));
+          console.error(`[Seedance] Scene ${i+1} attempt ${attempt} ERROR — status: ${status}, body:`, JSON.stringify(body).slice(0, 600));
         }
-        if (attempt < 3) {
-          await new Promise(r => setTimeout(r, 3000));
+        if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
+      }
+
+      // 2) Seedance failed 3x → NanoBanana fallback frame. Build the same
+      // per-scene reference list the original generateAllFrames used.
+      console.warn(`[Job ${jobId}] Seedance scene ${i+1} failed 3x — generating NanoBanana fallback frame`);
+      const isScene2 = i === 1;
+      const productOnly = isScene2 && videoType !== 'business';
+      const scene4Context = i === 3 && !productOnly;
+      const beat = i + 1;
+      const isBusinessCraft = videoType === 'business';
+      const actorInfo = mapAvatarToActorInfo(avatarUrl);
+      const actorId = actorInfo?.actorId || null;
+      const isFallbackActor = actorInfo?.isFallbackActor === true;
+
+      const imageUrls = [];
+      if (videoType === 'business') {
+        if (isScene2) {
+          preparedBusinessPhotos.slice(0, 3).forEach(u => imageUrls.push(u));
+        } else {
+          if (preparedAvatar) imageUrls.push(preparedAvatar);
+          if (preparedBusinessPhotos.length > 0 && (i === 2 || i === 3)) {
+            imageUrls.push(preparedBusinessPhotos[0]);
+          }
+        }
+      } else {
+        if (isScene2) {
+          if (preparedProduct) imageUrls.push(preparedProduct);
+        } else {
+          if (preparedAvatar) imageUrls.push(preparedAvatar);
+          if (preparedProduct && (i === 2 || i === 3)) imageUrls.push(preparedProduct);
         }
       }
-      // All 3 Kling attempts failed → static video fallback from NB frame.
-      console.warn(`[Job ${jobId}] Kling scene ${i+1} failed after 3 attempts — falling back to static frame video`);
-      try {
-        const staticUrl = await frameToStaticVideo(frameUrl, 5);
-        console.log(`[Job ${jobId}] Static fallback for scene ${i+1}:`, staticUrl ? 'OK' : 'failed');
-        if (staticUrl) { videoMeta[i] = 'static'; return staticUrl; }
-      } catch (e) {
-        console.error(`[Job ${jobId}] Static fallback scene ${i+1} crashed:`, e.message);
+
+      let nbFrameUrl = null;
+      if (productOnly || actorId) {
+        try {
+          nbFrameUrl = await generateNBFrame(scenes[i].nb_prompt, imageUrls, 3, {
+            productOnly, scene4Context, actorId, isFallbackActor, beat, productName, isBusinessCraft
+          });
+        } catch (e) {
+          console.error(`[Job ${jobId}] NB fallback scene ${i+1} failed: ${e.message}`);
+        }
+      } else {
+        console.error(`[Job ${jobId}] NB fallback scene ${i+1}: avatarUrl '${avatarUrl}' did not map to an actorId — skipping NB.`);
       }
+
+      if (nbFrameUrl) {
+        try {
+          const staticUrl = await frameToStaticVideo(nbFrameUrl, 5);
+          if (staticUrl) {
+            console.log(`[Job ${jobId}] Static video from NB fallback for scene ${i+1}: OK`);
+            videoMeta[i] = 'static';
+            return { frame: nbFrameUrl, video: staticUrl };
+          }
+        } catch (e) {
+          console.error(`[Job ${jobId}] frameToStaticVideo for NB frame scene ${i+1} crashed:`, e.message);
+        }
+      }
+
+      // 3) NB unavailable too → use the most relevant reference image as a
+      // still. Scene 2 (UGC) has no person, so use the product image; every
+      // other scene leans on the avatar.
+      const finalImg = (isScene2 && videoType !== 'business') ? preparedProduct : preparedAvatar;
+      if (finalImg) {
+        try {
+          const staticUrl = await frameToStaticVideo(finalImg, 5);
+          if (staticUrl) {
+            console.log(`[Job ${jobId}] Static video from reference image for scene ${i+1}: OK`);
+            videoMeta[i] = 'avatar-static';
+            return { frame: finalImg, video: staticUrl };
+          }
+        } catch (e) {
+          console.error(`[Job ${jobId}] frameToStaticVideo for reference image scene ${i+1} crashed:`, e.message);
+        }
+      }
+
       videoMeta[i] = 'none';
-      return null;
-    }));
+      return { frame: null, video: null };
+    };
+
+    const [voiceResult, sceneResults] = await Promise.all([
+      generateVoice(voiceover, voiceId),
+      Promise.all([0, 1, 2, 3].map(tryScene))
+    ]);
+    const audioBase64 = voiceResult?.base64 || null;
+    const wordTimestamps = voiceResult?.wordTimestamps || null;
+    const frames = sceneResults.map(r => r.frame);
+    const videos = sceneResults.map(r => r.video);
 
     console.log(`[Job ${jobId}] Video sources:`, videoMeta.map((m, i) => `scene${i+1}=${m}`).join(', '));
 

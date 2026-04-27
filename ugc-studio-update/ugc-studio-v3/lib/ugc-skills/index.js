@@ -281,6 +281,13 @@ const SEEDANCE_EXPRESSION_DIRECTION = {
   4: "Expression direction: calm steady gaze on the lens, soft genuine smile with lips pulled back at corners, eyes crinkle slightly at corners, slow blinks, eyebrows lift on key word, slow deliberate nods, occasional broader smile showing teeth briefly."
 };
 
+// UGC_MODE_TRIGGER — leading sentence that pushes Seedance into its "user-
+// generated content" prior. Research from VideoAI.me / Higgsfield blog notes
+// that Seedance has an unwritten UGC mode that turns on when the first words
+// frame the clip as amateur phone footage rather than commercial production.
+// Sits at parts[0] so it's the very first thing the model reads.
+const UGC_MODE_TRIGGER = "UGC creator, iPhone handheld phone footage, real organic lighting, slightly imperfect framing, no commercial polish, no studio production.";
+
 const SEEDANCE_AUTO_EXPOSURE = "Natural iPhone auto-exposure adjustment visible — slight image warming/cooling as the light shifts, no stable studio exposure.";
 
 const SEEDANCE_SILENT = "Silent footage, no audio, no spoken dialogue, mouth movements minimal and natural — lips part softly between phrases but no clear words form.";
@@ -345,6 +352,7 @@ export function buildSeedancePrompt(rawPromptIn, beat, productName, opts = {}) {
   }
 
   const parts = [
+    UGC_MODE_TRIGGER,
     tagDeclarations,
     cameraPhysics,
     raw,
@@ -360,12 +368,14 @@ export function buildSeedancePrompt(rawPromptIn, beat, productName, opts = {}) {
 
   // Length guard. Keep the structural layers (camera/expression/negatives) and
   // shorten the raw scene description if we run over the 2400-char buffer.
+  // raw lives at parts index 3 (after UGC_MODE_TRIGGER + tagDeclarations + cameraPhysics).
   if (finalPrompt.length > SEEDANCE_HARD_LIMIT) {
     console.warn(`[buildSeedancePrompt] EMERGENCY TRIM: ${finalPrompt.length} → ${SEEDANCE_HARD_LIMIT}`);
-    const overhead = parts.filter((_, i) => i !== 2).join('\n\n').length + 20;
+    const overhead = parts.filter((_, i) => i !== 3).join('\n\n').length + 20;
     const room = SEEDANCE_HARD_LIMIT - overhead;
     const truncatedRaw = room > 0 ? raw.slice(0, room) : '';
     const trimmed = [
+      UGC_MODE_TRIGGER,
       tagDeclarations,
       cameraPhysics,
       truncatedRaw,

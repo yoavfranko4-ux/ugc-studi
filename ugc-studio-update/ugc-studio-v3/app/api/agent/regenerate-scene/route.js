@@ -238,40 +238,16 @@ export async function POST(req) {
     }
   }
 
-  // 1) Re-run NanoBanana for this scene only — must go through the skill path
-  // (mandatory realism anchors). The legacy fallback in generateNBFrame was
-  // removed; non-productOnly calls require a valid actorId.
+  // Mirror of /api/agent: Seedance-first flow. Skip the NanoBanana frame
+  // upfront — only generate one if Seedance fails its 3 attempts. Saves an
+  // NB call per regenerate when Seedance lands on the first or second try.
   const actorInfo = mapAvatarToActorInfo(avatarUrl);
   const actorId = actorInfo?.actorId || null;
   const isFallbackActor = actorInfo?.isFallbackActor === true;
-  if (!productOnly && !actorId) {
-    return Response.json({
-      error: `avatarUrl '${avatarUrl}' did not map to a known actorId (daniel|noa|maya). The realism-anchors skill path requires a recognized avatar.`
-    }, { status: 400 });
-  }
   const isBusinessCraft = videoType === 'business';
-  let newFrameUrl;
-  try {
-    newFrameUrl = await generateNBFrame(nbPrompt, imageUrls, 3, {
-      productOnly,
-      scene4Context,
-      actorId,
-      isFallbackActor,
-      beat: sceneNumber,
-      productName,
-      isBusinessCraft
-    });
-  } catch (e) {
-    console.error(`[regenerate-scene] NB frame failed for job ${jobId} scene ${sceneNumber}:`, e.message);
-    return Response.json({ error: `NanoBanana frame generation failed: ${e.message}` }, { status: 502 });
-  }
-  if (!newFrameUrl) {
-    return Response.json({ error: 'NanoBanana frame generation returned no URL' }, { status: 502 });
-  }
 
-  // 2) Re-run Seedance — reference-to-video this time, with the same per-scene
-  // reference list the main /api/agent flow uses. Resolve any data: URLs to
-  // fal.storage first because reference-to-video rejects base64 payloads.
+  // 1) Run Seedance — reference-to-video, same per-scene reference list the
+  // main /api/agent flow uses. Resolve any data: URLs to fal.storage first.
   const [seedanceAvatar, seedanceProduct, seedanceBusiness] = await Promise.all([
     ensureFalUrl(preparedAvatar),
     ensureFalUrl(preparedProduct),
@@ -299,31 +275,61 @@ export async function POST(req) {
     productOnly,
   });
   const rawVideoUrl = await runKlingForScene(wrappedKlingPrompt, referenceImages, sceneNumber);
-  if (!rawVideoUrl) {
-    // NB frame succeeded but Kling failed 3x. Persist the new frame anyway
-    // so the client can at least show the updated still while the user
-    // decides whether to retry.
+
+  let newFrameUrl = null;
+  let newVideoUrl = null;
+
+  if (rawVideoUrl) {
+    // Seedance worked — apply flat color grading and skip NB entirely.
+    console.log(`[regenerate-scene] Scene ${sceneNumber}: applying flat color grading...`);
+    newVideoUrl = await applyFlatColorGrading(rawVideoUrl, `regen scene ${sceneNumber}`);
+    console.log(`[regenerate-scene] Scene ${sceneNumber}: post-process complete`);
+  } else {
+    // 2) Seedance failed 3x → spend an NB call now as a frame fallback.
+    console.warn(`[regenerate-scene] Seedance failed for scene ${sceneNumber} — falling back to NanoBanana frame`);
+    if (!productOnly && !actorId) {
+      return Response.json({
+        error: `avatarUrl '${avatarUrl}' did not map to a known actorId (daniel|noa|maya). Seedance failed and NB fallback also requires a recognized avatar.`
+      }, { status: 400 });
+    }
+    try {
+      newFrameUrl = await generateNBFrame(nbPrompt, imageUrls, 3, {
+        productOnly,
+        scene4Context,
+        actorId,
+        isFallbackActor,
+        beat: sceneNumber,
+        productName,
+        isBusinessCraft
+      });
+    } catch (e) {
+      console.error(`[regenerate-scene] NB fallback frame failed for job ${jobId} scene ${sceneNumber}:`, e.message);
+      return Response.json({ error: `Seedance failed 3x and NanoBanana fallback also failed: ${e.message}` }, { status: 502 });
+    }
+    if (!newFrameUrl) {
+      return Response.json({ error: 'Seedance failed 3x and NanoBanana fallback returned no URL' }, { status: 502 });
+    }
+    // NB frame succeeded but no Seedance video — persist the new frame so the
+    // client can show it while the user decides whether to retry. We don't
+    // build a static MP4 here (the heavy frameToStaticVideo helper lives in
+    // /api/agent only); the client treats a missing video as a retry signal.
     const framesCopy = Array.isArray(result.frames) ? [...result.frames] : [null, null, null, null];
     framesCopy[sceneIdx] = newFrameUrl;
     await supabase.from('jobs').update({ result: { ...result, frames: framesCopy } }).eq('id', jobId);
     return Response.json({
       success: false,
-      error: 'Frame regenerated but Kling video generation failed after 3 attempts — try again',
+      error: 'Seedance video generation failed 3x — frame regenerated, please try again',
       newFrameUrl,
       newVideoUrl: null,
     }, { status: 502 });
   }
 
-  // Post-process: same flat-color iPhone grading the main /api/agent flow
-  // applies. Best-effort — falls back to the raw Kling URL on any failure.
-  console.log(`[regenerate-scene] Scene ${sceneNumber}: applying flat color grading...`);
-  const newVideoUrl = await applyFlatColorGrading(rawVideoUrl, `regen scene ${sceneNumber}`);
-  console.log(`[regenerate-scene] Scene ${sceneNumber}: post-process complete`);
-
-  // 3) Write both the new frame and new video into the job result
+  // 3) Write the new video into the job result. Frame stays untouched when
+  // Seedance succeeded — no NB call was made, so result.frames[sceneIdx]
+  // keeps whatever it had before.
   const framesCopy = Array.isArray(result.frames) ? [...result.frames] : [null, null, null, null];
   const videosCopy = Array.isArray(result.videos) ? [...result.videos] : [null, null, null, null];
-  framesCopy[sceneIdx] = newFrameUrl;
+  if (newFrameUrl) framesCopy[sceneIdx] = newFrameUrl;
   videosCopy[sceneIdx] = newVideoUrl;
   const newResult = { ...result, frames: framesCopy, videos: videosCopy };
   const newRegenCount = { ...regenerations_used, [String(sceneNumber)]: currentCount + 1 };

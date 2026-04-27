@@ -44,12 +44,12 @@ let _ffmpegStaticPath = null
 try { _ffmpegStaticPath = _require('ffmpeg-static') } catch {}
 const _execFileAsync = promisify(execFile)
 
-// Knock contrast/saturation down a notch and raise mid-tones so Kling's
-// glossy AI footage feels like an iPhone capture. Runs after Kling, before
-// we hand the URL back to the editor pipeline.
-//   contrast=0.85 → 15% less contrast
-//   saturation=0.80 → 20% less saturation
-//   brightness=0.02 → mids slightly lifted
+// Light grading touch — Seedance already produces flat-ish output, so we just
+// take a small bite out of contrast/saturation rather than crushing it. The
+// previous 0.85/0.80 setting read as "destroyed" once Seedance was the source.
+//   contrast=0.95 → 5% less contrast
+//   saturation=0.92 → 8% less saturation
+//   brightness=0.01 → mids barely lifted
 // On any failure we return the original Kling URL — post-process is
 // best-effort, never a blocker for finishing the job.
 export async function applyFlatColorGrading(videoUrl, label = '') {
@@ -71,7 +71,7 @@ export async function applyFlatColorGrading(videoUrl, label = '') {
     await _execFileAsync(_ffmpegStaticPath, [
       '-y',
       '-i', inputPath,
-      '-vf', 'eq=contrast=0.85:saturation=0.80:brightness=0.02',
+      '-vf', 'eq=contrast=0.95:saturation=0.92:brightness=0.01',
       '-c:v', 'libx264',
       '-preset', 'fast',
       '-crf', '23',
