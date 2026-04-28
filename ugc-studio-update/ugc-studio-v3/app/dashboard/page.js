@@ -77,17 +77,19 @@ export default function DashboardPage() {
   )
 
   const plan = subscription?.plan ? PLANS[subscription.plan] : null
-  const videosUsed = Math.max(subscription?.videos_used || 0, savedEdits.length)
-  const videosLeft = plan ? Math.max(0, plan.videos - videosUsed) : 0
   const isActive = subscription?.status === 'active' && plan
-  const progressPercent = plan ? (videosUsed / plan.videos) * 100 : 0
 
-  // Quota banner — uses users-row counters (source of truth). Falls back to
-  // tier='trial' when the migration hasn't run on this DB yet.
+  // Quota — derived from the users-row counters (source of truth), not from
+  // savedEdits.length. savedEdits is lifetime history and includes rows from
+  // previous billing periods, so it badly inflated "videos created" before.
+  // Falls back to tier='trial' when the migration hasn't run on this DB yet.
   const quotaTier = userRow?.subscription_tier || 'trial'
   const quotaPlan = PLANS[quotaTier] || PLANS.trial
-  const quotaRemaining = userRow ? remainingVideos(userRow) : (plan ? videosLeft : 1)
+  const quotaRemaining = userRow ? remainingVideos(userRow) : (plan ? plan.videos : 1)
   const quotaExhausted = quotaRemaining === 0
+  const videosUsedThisPeriod = userRow?.videos_used_this_period || 0
+  const planTotal = (plan?.videos) || quotaPlan.videos
+  const progressPercent = planTotal ? (videosUsedThisPeriod / planTotal) * 100 : 0
 
   const getRenewalDate = () => {
     if (!subscription?.created_at || !plan) return null
@@ -203,22 +205,31 @@ export default function DashboardPage() {
                 {getRenewalDate() && <div style={{ color: '#FF0080', fontSize: 12, marginTop: 8, fontWeight: 500 }}>חידוש: {getRenewalDate()}</div>}
               </div>
 
-              {/* Videos left */}
+              {/* Videos left — same value as the top banner (DB-backed). */}
               <div style={glassCard}>
                 <div style={{ fontSize: 12, color: '#52525b', marginBottom: 8, fontWeight: 500 }}>סרטונים נותרו</div>
-                <div style={{ fontSize: 42, fontWeight: 900, background: 'linear-gradient(135deg, #FF0080, #FF0080)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', lineHeight: 1 }}>{videosLeft}</div>
-                <div style={{ color: '#52525b', fontSize: 12, marginTop: 8 }}>מתוך {plan.videos}</div>
+                <div style={{ fontSize: 42, fontWeight: 900, background: 'linear-gradient(135deg, #FF0080, #FF0080)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', lineHeight: 1 }}>{quotaRemaining}</div>
+                <div style={{ color: '#52525b', fontSize: 12, marginTop: 8 }}>מתוך {planTotal}</div>
               </div>
 
-              {/* Videos created */}
+              {/* Videos created this period — from users.videos_used_this_period,
+                  not savedEdits.length (which is lifetime history). */}
               <div style={glassCard}>
-                <div style={{ fontSize: 12, color: '#52525b', marginBottom: 8, fontWeight: 500 }}>סרטונים שנוצרו</div>
-                <div style={{ fontSize: 42, fontWeight: 900, color: '#F5F5F4', lineHeight: 1 }}>{videosUsed}</div>
+                <div style={{ fontSize: 12, color: '#52525b', marginBottom: 8, fontWeight: 500 }}>נוצרו {quotaTier === 'trial' ? 'בניסוי' : 'החודש'}</div>
+                <div style={{ fontSize: 42, fontWeight: 900, color: '#F5F5F4', lineHeight: 1 }}>{videosUsedThisPeriod}</div>
                 <div style={{ marginTop: 12 }}>
                   <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 100, height: 6, overflow: 'hidden' }}>
                     <div style={{ background: 'linear-gradient(90deg, #FF0080, #FF0080)', height: '100%', width: `${progressPercent}%`, borderRadius: 100, transition: 'width 0.5s ease', boxShadow: '0 0 10px rgba(255,0,128,0.4)' }} />
                   </div>
                 </div>
+              </div>
+
+              {/* Lifetime total — surfaces savedEdits.length without
+                  conflating it with the current-period quota. */}
+              <div style={glassCard}>
+                <div style={{ fontSize: 12, color: '#52525b', marginBottom: 8, fontWeight: 500 }}>סך הכל אי-פעם</div>
+                <div style={{ fontSize: 42, fontWeight: 900, color: '#a1a1aa', lineHeight: 1 }}>{savedEdits.length}</div>
+                <div style={{ color: '#52525b', fontSize: 12, marginTop: 8 }}>סרטונים בהיסטוריה</div>
               </div>
             </div>
 
