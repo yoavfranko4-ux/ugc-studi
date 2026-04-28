@@ -2,10 +2,12 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { PLANS } from '../../lib/plans'
+import { remainingVideos } from '../../lib/subscription-limits'
 
 export default function DashboardPage() {
   const [user, setUser] = useState(null)
   const [subscription, setSubscription] = useState(null)
+  const [userRow, setUserRow] = useState(null)
   const [loading, setLoading] = useState(true)
   const [videos, setVideos] = useState([])
   const [savedEdits, setSavedEdits] = useState([])
@@ -26,6 +28,18 @@ export default function DashboardPage() {
         .eq('status', 'active')
         .single()
       setSubscription(data)
+
+      // Load the users row (subscription_tier + counters) — source of truth
+      // for quota. Falls through silently when columns are missing so the
+      // dashboard still renders on a database that hasn't run the migration.
+      try {
+        const { data: u } = await supabase
+          .from('users')
+          .select('subscription_tier, subscription_expires_at, videos_used_this_period, lifetime_videos_used, subscription_period_start, trial_started_at')
+          .eq('id', user.id)
+          .maybeSingle()
+        if (u) setUserRow(u)
+      } catch {}
 
       try {
         const saved = localStorage.getItem(`videos_${user.id}`)
@@ -67,6 +81,13 @@ export default function DashboardPage() {
   const videosLeft = plan ? Math.max(0, plan.videos - videosUsed) : 0
   const isActive = subscription?.status === 'active' && plan
   const progressPercent = plan ? (videosUsed / plan.videos) * 100 : 0
+
+  // Quota banner — uses users-row counters (source of truth). Falls back to
+  // tier='trial' when the migration hasn't run on this DB yet.
+  const quotaTier = userRow?.subscription_tier || 'trial'
+  const quotaPlan = PLANS[quotaTier] || PLANS.trial
+  const quotaRemaining = userRow ? remainingVideos(userRow) : (plan ? videosLeft : 1)
+  const quotaExhausted = quotaRemaining === 0
 
   const getRenewalDate = () => {
     if (!subscription?.created_at || !plan) return null
@@ -135,6 +156,41 @@ export default function DashboardPage() {
           </button>
         </div>
 
+        {/* Quota banner — green when remaining > 0, red when exhausted. */}
+        <div style={{
+          padding: '12px 16px',
+          marginBottom: 16,
+          borderRadius: 10,
+          background: quotaExhausted ? 'rgba(244,63,94,0.08)' : 'rgba(34,197,94,0.06)',
+          border: `1px solid ${quotaExhausted ? 'rgba(244,63,94,0.4)' : 'rgba(34,197,94,0.3)'}`,
+          color: quotaExhausted ? '#f43f5e' : '#22c55e',
+          fontSize: 14,
+          fontWeight: 600,
+          fontFamily: 'Heebo,sans-serif',
+          direction: 'rtl',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+        }}>
+          <span>
+            {quotaExhausted
+              ? (quotaTier === 'trial'
+                  ? 'הניסוי הסתיים — שדרג ל-Basic או Pro כדי להמשיך'
+                  : 'נגמרה המכסה — שדרג ל-Pro לעוד סרטונים')
+              : `${quotaRemaining} מתוך ${quotaPlan.videos} סרטונים זמינים${quotaTier === 'trial' ? ' (תוכנית ניסוי)' : ''}`}
+          </span>
+          {quotaExhausted && (
+            <button onClick={() => window.location.href = '/#pricing'} style={{
+              padding: '6px 14px', background: '#f43f5e', color: '#fff',
+              border: 'none', borderRadius: 8, cursor: 'pointer',
+              fontFamily: 'Heebo,sans-serif', fontSize: 13, fontWeight: 700,
+            }}>
+              שדרג עכשיו
+            </button>
+          )}
+        </div>
+
         {isActive ? (
           <>
             {/* Stats Row */}
@@ -194,6 +250,10 @@ export default function DashboardPage() {
                   {savedEdits.map((edit, i) => {
                     const d = edit.edit_data || {}
                     const thumb = d.thumbnail || d.frames?.[0] || null
+                    const isBusiness = d.video_type === 'business' || d.mode === 'business'
+                    const cardLabel = isBusiness
+                      ? `🏪 ${d.business_name || 'סרטון עסק'}`
+                      : `🎬 ${d.product_name || `סרטון ${i + 1}`}`
                     return (
                       <div key={edit.id || i} style={{ background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 14, overflow: 'hidden', transition: 'all 200ms ease' }}>
                         {/* Thumbnail */}
@@ -207,7 +267,7 @@ export default function DashboardPage() {
                           )}
                           <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.7)', borderRadius: 4, padding: '2px 6px', fontSize: 10, color: '#fff', fontWeight: 600 }}>20s</div>
                           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,0.8))', padding: '16px 10px 8px' }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: '#F5F5F4', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>{d.product_name || `סרטון ${i + 1}`}</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#F5F5F4', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>{cardLabel}</div>
                           </div>
                         </div>
                         {/* Info + buttons */}

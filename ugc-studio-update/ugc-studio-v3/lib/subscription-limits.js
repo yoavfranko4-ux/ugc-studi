@@ -5,6 +5,8 @@
 // (Spec referenced 'noa' / 'daniel' / 'maya' — adapted to actual avatar names;
 //  'daniel' maps to 'Adam', the male avatar.)
 
+import { PLANS } from './plans.js'
+
 export const LIMITS = {
   trial: {
     videos: 1,
@@ -68,8 +70,34 @@ export function canUseVoice(userTier, voiceId) {
   return limit.voiceIds.includes(voiceId)
 }
 
+// Returns videos the user is still allowed to generate.
+//
+// Trial:  hard cap of PLANS.trial.videos *for life* (lifetime_videos_used),
+//         AND the 3-day clock from trial_started_at must still be running.
+// Paid:   per-period cap from PLANS[tier].videos against videos_used_this_period.
+//         If the period elapsed (no webhook reset yet), assume a fresh period
+//         and return the full quota — the increment hook will rebase on next
+//         generation.
 export function remainingVideos(user) {
-  const limit = LIMITS[user?.subscription_tier]
-  if (!limit) return 0
-  return Math.max(0, limit.videos - (user?.videos_used_this_period || 0))
+  const tier = user?.subscription_tier || 'trial'
+  const plan = PLANS[tier]
+  if (!plan) return 0
+
+  if (tier === 'trial') {
+    const trialStart = user?.trial_started_at ? new Date(user.trial_started_at) : null
+    if (trialStart) {
+      const days = (Date.now() - trialStart.getTime()) / (1000 * 60 * 60 * 24)
+      if (days >= (plan.days || 3)) return 0
+    }
+    const used = user?.lifetime_videos_used || 0
+    return Math.max(0, plan.videos - used)
+  }
+
+  const periodStart = user?.subscription_period_start ? new Date(user.subscription_period_start) : null
+  if (periodStart) {
+    const days = (Date.now() - periodStart.getTime()) / (1000 * 60 * 60 * 24)
+    if (days >= (plan.days || 30)) return plan.videos
+  }
+  const used = user?.videos_used_this_period || 0
+  return Math.max(0, plan.videos - used)
 }

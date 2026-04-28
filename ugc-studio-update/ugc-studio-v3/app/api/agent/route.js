@@ -1426,6 +1426,37 @@ async function runJob(jobId, body) {
 
     console.log(`[Job ${jobId}] Completed successfully`);
 
+    // Increment the user's quota counters now that the job actually succeeded.
+    // Done here (not at job INSERT) so failed jobs don't burn quota. Trial =
+    // lifetime cap; paid tiers also bump videos_used_this_period. All errors
+    // are swallowed — quota drift is preferable to failing a finished job.
+    if (body?.userId) {
+      try {
+        const { data: u } = await supabase
+          .from('users')
+          .select('subscription_tier, videos_used_this_period, lifetime_videos_used')
+          .eq('id', body.userId)
+          .maybeSingle();
+        if (u) {
+          const updates = {
+            lifetime_videos_used: (u.lifetime_videos_used || 0) + 1,
+            videos_used_this_period: (u.videos_used_this_period || 0) + 1,
+          };
+          const { error: incErr } = await supabase
+            .from('users')
+            .update(updates)
+            .eq('id', body.userId);
+          if (incErr) {
+            console.warn(`[Job ${jobId}] counter increment failed:`, incErr.message);
+          } else {
+            console.log(`[Job ${jobId}] counters incremented for user ${body.userId} (tier=${u.subscription_tier})`);
+          }
+        }
+      } catch (e) {
+        console.warn(`[Job ${jobId}] counter increment skipped:`, e?.message || e);
+      }
+    }
+
     // Fire-and-forget: pre-warm the Railway video cache so that when the
     // client opens the editor the videos are already resident in memory
     // and the proxy serves them instantly. This is the fix for fal.ai's

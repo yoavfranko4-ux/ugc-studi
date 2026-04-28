@@ -1,7 +1,7 @@
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
-import { canUseAvatar, canUseVoice } from '../../lib/subscription-limits'
+import { canUseAvatar, canUseVoice, remainingVideos } from '../../lib/subscription-limits'
 
 // === Subtitle Styles ===
 const SUBTITLE_STYLES = [
@@ -297,6 +297,7 @@ const AGENT_STEPS = [
 
 export default function Home() {
   const [userTier, setUserTier] = useState('pro')   // default: no lock until we learn the tier
+  const [userRow, setUserRow] = useState(null)      // full users row for quota check
   const [userId, setUserId] = useState(null)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [step, setStep] = useState('form')
@@ -371,6 +372,10 @@ export default function Home() {
   const audioBlobUrl = useRef(null)
   const playingRef = useRef(false)
   const currentPlayingIdxRef = useRef(0)  // index into clipOrder during playback (no re-render)
+  // Captured at pause time so the next play() resumes mid-scene instead of
+  // restarting from scene 0. Cleared on natural finish, "מודעה חדשה",
+  // exporting, or any "fresh start" entry into playAll.
+  const pausedStateRef = useRef(null)
   const autoExportRef = useRef(false)
   const blobUrlCache = useRef(new Map())  // remote-URL → blob: URL cache — survives re-renders
   const [preloadProgress, setPreloadProgress] = useState({ done: 0, total: 0 })
@@ -422,10 +427,11 @@ export default function Home() {
       try {
         const { data: u } = await supabase
           .from('users')
-          .select('subscription_tier')
+          .select('subscription_tier, subscription_expires_at, videos_used_this_period, lifetime_videos_used, subscription_period_start, trial_started_at')
           .eq('id', user.id)
           .maybeSingle()
         if (u?.subscription_tier) setUserTier(u.subscription_tier)
+        if (u) setUserRow(u)
       } catch (err) {
         console.warn('[Studio] tier lookup skipped:', err?.message || err)
       }
@@ -457,6 +463,16 @@ export default function Home() {
         if (d.transition) setTransition(d.transition)
         if (d.voice_id) setVoiceId(d.voice_id)
         if (d.voice_gender) setVoiceGender(d.voice_gender)
+        // Restore business-vs-UGC mode + inputs. Older saved_edits rows
+        // (pre-business-metadata save) won't have these — fall through
+        // to the default 'ugc' state, which is harmless in 'done' step.
+        const restoredMode = d.mode || d.video_type
+        if (restoredMode === 'ugc' || restoredMode === 'business') setMode(restoredMode)
+        if (d.business_name) setBusinessName(d.business_name)
+        if (d.business_description) setBusinessDescription(d.business_description)
+        if (Array.isArray(d.business_photos) && d.business_photos.length) {
+          setBusinessPhotos(d.business_photos)
+        }
 
         // Rebuild result object for the editor. Carry voiceId so re-record
         // picks the original voice even when state drifted for any reason.
@@ -887,8 +903,23 @@ export default function Home() {
       if (!businessName || !businessDescription) return alert('הכנס שם ותיאור עסק')
       if (businessPhotos.length === 0) return alert('העלה לפחות תמונה אחת של העסק')
     }
+    // Client-side quota gate. Server still enforces in /api/agent — this is
+    // just to surface a friendlier message before kicking off generation.
+    if (userRow && remainingVideos(userRow) === 0) {
+      const isTrial = (userRow.subscription_tier || 'trial') === 'trial'
+      alert(isTrial
+        ? 'הניסוי הסתיים. שדרג ל-Basic או Pro כדי להמשיך.'
+        : 'נגמרה המכסה החודשית. שדרג ל-Pro לעוד סרטונים.')
+      window.location.href = '/dashboard'
+      return
+    }
     setStep('generating'); setLogs([]); setAgentStatus({ script: 'active' });
     setHasRerecorded(false); setShowRerecordPanel(false); setRerecordText('');
+    // New generation = brand-new entry, never an edit of a saved row. Without
+    // this, a session that previously loaded ?editId=X (or saved once) would
+    // overwrite the original saved_edits row on the next "שמור".
+    setLoadedEditId(null);
+    pausedStateRef.current = null;
     addLog('Agent מתחיל לעבוד...')
     try {
       const currentAvatarUrl = customAvatar || selectedAvatar?.url
@@ -1007,6 +1038,8 @@ export default function Home() {
 
   const loadScene = (idx) => {
     setCurrentScene(idx)
+    // Manual scene switch invalidates any captured pause snapshot.
+    pausedStateRef.current = null
     // Swap visibility among preloaded <video> elements — no reload, no freeze
     const orderPos = clipOrder.indexOf(idx)
     videoRefs.current.forEach((v, i) => {
@@ -1080,6 +1113,9 @@ export default function Home() {
         return next
       })
       setVideosReady(false)
+      // Regenerated scene swaps the underlying blob — any pause snapshot
+      // pointing into the old scene's timeline is now meaningless.
+      pausedStateRef.current = null
       setRegenMsg(`סצנה ${sceneNumber} עודכנה ✓`)
 
       // Sync the regenerated scene back to saved_edits when the editor was
@@ -1108,6 +1144,12 @@ export default function Home() {
             job_id: jobId,
             last_gen_payload: lastGenPayload,
             regenerations_used: newRegenCounts,
+            // Preserve business metadata across scene regenerations.
+            mode,
+            video_type: mode,
+            business_name: businessName || null,
+            business_description: businessDescription || null,
+            business_photos: businessPhotos || [],
           }
           const { error: updateError } = await supabase
             .from('saved_edits')
@@ -1157,7 +1199,22 @@ export default function Home() {
     console.log(`[Studio] playAll started, video elements: ${videoEls.length}, DOM <video> count: ${typeof document !== 'undefined' ? document.querySelectorAll('video').length : 'N/A'}`)
     if (videoEls.length === 0) return
 
+    // Opacity is on the WRAPPING <div>, not the <video> itself — because
+    // broken scenes layer a still-frame <img> on top and both need to be
+    // hidden together during playback of other scenes. Walk to parentElement
+    // so the cross-fade actually shows the next scene.
+    const getOpacityTarget = (v) => v?.parentElement || v
+
     if (playing) {
+      // PAUSE — capture every timeline so the next click resumes here.
+      const idx = currentPlayingIdxRef.current || 0
+      const activeVid = videoEls[idx]
+      pausedStateRef.current = {
+        sceneIdx: idx,
+        videoTime: activeVid?.currentTime || 0,
+        audioTime: audioRef.current?.currentTime || 0,
+        musicTime: musicAudioRef.current?.currentTime || 0,
+      }
       playingRef.current = false
       setPlaying(false)
       videoEls.forEach(v => { try { v.pause() } catch {} })
@@ -1168,24 +1225,41 @@ export default function Home() {
 
     setPlaying(true); playingRef.current = true
 
-    // Opacity is on the WRAPPING <div>, not the <video> itself — because
-    // broken scenes layer a still-frame <img> on top and both need to be
-    // hidden together during playback of other scenes. Walk to parentElement
-    // so the cross-fade actually shows the next scene.
-    const getOpacityTarget = (v) => v?.parentElement || v
+    // Capture resume snapshot now (cleared at end of this branch). When set,
+    // we skip the global t=0 reset on the resume scene + on audio/music.
+    const resume = pausedStateRef.current
+    pausedStateRef.current = null
+    const startIdx = resume?.sceneIdx ?? 0
 
-    // Reset all videos to t=0, show only first
-    videoEls.forEach((v, i) => {
-      try { v.pause(); v.currentTime = 0 } catch {}
-      const target = getOpacityTarget(v)
-      target.style.opacity = i === 0 ? '1' : '0'
-      target.style.transition = 'opacity 40ms linear'
-      console.log(`[Studio] Scene ${i} mount: tag=${v.tagName}, src=${v.src?.slice(0, 80)}, readyState=${v.readyState}, opacity=${target.style.opacity}`)
-    })
+    if (resume) {
+      // Position only the resume scene + hide the rest. playChain reapplies
+      // opacity on each step, so this just primes the first frame.
+      videoEls.forEach((v, i) => {
+        const target = getOpacityTarget(v)
+        target.style.opacity = i === startIdx ? '1' : '0'
+        target.style.transition = 'opacity 40ms linear'
+        if (i !== startIdx) { try { v.pause(); v.currentTime = 0 } catch {} }
+      })
+      const activeVid = videoEls[startIdx]
+      if (activeVid) { try { activeVid.currentTime = resume.videoTime } catch {} }
+    } else {
+      // FRESH START — reset all videos to t=0, show only first.
+      videoEls.forEach((v, i) => {
+        try { v.pause(); v.currentTime = 0 } catch {}
+        const target = getOpacityTarget(v)
+        target.style.opacity = i === 0 ? '1' : '0'
+        target.style.transition = 'opacity 40ms linear'
+        console.log(`[Studio] Scene ${i} mount: tag=${v.tagName}, src=${v.src?.slice(0, 80)}, readyState=${v.readyState}, opacity=${target.style.opacity}`)
+      })
+    }
 
-    // Start voiceover
+    // Start voiceover (resume seeks; fresh start rewinds)
     if (audioRef.current && audioBlobUrl.current) {
-      try { audioRef.current.currentTime = 0; audioRef.current.play().catch(() => {}) } catch {}
+      try {
+        if (!audioRef.current.src) audioRef.current.src = audioBlobUrl.current
+        audioRef.current.currentTime = resume ? resume.audioTime : 0
+        audioRef.current.play().catch(() => {})
+      } catch {}
     }
     // Start real music track
     const track = MUSIC_TRACKS.find(t => t.id === bgMusic)
@@ -1195,7 +1269,7 @@ export default function Home() {
         if (m.src !== track.url) m.src = track.url
         m.volume = 0.15
         m.loop = true
-        m.currentTime = 0
+        m.currentTime = resume ? resume.musicTime : 0
         m.play().catch(() => {})
       } catch {}
     }
@@ -1226,14 +1300,18 @@ export default function Home() {
       requestAnimationFrame(subtitleTick)
     }
 
-    // Chain clips: on ended, immediately swap opacity + play next (zero gap)
-    const playChain = (idx) => {
+    // Chain clips: on ended, immediately swap opacity + play next (zero gap).
+    // skipReset: true on the very first invocation when resuming, so we don't
+    // clobber the seeked-to currentTime on the active scene.
+    const playChain = (idx, skipReset = false) => {
       if (!playingRef.current) return
       if (idx >= videoEls.length) {
         // Done
         console.log('[Studio] playChain finished after', videoEls.length, 'scenes')
         playingRef.current = false
         setPlaying(false)
+        // Natural end clears any stale resume snapshot — next click is fresh.
+        pausedStateRef.current = null
         if (audioRef.current) { try { audioRef.current.pause() } catch {} }
         if (musicAudioRef.current) { try { musicAudioRef.current.pause() } catch {} }
         return
@@ -1249,7 +1327,7 @@ export default function Home() {
         target.style.opacity = i === idx ? '1' : '0'
       })
       console.log(`[Studio] Switching opacity: scene ${idx - 1} -> ${idx}, readyState=${v.readyState}, src=${v.src?.slice(0, 80)}`)
-      try { v.currentTime = 0 } catch {}
+      if (!skipReset) { try { v.currentTime = 0 } catch {} }
       // Immediately play — catch autoplay rejection so a single scene failure
       // doesn't leave the chain stuck.
       const playPromise = v.play()
@@ -1268,9 +1346,10 @@ export default function Home() {
       v.addEventListener('ended', onEnded, { once: true })
     }
 
-    // Kick off rAF + chain
+    // Kick off rAF + chain. On resume, start at the captured scene and skip
+    // the t=0 reset on its first visit so we keep the seeked-to position.
     requestAnimationFrame(subtitleTick)
-    playChain(0)
+    playChain(startIdx, !!resume)
   }, [result, clipOrder, bgMusic, playing, subtitleStyle])
 
   // === Server-side FFmpeg export via /api/export ===
@@ -1452,6 +1531,14 @@ export default function Home() {
         job_id: jobId,
         last_gen_payload: lastGenPayload,
         regenerations_used: regenCounts,
+        // Business-vs-UGC metadata. Lets the dashboard label cards correctly
+        // and lets the form step restore mode + business inputs when the
+        // user opens "מודעה חדשה" from a saved business edit.
+        mode,
+        video_type: mode,
+        business_name: businessName || null,
+        business_description: businessDescription || null,
+        business_photos: businessPhotos || [],
       }
       // Update the existing row when this editor session was opened from
       // the dashboard via ?editId=, otherwise insert a fresh row. Without
@@ -1522,7 +1609,17 @@ export default function Home() {
           ].map(m => {
             const sel = mode === m.id
             return (
-              <button key={m.id} onClick={() => setMode(m.id)}
+              <button key={m.id} onClick={() => {
+                  if (mode !== m.id) {
+                    // Switching video type starts a new entry — drop the
+                    // edit-session pointer so the next save does an INSERT.
+                    setLoadedEditId(null)
+                    setJobId(null)
+                    setLastGenPayload(null)
+                    setRegenCounts({})
+                  }
+                  setMode(m.id)
+                }}
                 style={{
                   padding: 18, borderRadius: 14,
                   border: `2px solid ${sel ? 'rgba(255,0,128,0.6)' : 'rgba(255,255,255,0.08)'}`,
@@ -1813,6 +1910,8 @@ export default function Home() {
             setJobId(null);
             setLastGenPayload(null);
             setRegenCounts({});
+            // Drop any captured pause snapshot — next playback starts fresh.
+            pausedStateRef.current = null;
           }} style={ghostBtn}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scaleX(-1)' }}><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             מודעה חדשה
