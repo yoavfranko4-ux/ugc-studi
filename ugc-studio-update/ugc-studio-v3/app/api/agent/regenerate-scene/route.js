@@ -19,107 +19,116 @@
 //
 // Returns: { success, sceneNumber, newFrameUrl, newVideoUrl, regenerations_used, result }
 
-import { fal } from '@fal-ai/client'
 import { supabase } from '../../../../lib/supabase'
-import { generateNBFrame, buildKlingPrompt, mapAvatarToActorId, mapAvatarToActorInfo, applyFlatColorGrading } from '../../../../lib/agent-pipeline.js'
+import { buildKlingPrompt } from '../../../../lib/agent-pipeline.js'
+import { generateVideo as byteplusGenerateVideo, isByteplusConfigured, uploadToByteplusFiles } from '../../../../lib/byteplus-client.js'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import { writeFile, readFile, mkdir, rm } from 'fs/promises'
+import fs from 'fs'
+import path from 'path'
+import { randomUUID } from 'crypto'
+import { createRequire } from 'module'
+import sharp from 'sharp'
 
 export const maxDuration = 300;
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const FAL_KEY = process.env.FAL_API_KEY;
-if (!FAL_KEY) console.warn('[regenerate-scene] FAL_API_KEY is not set');
-fal.config({ credentials: FAL_KEY });
+if (!process.env.ARK_API_KEY) {
+  console.warn('[regenerate-scene] ARK_API_KEY is not set — BytePlus video generation will fail; static fallback only');
+}
+
+const _require = createRequire(import.meta.url);
+let ffmpegStaticPath = null;
+try { ffmpegStaticPath = _require('ffmpeg-static'); } catch {}
+const execFileAsync = promisify(execFile);
 
 // v1: hard-coded per-scene cap. Upgrade to tier-based limits once the
 // regenerations_used column is live and we want tier gating.
 const MAX_REGENS_PER_SCENE = 3;
 
-// Mirror of route.js — reference-to-video needs http(s) URLs in image_urls.
-// Beyond data: uploads, we also re-host external http(s) URLs (e.g. Railway
-// avatars) on fal.storage to bypass Seedance's untrusted-domain filter.
-async function ensureFalUrl(u) {
-  if (!u || typeof u !== 'string') return null;
-  if (u.startsWith('/')) {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
-    u = `${baseUrl}${u}`;
-    console.log(`[regenerate-scene][ensureFalUrl] resolved relative path to: ${u.slice(0, 100)}`);
+// Static fallback for when BytePlus Seedance fails. Single scene-relevant
+// image (avatar for 1/3/4, product for UGC scene 2) → sharp cover-fit to
+// 720x1280 → ffmpeg loop into 5-sec MP4 returned as data: URL. Mirrors the
+// helper in app/api/agent/route.js — kept inline for the same reason
+// ensureFalUrl was previously duplicated.
+async function buildStaticFallbackVideo(imageUrl, durationSec = 5) {
+  if (!imageUrl) return null;
+  if (!ffmpegStaticPath || !fs.existsSync(ffmpegStaticPath)) {
+    console.warn('[regenerate-scene][staticFallback] ffmpeg-static not available — cannot build fallback video');
+    return null;
   }
-  if (u.includes('fal.media') || u.includes('fal.storage')) return u;
-  if (u.startsWith('data:')) {
-    try {
-      const m = u.match(/^data:([^;]+);base64,(.+)$/);
-      if (!m) throw new Error('malformed data url');
-      const buf = Buffer.from(m[2], 'base64');
-      const blob = new Blob([buf], { type: m[1] || 'image/png' });
-      const uploaded = await fal.storage.upload(blob);
-      if (!uploaded) throw new Error('fal.storage.upload returned empty');
-      console.log('[regenerate-scene][ensureFalUrl] uploaded data URL:', uploaded.slice(0, 80));
-      return uploaded;
-    } catch (e) {
-      console.warn('[regenerate-scene][ensureFalUrl] data URL upload failed:', e.message);
-      return u;
+  const tmpDir = path.join('/tmp', `static-${randomUUID()}`);
+  await mkdir(tmpDir, { recursive: true });
+  const inPath = path.join(tmpDir, 'frame.png');
+  const outPath = path.join(tmpDir, 'static.mp4');
+  try {
+    let imgBuf;
+    if (imageUrl.startsWith('data:')) {
+      const m = imageUrl.match(/^data:[^;]+;base64,(.+)$/);
+      if (!m) throw new Error('malformed data URL');
+      imgBuf = Buffer.from(m[1], 'base64');
+    } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      const resp = await fetch(imageUrl);
+      if (!resp.ok) throw new Error(`fetch HTTP ${resp.status}`);
+      imgBuf = Buffer.from(await resp.arrayBuffer());
+    } else if (imageUrl.startsWith('/')) {
+      const localPath = path.join(process.cwd(), 'public', imageUrl.replace(/^\/+/, ''));
+      imgBuf = await readFile(localPath);
+    } else {
+      throw new Error(`unsupported image URL prefix: ${imageUrl.slice(0, 60)}`);
     }
+    const framedBuf = await sharp(imgBuf)
+      .resize(720, 1280, { fit: 'cover' })
+      .png()
+      .toBuffer();
+    await writeFile(inPath, framedBuf);
+    await execFileAsync(ffmpegStaticPath, [
+      '-y', '-loop', '1', '-i', inPath,
+      '-t', String(durationSec),
+      '-r', '24',
+      '-c:v', 'libx264',
+      '-preset', 'fast',
+      '-crf', '23',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      outPath
+    ], { timeout: 60000, maxBuffer: 20 * 1024 * 1024 });
+    const stats = fs.statSync(outPath);
+    if (stats.size < 10 * 1024) throw new Error('generated mp4 too small');
+    const mp4Buf = await readFile(outPath);
+    console.log(`[regenerate-scene][staticFallback] OK, ${mp4Buf.length} bytes`);
+    return `data:video/mp4;base64,${mp4Buf.toString('base64')}`;
+  } catch (e) {
+    console.error('[regenerate-scene][staticFallback] failed:', e.message);
+    return null;
+  } finally {
+    rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
-  if (u.startsWith('http://') || u.startsWith('https://')) {
-    try {
-      const response = await fetch(u);
-      if (!response.ok) throw new Error(`fetch ${u} returned ${response.status}`);
-      const buffer = await response.arrayBuffer();
-      const contentType = response.headers.get('content-type') || 'image/jpeg';
-      const blob = new Blob([buffer], { type: contentType });
-      const filename = (u.split('/').pop() || '').split('?')[0] || 'image.jpg';
-      const file = new File([blob], filename, { type: contentType });
-      const uploaded = await fal.storage.upload(file);
-      if (!uploaded) throw new Error('fal.storage.upload returned empty');
-      console.log(`[regenerate-scene][ensureFalUrl] re-uploaded ${u.slice(0, 80)} → ${uploaded.slice(0, 80)}`);
-      return uploaded;
-    } catch (e) {
-      console.error(`[regenerate-scene][ensureFalUrl] http(s) re-upload failed for ${u.slice(0, 80)}:`, e.message);
-      return u;
-    }
-  }
-  return u;
 }
 
-// Minimal Seedance call — 3 attempts, basic "is it a URL" check. We do NOT
-// run ffprobe validation here (unlike the main /api/agent flow) because
-// the user can just click regenerate again if Seedance returns garbage,
-// which is cheaper than carrying the ffprobe dependency into this route.
-async function runKlingForScene(klingPrompt, referenceImages, sceneNumber) {
-  console.log(`[Kling regenerate-scene] FINAL prompt length: ${klingPrompt?.length ?? 0}`);
+// BytePlus Seedance attempt — 3 retries, returns videoUrl or null.
+async function runByteplusForScene(klingPrompt, referenceImages, sceneNumber) {
+  console.log(`[regenerate-scene][BytePlus Scene ${sceneNumber}] prompt length: ${klingPrompt?.length ?? 0}, refs=${referenceImages.length}`);
   if ((klingPrompt?.length ?? 0) > 2500) {
-    console.error(`[Kling regenerate-scene] ⚠️ STILL TOO LONG: ${klingPrompt.length}`);
+    console.error(`[regenerate-scene][BytePlus Scene ${sceneNumber}] ⚠️ TOO LONG: ${klingPrompt.length}`);
   }
-  console.log(`[Seedance regenerate-scene Scene ${sceneNumber}] sending ${referenceImages.length} reference images`);
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      console.log(`[regenerate-scene] Seedance attempt ${attempt}/3`);
-      const result = await fal.subscribe('bytedance/seedance-2.0/fast/reference-to-video', {
-        input: {
-          prompt: klingPrompt,
-          image_urls: referenceImages,
-          duration: '5',
-          resolution: '720p',
-          aspect_ratio: '9:16',
-          generate_audio: false
-        },
-        pollInterval: 5000
+      console.log(`[regenerate-scene] BytePlus attempt ${attempt}/3`);
+      const { videoUrl } = await byteplusGenerateVideo({
+        prompt: klingPrompt,
+        imageUrls: referenceImages.filter(Boolean),
+        duration: 5
       });
-      const videoUrl = result.data.video?.url || null;
-      const videoMeta = result.data.video || null;
-      console.log(`[Seedance regenerate-scene] attempt ${attempt} response:`, JSON.stringify({
-        url: videoUrl ? videoUrl.slice(0, 100) : null,
-        content_type: videoMeta?.content_type,
-        duration: videoMeta?.duration,
-        width: videoMeta?.width,
-        height: videoMeta?.height,
-        seed: result.data?.seed,
-      }));
-      if (videoUrl) return videoUrl;
+      if (videoUrl) {
+        console.log(`[regenerate-scene] BytePlus attempt ${attempt} OK: ${videoUrl.slice(0, 100)}`);
+        return videoUrl;
+      }
+      console.warn(`[regenerate-scene] BytePlus attempt ${attempt} returned no url`);
     } catch (e) {
-      const status = e.status || e.statusCode || 'unknown';
-      console.error(`[regenerate-scene] Seedance attempt ${attempt} failed — status: ${status}, body:`, JSON.stringify(e.body || e.message || String(e)).slice(0, 500));
+      console.error(`[regenerate-scene] BytePlus attempt ${attempt} failed:`, (e?.message || String(e)).slice(0, 500));
     }
     if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
   }
@@ -201,15 +210,17 @@ export async function POST(req) {
     }, { status: 429 });
   }
 
-  const nbPrompt = (typeof customPrompt === 'string' && customPrompt.trim()) ? customPrompt.trim() : scenes[sceneIdx].nb_prompt;
-  const klingPrompt = scenes[sceneIdx].kling_prompt;
+  // customPrompt may override the default kling_prompt (UI offers per-scene
+  // text edit). nb_prompt is no longer used in this route since the
+  // NanoBanana fallback was removed alongside the fal.ai migration.
+  const klingPrompt = (typeof customPrompt === 'string' && customPrompt.trim()) ? customPrompt.trim() : scenes[sceneIdx].kling_prompt;
 
-  // Normalize image URLs to absolute form before handing them to fal.ai.
-  // fal rejects anything that isn't http://, https://, or data:, so a
-  // relative path like "/avatars/avatar-5.jpg" (what the studio bundled
-  // avatars look like after the frontend picker) triggers a 422. The main
-  // /api/agent route does this same conversion — mirror it here so the
-  // regenerate flow accepts the same frontend payload.
+  // Normalize image URLs to absolute form before handing them to BytePlus.
+  // The Seedance API rejects anything that isn't http://, https://, or
+  // data:, so a relative path like "/avatars/avatar-5.jpg" (what the studio
+  // bundled avatars look like after the frontend picker) triggers a 422.
+  // The main /api/agent route does this same conversion — mirror it here so
+  // the regenerate flow accepts the same frontend payload.
   //
   // Order of preference for the base:
   //   1. NEXT_PUBLIC_BASE_URL env var (matches what the main route uses)
@@ -231,53 +242,19 @@ export async function POST(req) {
   const preparedAvatar = prepareUrl(avatarUrl);
   const preparedProduct = prepareUrl(productImageUrl);
   const preparedBusinessPhotos = Array.isArray(businessPhotos) ? businessPhotos.map(prepareUrl).filter(Boolean) : [];
-  // result.frames entries come from fal.ai already (absolute https URLs),
-  // but normalize defensively in case an older job stored a relative path.
-  const preparedPrevFrame = prepareUrl(result.frames?.[sceneIdx - 1]);
-  console.log(`[regenerate-scene] job=${jobId} scene=${sceneNumber} baseUrl=${baseUrl} avatar=${preparedAvatar?.slice(0, 80) || '(none)'} product=${preparedProduct?.slice(0, 80) || '(none)'} prevFrame=${preparedPrevFrame?.slice(0, 80) || '(none)'}`);
+  console.log(`[regenerate-scene] job=${jobId} scene=${sceneNumber} baseUrl=${baseUrl} avatar=${preparedAvatar?.slice(0, 80) || '(none)'} product=${preparedProduct?.slice(0, 80) || '(none)'}`);
 
-  // Build reference-image list for this scene — mirrors the main /api/agent
-  // loop so the regenerated frame uses the same style/identity anchors.
   const isScene2 = sceneIdx === 1;
   const isScene4 = sceneIdx === 3;
   const productOnly = isScene2 && videoType !== 'business';
   const scene4Context = isScene4 && !productOnly;
 
-  const imageUrls = [];
-  if (videoType === 'business') {
-    if (isScene2) {
-      preparedBusinessPhotos.slice(0, 3).forEach(u => imageUrls.push(u));
-    } else {
-      if (preparedAvatar) imageUrls.push(preparedAvatar);
-      if (preparedPrevFrame) imageUrls.push(preparedPrevFrame);
-      if (preparedBusinessPhotos[0] && (sceneIdx === 2 || sceneIdx === 3)) {
-        imageUrls.push(preparedBusinessPhotos[0]);
-      }
-    }
-  } else {
-    if (isScene2) {
-      if (preparedProduct) imageUrls.push(preparedProduct);
-    } else {
-      if (preparedAvatar) imageUrls.push(preparedAvatar);
-      if (preparedPrevFrame) imageUrls.push(preparedPrevFrame);
-      if (preparedProduct && (sceneIdx === 2 || sceneIdx === 3)) imageUrls.push(preparedProduct);
-    }
-  }
-
-  // Mirror of /api/agent: Seedance-first flow. Skip the NanoBanana frame
-  // upfront — only generate one if Seedance fails its 3 attempts. Saves an
-  // NB call per regenerate when Seedance lands on the first or second try.
-  const actorInfo = mapAvatarToActorInfo(avatarUrl);
-  const actorId = actorInfo?.actorId || null;
-  const isFallbackActor = actorInfo?.isFallbackActor === true;
-  const isBusinessCraft = videoType === 'business';
-
-  // 1) Run Seedance — reference-to-video, same per-scene reference list the
-  // main /api/agent flow uses. Resolve any data: URLs to fal.storage first.
+  // 1) Run BytePlus Seedance — reference-to-video, same per-scene reference
+  // list the main /api/agent flow uses.
   const [seedanceAvatar, seedanceProduct, seedanceBusiness] = await Promise.all([
-    ensureFalUrl(preparedAvatar),
-    ensureFalUrl(preparedProduct),
-    Promise.all(preparedBusinessPhotos.map(ensureFalUrl)).then(arr => arr.filter(Boolean))
+    preparedAvatar ? uploadToByteplusFiles(preparedAvatar) : null,
+    preparedProduct ? uploadToByteplusFiles(preparedProduct) : null,
+    Promise.all(preparedBusinessPhotos.map(u => uploadToByteplusFiles(u))).then(arr => arr.filter(Boolean))
   ]);
 
   const referenceImages = (() => {
@@ -300,59 +277,54 @@ export async function POST(req) {
     scene4Context,
     productOnly,
   });
-  const rawVideoUrl = await runKlingForScene(wrappedKlingPrompt, referenceImages, sceneNumber);
 
   let newFrameUrl = null;
   let newVideoUrl = null;
 
+  const byteplusReady = isByteplusConfigured();
+  const rawVideoUrl = byteplusReady
+    ? await runByteplusForScene(wrappedKlingPrompt, referenceImages, sceneNumber)
+    : null;
+
   if (rawVideoUrl) {
-    // Seedance worked — apply flat color grading and skip NB entirely.
-    console.log(`[regenerate-scene] Scene ${sceneNumber}: applying flat color grading...`);
-    newVideoUrl = await applyFlatColorGrading(rawVideoUrl, `regen scene ${sceneNumber}`);
-    console.log(`[regenerate-scene] Scene ${sceneNumber}: post-process complete`);
+    // BytePlus succeeded — ship it as-is (no color grading).
+    newVideoUrl = rawVideoUrl;
   } else {
-    // 2) Seedance failed 3x → spend an NB call now as a frame fallback.
-    console.warn(`[regenerate-scene] Seedance failed for scene ${sceneNumber} — falling back to NanoBanana frame`);
-    if (!productOnly && !actorId) {
+    // 2) BytePlus failed (or not configured) → build a 5-sec static MP4 from
+    // the scene-relevant reference image. No NanoBanana, no fal.
+    if (!byteplusReady) {
+      console.error(`[regenerate-scene] BytePlus not configured — using static fallback`);
+    } else {
+      console.warn(`[regenerate-scene] BytePlus failed for scene ${sceneNumber} — using static fallback`);
+    }
+    let fallbackImage;
+    if (productOnly) {
+      fallbackImage = preparedProduct;
+    } else if (videoType === 'business' && isScene2) {
+      fallbackImage = preparedBusinessPhotos[0] || preparedAvatar;
+    } else {
+      fallbackImage = preparedAvatar;
+    }
+    if (!fallbackImage) {
       return Response.json({
-        error: `avatarUrl '${avatarUrl}' did not map to a known actorId (daniel|noa|maya). Seedance failed and NB fallback also requires a recognized avatar.`
-      }, { status: 400 });
+        error: `BytePlus failed and no fallback image available for scene ${sceneNumber}`
+      }, { status: 502 });
     }
     try {
-      newFrameUrl = await generateNBFrame(nbPrompt, imageUrls, 3, {
-        productOnly,
-        scene4Context,
-        actorId,
-        isFallbackActor,
-        beat: sceneNumber,
-        productName,
-        isBusinessCraft
-      });
+      newVideoUrl = await buildStaticFallbackVideo(fallbackImage, 5);
     } catch (e) {
-      console.error(`[regenerate-scene] NB fallback frame failed for job ${jobId} scene ${sceneNumber}:`, e.message);
-      return Response.json({ error: `Seedance failed 3x and NanoBanana fallback also failed: ${e.message}` }, { status: 502 });
+      console.error(`[regenerate-scene] static fallback for scene ${sceneNumber} crashed:`, e.message);
+      return Response.json({ error: `BytePlus failed and static fallback crashed: ${e.message}` }, { status: 502 });
     }
-    if (!newFrameUrl) {
-      return Response.json({ error: 'Seedance failed 3x and NanoBanana fallback returned no URL' }, { status: 502 });
+    if (!newVideoUrl) {
+      return Response.json({ error: 'BytePlus failed and static fallback returned no video' }, { status: 502 });
     }
-    // NB frame succeeded but no Seedance video — persist the new frame so the
-    // client can show it while the user decides whether to retry. We don't
-    // build a static MP4 here (the heavy frameToStaticVideo helper lives in
-    // /api/agent only); the client treats a missing video as a retry signal.
-    const framesCopy = Array.isArray(result.frames) ? [...result.frames] : [null, null, null, null];
-    framesCopy[sceneIdx] = newFrameUrl;
-    await supabase.from('jobs').update({ result: { ...result, frames: framesCopy } }).eq('id', jobId);
-    return Response.json({
-      success: false,
-      error: 'Seedance video generation failed 3x — frame regenerated, please try again',
-      newFrameUrl,
-      newVideoUrl: null,
-    }, { status: 502 });
+    newFrameUrl = fallbackImage;
   }
 
-  // 3) Write the new video into the job result. Frame stays untouched when
-  // Seedance succeeded — no NB call was made, so result.frames[sceneIdx]
-  // keeps whatever it had before.
+  // 3) Write the new video into the job result. When BytePlus succeeded the
+  // frame stays untouched; on static fallback we record the source image as
+  // the frame so the editor can display it.
   const framesCopy = Array.isArray(result.frames) ? [...result.frames] : [null, null, null, null];
   const videosCopy = Array.isArray(result.videos) ? [...result.videos] : [null, null, null, null];
   if (newFrameUrl) framesCopy[sceneIdx] = newFrameUrl;
