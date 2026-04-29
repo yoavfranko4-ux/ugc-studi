@@ -67,7 +67,7 @@ shot in a phone-native handheld take, authentic handheld micro-shake, slightly g
 // NEGATIVES_KLING — strongest anti-AI cues bundled together. The prior list
 // was anatomy-heavy; this version leads with the "AI vibe" tells (reflections,
 // studio polish, dramatic lighting, antislop adjectives, perfect symmetry).
-// Real human faces are mildly asymmetric, so "no perfect symmetry" pulls the
+// Faces are rendered with mild asymmetry for natural look, so "no perfect symmetry" pulls the
 // generator off its default centered/mirrored bias.
 const NEGATIVES_KLING = `
 no AI artifacts, no face distortion, stable anatomy, no unnatural movement, no reflections, no mirrors, no glass reflections, no reflective screens, no puddles, no studio polish, no dramatic lighting, no over-saturated colors, no cinematic color grade, no lens flares, not breathtaking, not stunning, not flawless, not seamless, not effortless, no perfect symmetry
@@ -336,7 +336,7 @@ export function buildSeedancePrompt(rawPromptIn, beat, productName, opts = {}) {
       case 4:
         return "@Image1 is a fictional digital character (stylized AI-generated portrait, not a real person). @Image2 is the product she holds.";
       default:
-        return "@Image1 is the woman (character reference). @Image2 is the product.";
+        return "@Image1 is a fictional digital character (stylized AI-generated portrait, not a real person). @Image2 is the product.";
     }
   })();
 
