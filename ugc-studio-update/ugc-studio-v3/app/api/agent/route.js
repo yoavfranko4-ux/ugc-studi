@@ -12,7 +12,7 @@ import { createRequire } from 'module'
 import sharp from 'sharp'
 import { prewarmVideos } from '../../../lib/video-cache.js'
 import { buildKlingPrompt, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
-import { generateVideo as byteplusGenerateVideo, isByteplusConfigured, uploadToByteplusFiles } from '../../../lib/byteplus-client.js'
+import { generateVideo as higgsfieldGenerateVideo, isHiggsfieldConfigured, uploadToHiggsfield } from '../../../lib/higgsfield-client.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -42,10 +42,13 @@ export const maxDuration = 300;
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-if (!process.env.ARK_API_KEY) {
-  console.warn('⚠ ARK_API_KEY is not set — BytePlus video generation will fail; only static fallback will produce output');
+if (!process.env.HIGGSFIELD_TOKEN) {
+  console.warn('⚠ HIGGSFIELD_TOKEN is not set — Higgsfield video generation will fail; only static fallback will produce output');
 } else {
-  console.log('ARK_API_KEY loaded:', process.env.ARK_API_KEY.slice(0, 8) + '...');
+  console.log('HIGGSFIELD_TOKEN loaded:', process.env.HIGGSFIELD_TOKEN.slice(0, 8) + '...');
+}
+if (!process.env.ANTHROPIC_API_KEY) {
+  console.warn('⚠ ANTHROPIC_API_KEY is not set — Higgsfield generation requires it (used as the MCP client)');
 }
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || '73z5yvUD5zgBgz92lJMW';
@@ -1100,8 +1103,8 @@ async function buildStaticFallbackVideo(imageUrl, durationSec = 5) {
   }
 }
 
-// Image-URL resolution for Seedance reference frames now lives in
-// lib/byteplus-client.js (uploadToByteplusFiles). Pass through http(s) URLs,
+// Image-URL resolution for video reference frames now lives in
+// lib/higgsfield-client.js (uploadToHiggsfield). Pass through http(s) URLs,
 // resolve relative paths to https, and accept data: URIs inline.
 
 async function runJob(jobId, body) {
@@ -1125,13 +1128,14 @@ async function runJob(jobId, body) {
       : [];
     console.log(`[Job ${jobId}] videoType=${videoType} Prepared URLs:`, { avatar: preparedAvatar?.slice(0, 80), product: preparedProduct?.slice(0, 80), businessPhotos: preparedBusinessPhotos.length });
 
-    // BytePlus Seedance accepts http(s) URLs and inline data URIs. Resolve
-    // each image upfront once and reuse for all scenes — saves four redundant
-    // resolutions across the per-scene loop.
-    const [seedanceAvatarUrl, seedanceProductUrl, seedanceBusinessPhotos] = await Promise.all([
-      preparedAvatar ? uploadToByteplusFiles(preparedAvatar) : null,
-      preparedProduct ? uploadToByteplusFiles(preparedProduct) : null,
-      Promise.all(preparedBusinessPhotos.map(u => uploadToByteplusFiles(u))).then(arr => arr.filter(Boolean))
+    // Higgsfield's MCP media_upload accepts http(s) URLs and inline data
+    // URIs. Resolve each image upfront once (relative paths → absolute https)
+    // and reuse for all scenes — saves four redundant resolutions across the
+    // per-scene loop.
+    const [refAvatarUrl, refProductUrl, refBusinessPhotos] = await Promise.all([
+      preparedAvatar ? uploadToHiggsfield(preparedAvatar) : null,
+      preparedProduct ? uploadToHiggsfield(preparedProduct) : null,
+      Promise.all(preparedBusinessPhotos.map(u => uploadToHiggsfield(u))).then(arr => arr.filter(Boolean))
     ]);
 
     const voiceGender = voiceId === 'nBiC8Jexp2XGyIxATg9S' ? 'male' : 'female';
@@ -1172,35 +1176,39 @@ async function runJob(jobId, body) {
       console.log(`    kling_prompt (first 150): ${(s?.kling_prompt || '').slice(0, 150)}`);
     });
 
-    // BytePlus-only video flow. Each scene tries BytePlus Seedance 2.0; on
-    // failure we build a 5-second static MP4 from a single scene-relevant
-    // reference image (avatar for 1/3/4, product for UGC scene 2). No fal.ai,
-    // no NanoBanana — fal credits are exhausted and migrating away from
-    // them is the whole point of this route's redesign.
-    console.log(`[Job ${jobId}] Starting BytePlus-only scene generation (sharp static as fallback)...`);
-    const byteplusReady = isByteplusConfigured();
-    if (!byteplusReady) {
-      console.warn(`[Job ${jobId}] BytePlus not configured (missing ARK_API_KEY/ARK_BASE_URL) — every scene will use the static fallback`);
+    // Higgsfield-only video flow. Each scene tries Higgsfield (Seedance 2.0
+    // via MCP); on failure we build a 5-second static MP4 from a single
+    // scene-relevant reference image (avatar for 1/3/4, product for UGC scene
+    // 2). No fal.ai, no NanoBanana — fal credits are exhausted and BytePlus
+    // was rejecting our Seedream-generated avatars under its content filter.
+    console.log(`[Job ${jobId}] Starting Higgsfield-only scene generation (sharp static as fallback)...`);
+    const higgsfieldReady = isHiggsfieldConfigured();
+    if (!higgsfieldReady) {
+      console.warn(`[Job ${jobId}] Higgsfield not configured (missing HIGGSFIELD_TOKEN/ANTHROPIC_API_KEY) — every scene will use the static fallback`);
     }
-    const videoMeta = new Array(4).fill('none'); // 'byteplus' | 'static' | 'none'
+    const videoMeta = new Array(4).fill('none'); // 'higgsfield' | 'static' | 'none'
+    // Per-scene token usage from the Anthropic API (one entry per successful
+    // Higgsfield call). Used after Promise.all to log a job-wide cost summary
+    // and warn if spend exceeds $5.
+    const sceneUsages = new Array(4).fill(null);
 
     // computeSceneInputs — returns the per-scene reference image list and
-    // the wrapped Seedance prompt for the BytePlus call.
+    // the wrapped video prompt for the Higgsfield call.
     const computeSceneInputs = async (i) => {
       const beat = i + 1;
       const klingScene4Context = i === 3;
       const klingIsBusinessCraft = videoType === 'business';
       const klingProductOnly = (i === 1) && !klingIsBusinessCraft;
 
-      // Reuse the upfront-resolved BytePlus URLs (no per-scene re-resolution).
-      const avatarFalUrl = seedanceAvatarUrl;
-      const productFalUrl = seedanceProductUrl;
+      // Reuse the upfront-resolved URLs (no per-scene re-resolution).
+      const avatarFalUrl = refAvatarUrl;
+      const productFalUrl = refProductUrl;
 
       const referenceImages = (() => {
         if (klingIsBusinessCraft) {
-          if (i === 1) return seedanceBusinessPhotos.slice(0, 3);
+          if (i === 1) return refBusinessPhotos.slice(0, 3);
           if (i === 0) return [avatarFalUrl].filter(Boolean);
-          return [avatarFalUrl, seedanceBusinessPhotos[0]].filter(Boolean);
+          return [avatarFalUrl, refBusinessPhotos[0]].filter(Boolean);
         }
         switch (i + 1) {
           case 1: return [avatarFalUrl].filter(Boolean);
@@ -1225,54 +1233,58 @@ async function runJob(jobId, body) {
       return { avatarFalUrl, productFalUrl, referenceImages, wrappedKlingPrompt };
     };
 
-    // generateSceneVideoByteplus — BytePlus ModelArk Seedance 2.0 reference-
-    // to-video call. ModelArk trusts Seedream-generated avatars natively,
-    // which is why this route was migrated off fal entirely.
-    const generateSceneVideoByteplus = async (i) => {
+    // generateSceneVideoHiggsfield — Anthropic Messages API + Higgsfield MCP
+    // connector. Claude orchestrates media_upload + generate_video
+    // (seedance_2_0) and returns a video URL. Higgsfield trusts Seedream-
+    // generated avatars, which BytePlus's content filter rejected. The
+    // returned `usage` is captured into sceneUsages[i] for the job-wide cost
+    // summary printed after Promise.all.
+    const generateSceneVideoHiggsfield = async (i) => {
       try {
         const { wrappedKlingPrompt, referenceImages } = await computeSceneInputs(i);
-        console.log(`[BytePlus] Scene ${i+1} sending ${referenceImages.filter(Boolean).length} reference images, prompt length=${wrappedKlingPrompt.length}`);
-        const { videoUrl } = await byteplusGenerateVideo({
+        console.log(`[Higgsfield] Scene ${i+1} sending ${referenceImages.filter(Boolean).length} reference images, prompt length=${wrappedKlingPrompt.length}`);
+        const { videoUrl, usage } = await higgsfieldGenerateVideo({
           prompt: wrappedKlingPrompt,
           imageUrls: referenceImages.filter(Boolean),
           duration: 5
         });
+        if (usage) sceneUsages[i] = usage;
         return videoUrl || null;
       } catch (e) {
-        console.error(`[Video scene ${i+1}] BytePlus direct failed: ${e?.message}`);
+        console.error(`[Video scene ${i+1}] Higgsfield direct failed: ${e?.message}`);
         return null;
       }
     };
 
     // tryScene — single source of truth for video output:
-    //   1) BytePlus ModelArk Seedance 2.0 (only generation provider)
+    //   1) Higgsfield MCP via Anthropic Messages API (only generation provider)
     //   2) Static MP4 (data: URL) built via sharp + ffmpeg from a single
-    //      scene-relevant reference image when BytePlus fails.
+    //      scene-relevant reference image when Higgsfield fails.
     //
-    // Returns { frame, video } per scene. `frame` stays null when BytePlus
+    // Returns { frame, video } per scene. `frame` stays null when Higgsfield
     // succeeds; on static fallback it's the reference image used.
     const tryScene = async (i) => {
-      // 1) BytePlus ModelArk Seedance 2.0
-      if (byteplusReady) {
+      // 1) Higgsfield MCP via Anthropic Messages API
+      if (higgsfieldReady) {
         try {
-          console.log(`[Job ${jobId}] BytePlus scene ${i+1}: attempting...`);
-          const bpUrl = await generateSceneVideoByteplus(i);
+          console.log(`[Job ${jobId}] Higgsfield scene ${i+1}: attempting...`);
+          const bpUrl = await generateSceneVideoHiggsfield(i);
           if (bpUrl) {
             const v = await validateKlingVideo(bpUrl);
             if (v.valid) {
-              console.log(`[Job ${jobId}] BytePlus scene ${i+1}: OK — ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s`);
-              videoMeta[i] = 'byteplus';
+              console.log(`[Job ${jobId}] Higgsfield scene ${i+1}: OK — ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s`);
+              videoMeta[i] = 'higgsfield';
               return { frame: null, video: bpUrl };
             }
-            console.warn(`[Job ${jobId}] BytePlus scene ${i+1} url failed validation: ${v.reason}`);
+            console.warn(`[Job ${jobId}] Higgsfield scene ${i+1} url failed validation: ${v.reason}`);
           } else {
-            console.warn(`[Job ${jobId}] BytePlus scene ${i+1} returned no url`);
+            console.warn(`[Job ${jobId}] Higgsfield scene ${i+1} returned no url`);
           }
         } catch (e) {
-          console.error(`[Job ${jobId}] BytePlus scene ${i+1} threw: ${e?.message}`);
+          console.error(`[Job ${jobId}] Higgsfield scene ${i+1} threw: ${e?.message}`);
         }
       } else {
-        console.error(`[Job ${jobId}] BytePlus not configured (no ARK_API_KEY) — going straight to static fallback`);
+        console.error(`[Job ${jobId}] Higgsfield not configured (no HIGGSFIELD_TOKEN/ANTHROPIC_API_KEY) — going straight to static fallback`);
       }
 
       // 2) Static fallback — single scene-relevant image, sharp cover-fit to
@@ -1322,6 +1334,23 @@ async function runJob(jobId, body) {
     const videos = sceneResults.map(r => r.video);
 
     console.log(`[Job ${jobId}] Video sources:`, videoMeta.map((m, i) => `scene${i+1}=${m}`).join(', '));
+
+    // Anthropic API cost summary across all 4 scenes. Higgsfield's MCP
+    // doesn't bill us — Anthropic does, since Claude is the MCP client.
+    // Warn loudly if a single video burns more than $5 in tokens; that
+    // usually means a prompt blew up (e.g., reference URL re-sent multiple
+    // times in a retry loop) and is worth investigating.
+    {
+      const successfulUsages = sceneUsages.filter(Boolean);
+      const totalCost = successfulUsages.reduce((s, u) => s + (u.cost_usd || 0), 0);
+      const totalIn = successfulUsages.reduce((s, u) => s + (u.input_tokens || 0), 0);
+      const totalOut = successfulUsages.reduce((s, u) => s + (u.output_tokens || 0), 0);
+      const totalElapsed = successfulUsages.reduce((s, u) => s + (u.elapsed_s || 0), 0);
+      console.log(`[Job ${jobId}] Anthropic cost summary: ${successfulUsages.length}/4 scenes, in=${totalIn} out=${totalOut} elapsed=${totalElapsed.toFixed(1)}s ≈ $${totalCost.toFixed(4)}`);
+      if (totalCost > 5) {
+        console.warn(`[Job ${jobId}] ⚠️  COST ALERT: Anthropic spend exceeded $5 ($${totalCost.toFixed(2)}) for this single video. Investigate prompt size or retry loops.`);
+      }
+    }
 
     const result = {
       story: { scenes, hebrew_voice: voiceover },
