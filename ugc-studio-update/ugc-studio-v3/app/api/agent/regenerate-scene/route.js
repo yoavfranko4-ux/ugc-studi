@@ -40,6 +40,11 @@ const MAX_REGENS_PER_SCENE = 3;
 // avatars) on fal.storage to bypass Seedance's untrusted-domain filter.
 async function ensureFalUrl(u) {
   if (!u || typeof u !== 'string') return null;
+  if (u.startsWith('/')) {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
+    u = `${baseUrl}${u}`;
+    console.log(`[regenerate-scene][ensureFalUrl] resolved relative path to: ${u.slice(0, 100)}`);
+  }
   if (u.includes('fal.media') || u.includes('fal.storage')) return u;
   if (u.startsWith('data:')) {
     try {

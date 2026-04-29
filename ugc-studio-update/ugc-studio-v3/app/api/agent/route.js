@@ -1104,6 +1104,11 @@ async function frameToStaticVideo(frameUrl, durationSec = 5) {
 // bypasses that.
 async function ensureFalUrl(u) {
   if (!u || typeof u !== 'string') return null;
+  if (u.startsWith('/')) {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
+    u = `${baseUrl}${u}`;
+    console.log(`[ensureFalUrl] resolved relative path to: ${u.slice(0, 100)}`);
+  }
   if (u.includes('fal.media') || u.includes('fal.storage')) return u;
   if (u.startsWith('data:')) {
     try {
@@ -1151,7 +1156,9 @@ async function runJob(jobId, body) {
     } = body;
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
     const prepareUrl = (u) => u
-      ? (u.startsWith('http') || u.startsWith('data:') ? u : `${baseUrl}${u}`)
+      ? (u.startsWith('http') || u.startsWith('data:')
+          ? u
+          : `${baseUrl}${u.startsWith('/') ? '' : '/'}${u}`)
       : null;
     const preparedAvatar = prepareUrl(avatarUrl);
     const preparedProduct = prepareUrl(productImageUrl);
