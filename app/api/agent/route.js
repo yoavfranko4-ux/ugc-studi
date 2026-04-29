@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { checkRateLimit } from '../middleware/rateLimit.js'
 import { validateProductInput, sanitizeForLLM } from '../middleware/validate.js'
 import { cleanHebrewText } from '../../../lib/hebrew-tts.js'
+import { generateVideo as byteplusGenerateVideo, isByteplusConfigured } from '../../../lib/byteplus-client.js'
 
 export async function POST(req) {
   // Rate limiting
@@ -41,7 +42,8 @@ export async function POST(req) {
       : 'female'
   const isMale = voiceGender === 'male'
 
-  console.log('Keys available:', { hasFal: !!falKey, hasEleven: !!elevenKey, voiceId, voiceGender })
+  const byteplusReady = isByteplusConfigured()
+  console.log('Keys available:', { hasFal: !!falKey, hasEleven: !!elevenKey, hasByteplus: byteplusReady, voiceId, voiceGender })
 
   const pName = rawProductName || 'המוצר'
   const pUse = applicationArea || 'מורחים על האזור הבעייתי'
@@ -628,9 +630,13 @@ Return ONLY JSON:
   const nPlaceholder = frameSources.filter(s => s === 'placeholder').length
   console.log(`[Job ${jobId}] Completed: ${nPrimary}/4 frames from NB primary, ${nFallback}/4 from flux fallback, ${nPlaceholder}/4 placeholder`)
 
-  // ── STEP 3: Generate Kling videos SEQUENTIALLY ──
-  const videos = []
-  for (let i = 0; i < 4; i++) {
+  // ── STEP 3: Generate videos SEQUENTIALLY ──
+  // Primary: BytePlus ModelArk Seedance 2.0 (when ARK_API_KEY is set).
+  // ModelArk trusts face-containing outputs from Seedream models, which
+  // bypasses fal.ai's content filter on real-person reference frames.
+  // Fallback: fal.ai Kling v1.6 (existing path) — used when BytePlus is not
+  // configured or fails for a specific scene.
+  async function generateSceneVideoFal(i) {
     try {
       const kRes = await fetch('https://fal.run/fal-ai/kling-video/v1.6/standard/image-to-video', {
         method: 'POST',
@@ -643,8 +649,6 @@ Return ONLY JSON:
         })
       })
       const kData = await kRes.json()
-
-      // Poll if needed
       let videoUrl = kData.video?.url || kData.url
       if (!videoUrl && kData.request_id) {
         for (let p = 0; p < 72; p++) {
@@ -659,10 +663,44 @@ Return ONLY JSON:
           if (pd.status === 'FAILED') break
         }
       }
-      videos.push(videoUrl || null)
-    } catch {
-      videos.push(null)
+      return videoUrl || null
+    } catch (e) {
+      console.error(`[Video scene ${i+1}] fal/Kling exception:`, e?.message)
+      return null
     }
+  }
+
+  async function generateSceneVideoByteplus(i) {
+    try {
+      const { videoUrl } = await byteplusGenerateVideo({
+        prompt: story.scenes[i].kling_prompt,
+        imageUrls: frames[i] ? [frames[i]] : [],
+        duration: 5
+      })
+      return videoUrl || null
+    } catch (e) {
+      console.error(`[Video scene ${i+1}] BytePlus failed: ${e?.message}`)
+      return null
+    }
+  }
+
+  const videos = []
+  for (let i = 0; i < 4; i++) {
+    let videoUrl = null
+    if (byteplusReady) {
+      console.log(`[Video scene ${i+1}] using BytePlus ModelArk (Seedance 2.0)`)
+      videoUrl = await generateSceneVideoByteplus(i)
+      if (!videoUrl && falKey) {
+        console.warn(`[Video scene ${i+1}] BytePlus failed — falling back to fal.ai/Kling`)
+        videoUrl = await generateSceneVideoFal(i)
+      }
+    } else if (falKey) {
+      console.log(`[Video scene ${i+1}] using fal.ai/Kling (BytePlus not configured)`)
+      videoUrl = await generateSceneVideoFal(i)
+    } else {
+      console.warn(`[Video scene ${i+1}] no video provider configured`)
+    }
+    videos.push(videoUrl)
   }
 
   // ── STEP 4: Generate voice — V3 only ──
