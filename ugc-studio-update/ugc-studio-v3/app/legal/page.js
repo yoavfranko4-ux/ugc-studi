@@ -269,7 +269,7 @@ export default function LegalPage() {
               <ul style={{ ...ulStyle, marginTop: 6 }}>
                 <li style={liStyle}>Anthropic – יצירת תוכן.</li>
                 <li style={liStyle}>
-                  <a href="http://fal.ai" style={linkStyle}>fal.ai</a> – יצירת סרטונים.
+                  <a href="https://www.byteplus.com/en/product/modelark" style={linkStyle}>BytePlus ModelArk (ByteDance)</a> – יצירת סרטונים ותמונות.
                 </li>
                 <li style={liStyle}>ElevenLabs – קריינות.</li>
                 <li style={liStyle}>Supabase – אחסון נתונים.</li>

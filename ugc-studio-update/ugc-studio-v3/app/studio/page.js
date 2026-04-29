@@ -317,12 +317,10 @@ export default function Home() {
   const [voiceGender, setVoiceGender] = useState('female')
   const [voicePreviewing, setVoicePreviewing] = useState(null)
   const voicePreviewRef = useRef(null)
-  const [falKey, setFalKey] = useState('')
   const [elevenKey, setElevenKey] = useState('')
   const [keysOpen, setKeysOpen] = useState(false)
   useEffect(() => {
     fetch('/api/keys').then(r => r.json()).then(d => {
-      if (d.fal) setFalKey(d.fal)
       if (d.eleven) setElevenKey(d.eleven)
     }).catch(() => {})
   }, [])
@@ -559,10 +557,10 @@ export default function Home() {
     setPreloadProgress({ done: 0, total })
 
     // === Route videos through the Railway proxy. ===
-    // fal.ai's geo CDN is inconsistent — some users get 50ms TTFB, others get
-    // 2MB-per-30s. Railway's link to fal.ai is fast and consistent, and the
-    // proxy caches bytes in memory (pre-warmed at job completion), so second
-    // load of the same URL is instant. See lib/video-cache.js.
+    // BytePlus's video CDN can be inconsistent across geographies. Routing
+    // through Railway gives a stable link, and the proxy caches bytes in
+    // memory (pre-warmed at job completion), so second load is instant.
+    // See lib/video-cache.js.
     const USE_PROXY = true
     const viaProxy = (u) => (USE_PROXY && u && !u.startsWith('/api/')) ? `/api/proxy?url=${encodeURIComponent(u)}` : u
     console.log(`[Studio] Starting to load ${total} videos (USE_PROXY=${USE_PROXY})`)
@@ -702,8 +700,8 @@ export default function Home() {
     // the bytes are already in memory and don't need to be re-downloaded.
     // Progress counter updates as each video arrives — user sees 1/4, 2/4, …
     // -----------------------------------------------------------------------
-    // Fetch a single clip with up to 3 attempts (transient fal.ai CDN issues
-    // are common — retrying usually succeeds). Each attempt gets a fresh
+    // Fetch a single clip with up to 3 attempts (transient CDN issues are
+    // common — retrying usually succeeds). Each attempt gets a fresh
     // 15-second AbortController so one slow attempt can't eat the budget.
     const fetchClipWithRetry = async (remoteUrl, i, maxAttempts = 3) => {
       let lastErr = null
@@ -926,13 +924,13 @@ export default function Home() {
       addLog('Avatar: ' + (currentAvatarUrl ? currentAvatarUrl.slice(0,40) : 'NONE'), currentAvatarUrl ? '' : 'err')
       let finalAvatarUrl = currentAvatarUrl
       if (currentAvatarUrl && currentAvatarUrl.startsWith('data:')) {
-        addLog('מעלה אווטאר ל-fal.ai...')
+        addLog('מעלה אווטאר...')
         const [header, base64] = avatarUrl.split(',')
         const mime = header.match(/:(.*?);/)[1]
         const bc = atob(base64), ba = new Uint8Array(bc.length)
         for (let i = 0; i < bc.length; i++) ba[i] = bc.charCodeAt(i)
         const blob = new Blob([ba], { type: mime })
-        const fd = new FormData(); fd.append('file', blob, 'avatar.jpg'); fd.append('falKey', falKey)
+        const fd = new FormData(); fd.append('file', blob, 'avatar.jpg')
         const up = await fetch('/api/upload', { method: 'POST', body: fd })
         const upData = await up.json()
         finalAvatarUrl = upData.url || upData.access_url
@@ -946,7 +944,7 @@ export default function Home() {
         const pbc = atob(pb), pba = new Uint8Array(pbc.length)
         for (let i = 0; i < pbc.length; i++) pba[i] = pbc.charCodeAt(i)
         const pblob = new Blob([pba], { type: pm })
-        const pfd = new FormData(); pfd.append('file', pblob, 'product.jpg'); pfd.append('falKey', falKey)
+        const pfd = new FormData(); pfd.append('file', pblob, 'product.jpg')
         addLog('מעלה תמונת מוצר...')
         const pup = await fetch('/api/upload', { method: 'POST', body: pfd })
         const pupData = await pup.json()
@@ -970,7 +968,7 @@ export default function Home() {
       }
       const agentRes = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, falKey, elevenKey, voiceId, userId })
+        body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, elevenKey, voiceId, userId })
       })
       if (!agentRes.ok) throw new Error('Agent failed')
       const { jobId } = await agentRes.json()
@@ -1368,7 +1366,7 @@ export default function Home() {
       console.log('[Studio Export] result.story?.scenes:', result?.story?.scenes?.map((s, i) => ({ i, video_url: s?.video_url })))
 
       // Always encode base64 from the preloaded blob URL (already in browser memory — fast & reliable).
-      // HTTP URLs from Kling/fal.ai expire, so we only use them as a LAST RESORT.
+      // HTTP URLs from BytePlus expire, so we only use them as a LAST RESORT.
       // videoUrls are still sent so the server has a secondary fallback.
       setExportProgress('מכין קליפים... 5%')
       const videoUrls = orderedScenes.map(si => {
@@ -1647,7 +1645,6 @@ export default function Home() {
         </button>
         {keysOpen && (
           <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label style={lblS}>fal.ai Key</label><input type="password" value={falKey} onChange={e => setFalKey(e.target.value)} placeholder="xxxxxxxx:xxxxxxxx" style={{ ...inpS, marginTop: 6 }} /></div>
             <div><label style={lblS}>ElevenLabs Key</label><input type="password" value={elevenKey} onChange={e => setElevenKey(e.target.value)} placeholder="sk_xxxxxxxx" style={{ ...inpS, marginTop: 6 }} /></div>
             <div style={{ gridColumn: '1/-1', background: 'rgba(255,0,128,0.04)', border: '1px solid rgba(255,0,128,0.12)', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#52525b' }}>
               <span style={{ color: '#FF0080', fontWeight: 600 }}>Claude API</span> רץ בשרת — לא צריך מפתח

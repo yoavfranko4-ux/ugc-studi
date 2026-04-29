@@ -1,103 +1,18 @@
 // Shared helpers for the agent pipeline.
 //
-// Extracted from app/api/agent/route.js so the regenerate-scene endpoint
-// (app/api/agent/regenerate-scene/route.js) can reuse the same frame-
-// generation logic and prompt-lock constants without duplication.
-//
-// As of the UGC Creator Pro skill rollout, the identity-lock / anatomy / no-
-// phone / anti-AI / product-lock rules all live in lib/ugc-skills/. We re-
-// export the stable constants here for backwards compat and delegate prompt
-// wrapping to the skill's building blocks so there is one source of truth.
-//
-// Callers must have configured `fal` (via `fal.config({ credentials: ... })`)
-// before invoking `generateNBFrame`. Both route files configure it at module
-// load from process.env.FAL_API_KEY, so nothing to do here.
+// Originally this module hosted fal.ai-bound helpers (NanoBanana frame
+// generation via fal.run, applyFlatColorGrading via fal.storage.upload,
+// etc.). After the BytePlus migration the only remaining shared concerns
+// are skill re-exports and the avatar→actor mapping used by the studio
+// script-generation path.
 
-import { fal } from '@fal-ai/client'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
-import { writeFile, readFile, unlink } from 'fs/promises'
-import fs from 'fs'
-import path from 'path'
-import os from 'os'
-import { randomUUID } from 'crypto'
-import { createRequire } from 'module'
 import {
   generateUGCPrompt,
-  buildPrompt,
   buildKlingPrompt,
-  getActorCard,
-  getShotTypeForBeat,
-  getShotType,
-  CHARACTER_REF_RULE,
-  ANATOMY_RULE,
-  STANDARD_NEGATIVES,
-  ANATOMY_NEGATIVES,
-  getMandatoryProductPhrases,
   STABLE as SKILL_STABLE,
   PRODUCT_LOCK as SKILL_PRODUCT_LOCK,
   BUSINESS_CRAFT_LOCK as SKILL_BUSINESS_CRAFT_LOCK
 } from './ugc-skills/index.js'
-
-const _require = createRequire(import.meta.url)
-let _ffmpegStaticPath = null
-try { _ffmpegStaticPath = _require('ffmpeg-static') } catch {}
-const _execFileAsync = promisify(execFile)
-
-// Light grading touch — Seedance already produces flat-ish output, so we just
-// take a small bite out of contrast/saturation rather than crushing it. The
-// previous 0.85/0.80 setting read as "destroyed" once Seedance was the source.
-//   contrast=0.95 → 5% less contrast
-//   saturation=0.92 → 8% less saturation
-//   brightness=0.01 → mids barely lifted
-// On any failure we return the original Kling URL — post-process is
-// best-effort, never a blocker for finishing the job.
-export async function applyFlatColorGrading(videoUrl, label = '') {
-  if (!videoUrl) return videoUrl;
-  if (!_ffmpegStaticPath || !fs.existsSync(_ffmpegStaticPath)) {
-    console.warn(`[post-process${label ? ' ' + label : ''}] ffmpeg-static not available — returning original`);
-    return videoUrl;
-  }
-  const tmpDir = os.tmpdir();
-  const stamp = `${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const inputPath = path.join(tmpDir, `kling-in-${stamp}.mp4`);
-  const outputPath = path.join(tmpDir, `kling-out-${stamp}.mp4`);
-  try {
-    const res = await fetch(videoUrl);
-    if (!res.ok) throw new Error(`download failed HTTP ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    await writeFile(inputPath, buf);
-
-    await _execFileAsync(_ffmpegStaticPath, [
-      '-y',
-      '-i', inputPath,
-      '-vf', 'eq=contrast=0.95:saturation=0.92:brightness=0.01',
-      '-c:v', 'libx264',
-      '-preset', 'fast',
-      '-crf', '23',
-      '-an',
-      '-movflags', '+faststart',
-      outputPath
-    ], { timeout: 90000, maxBuffer: 50 * 1024 * 1024 });
-
-    const stats = fs.statSync(outputPath);
-    if (stats.size < 10 * 1024) throw new Error(`processed mp4 too small (${stats.size}B)`);
-
-    const processedBuf = await readFile(outputPath);
-    const blob = new Blob([processedBuf], { type: 'video/mp4' });
-    const uploadedUrl = await fal.storage.upload(blob);
-    if (!uploadedUrl) throw new Error('fal.storage.upload returned empty');
-
-    console.log(`[post-process${label ? ' ' + label : ''}] OK — ${processedBuf.length}B → ${uploadedUrl.slice(0, 80)}`);
-    return uploadedUrl;
-  } catch (err) {
-    console.error(`[post-process${label ? ' ' + label : ''}] failed, falling back to original:`, err.message);
-    return videoUrl;
-  } finally {
-    unlink(inputPath).catch(() => {});
-    unlink(outputPath).catch(() => {});
-  }
-}
 
 export const SCENE_DURATIONS = [5, 5, 5, 5];
 
@@ -110,7 +25,7 @@ export const BUSINESS_CRAFT_LOCK = SKILL_BUSINESS_CRAFT_LOCK;
 // lib/agent-pipeline.js without learning the ugc-skills path.
 export { generateUGCPrompt, buildKlingPrompt };
 
-// Map an avatar URL / filename to the actor id used by lib/ugc-skills. The
+// Map an avatar URL / filename to the actor info used by lib/ugc-skills. The
 // skill's Layer-1 identity lock needs this to pick the right actor card.
 //
 // The studio UI (app/studio/page.js) ships six avatars under
@@ -119,15 +34,6 @@ export { generateUGCPrompt, buildKlingPrompt };
 // the closest-gender card. Custom (data:) uploads return null and the caller
 // is expected to throw — the legacy fallback was removed so silent drift to a
 // no-realism prompt no longer happens.
-export function mapAvatarToActorId(avatarUrl) {
-  const info = mapAvatarToActorInfo(avatarUrl);
-  return info ? info.actorId : null;
-}
-
-// Richer mapping that also reports whether the chosen card is a best-effort
-// fallback (Adam/Yoav/Lior/Dana have no card of their own; we route them to
-// the closest-gender card and signal the consumer to lean on the reference
-// image instead of the hard-coded identity-lock text).
 export function mapAvatarToActorInfo(avatarUrl) {
   if (!avatarUrl) return null;
   const url = String(avatarUrl).toLowerCase();
@@ -146,87 +52,4 @@ export function mapAvatarToActorInfo(avatarUrl) {
   if (url.includes('avatar-maya')   || url.includes('/maya'))   return { actorId: 'maya',   isFallbackActor: false };
 
   return null;
-}
-
-// Generate a still frame via NanoBanana (fal.ai).
-//
-//   prompt       — scene-specific nb_prompt (Claude-authored or custom)
-//   imageUrls    — reference images (avatar, product, prev-frame) — may be empty
-//   maxRetries   — retries on 403/429
-//   opts.productOnly     — scene 2 product-only composition (no person)
-//   opts.scene4Context   — scene 4 aspirational-result (drops default lighting
-//                          + vehicle negative so contextual setting dominates)
-//   opts.actorId         — (optional) 'daniel' | 'noa' | 'maya'. When present
-//                          alongside opts.beat, the prompt is rebuilt end-to-end
-//                          via the skill's buildPrompt(). Without these, we
-//                          fall back to the legacy wrapping path so existing
-//                          callers keep working unchanged.
-//   opts.beat            — 1..4 storytelling beat; required when using actorId
-//   opts.isBusinessCraft — use BUSINESS_CRAFT_LOCK instead of PRODUCT_LOCK
-//   opts.productName     — passed through to skill for product-context overlays
-//
-// Returns the generated image URL, or throws after maxRetries failures.
-export async function generateNBFrame(prompt, imageUrls, maxRetries = 3, opts = {}) {
-  const validUrls = imageUrls.filter(Boolean);
-  const productOnly = opts.productOnly === true;
-  const scene4Context = opts.scene4Context === true;
-
-  let enhancedPrompt;
-  if (productOnly) {
-    const productOnlyRule = 'PRODUCT ONLY SHOT — absolutely no person, no human, no hands holding the product, no face, no body parts, no avatar, no model. The frame contains ONLY the product resting on a surface. Pure product photography, studio-style, no humans in frame whatsoever.';
-    const productNegatives = 'Negative (STRICT): person, human, woman, man, hands, face, body, avatar, model, people, arms, fingers, holding, selfie, skin, hair, limbs, silhouette.';
-    const productRealism = 'shot on iPhone back camera in a real home setting, natural daylight through a nearby window plus ambient room light, slight handheld angle rather than dead-on tripod, subtle lens softness at corners, flat washed-out color grading, low saturation, uncolor-graded, realistic surface with tiny imperfections — faint dust, small fingerprint smudge, organic wood grain or authentic marble veining, mild warm white balance, no studio softbox, no seamless white backdrop, no perfectly clean catalog look, product firmly grounded on the surface with a visible contact shadow, product is NOT floating, NOT levitating, NOT suspended, NOT hovering, edges of the product render cleanly without melted geometry';
-    const mandatoryProduct = getMandatoryProductPhrases().join('; ');
-    enhancedPrompt = `${productOnlyRule} ${prompt}, realistic product photography, product clearly resting on a physical surface with contact shadow, ${productRealism}, REALISM ANCHORS — MANDATORY: ${mandatoryProduct}. photorealistic, looks like a real phone photo not a render, no burned-in subtitles or captions or on-screen text or graphic overlays. ${productNegatives}`;
-  } else {
-    // Skill-driven path is the only supported non-productOnly path. Callers
-    // must supply actorId + beat. The legacy fallback was removed because it
-    // skipped the mandatory realism anchors entirely and produced AI-vibe
-    // frames (oversized eyes, plastic smile, fused fingers).
-    if (!opts.actorId) {
-      throw new Error('generateNBFrame: opts.actorId is required for non-productOnly frames (mandatory realism anchors live in the skill path).');
-    }
-    if (!opts.beat) {
-      throw new Error('generateNBFrame: opts.beat is required for non-productOnly frames.');
-    }
-    enhancedPrompt = generateUGCPrompt({
-      actorId: opts.actorId,
-      productName: opts.productName,
-      beat: opts.beat,
-      sceneContext: prompt,
-      scene4Context,
-      isBusinessCraft: opts.isBusinessCraft === true,
-      shotTypeOverride: opts.shotTypeOverride,
-      isFallbackActor: opts.isFallbackActor === true
-    });
-  }
-
-  const endpointId = validUrls.length === 0
-    ? 'fal-ai/nano-banana-2'
-    : 'fal-ai/nano-banana-2/edit';
-  console.log('[NB] Model:', endpointId, 'Images:', validUrls.length, { promptLen: enhancedPrompt?.length, productOnly, scene4Context, urlPreviews: validUrls.map(u => u?.slice(0, 60)) });
-  const input = validUrls.length === 0
-    ? { prompt: enhancedPrompt, image_size: { width: 720, height: 1280 } }
-    : { prompt: enhancedPrompt, image_urls: validUrls, image_size: { width: 720, height: 1280 } };
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const result = await fal.run(endpointId, { input });
-      console.log('NB response:', JSON.stringify(result.data).slice(0, 400));
-      const imageUrl = result.data.images?.[0]?.url || result.data.images?.[0] || null;
-      console.log('NB image URL:', imageUrl?.slice(0, 100));
-      return imageUrl;
-    } catch (err) {
-      const status = err.status || err.statusCode || 'unknown';
-      const body = err.body || err.message || String(err);
-      console.error(`NB frame attempt ${attempt}/${maxRetries} failed — status: ${status}, body:`, JSON.stringify(body).slice(0, 500));
-      if ((status === 403 || status === 429) && attempt < maxRetries) {
-        const delay = attempt * 2000;
-        console.log(`NB retrying in ${delay}ms...`);
-        await new Promise(r => setTimeout(r, delay));
-        continue;
-      }
-      throw err;
-    }
-  }
 }
