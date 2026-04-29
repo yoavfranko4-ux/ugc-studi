@@ -271,6 +271,20 @@ const SEEDANCE_CAMERA_PHYSICS = {
   4: "Phone in her right hand at arm's length, selfie angle, slightly below eye level. Tremor only, no walking bob. Marginal drift as arm relaxes. Slight auto-exposure adjustment when product comes into frame."
 };
 
+const SEEDANCE_MACRO_DETAIL = {
+  1: "Subtle macro element: visible skin texture with natural pores, faint under-eye shadow, individual eyelashes catching light, real human imperfections.",
+  2: "Subtle macro element: product surface texture visible, label edges sharp, light refraction on packaging materials, soft contact shadow grounds the product.",
+  3: "Subtle macro element: fingers/hands texture detail, subtle skin reflection, product surface interaction visible at micro level, tangible physicality.",
+  4: "Subtle macro element: eyes catch light naturally, genuine micro-expressions, skin texture preserved, no airbrushed look, slight asymmetry in smile."
+};
+
+const SEEDANCE_LIGHT_DIRECTION = {
+  1: "Window light from her left at ~45 degrees, soft diffuse with slight directional shadow on right side of face, no harsh contrast.",
+  2: "Warm practical light from side + soft window backlight separation, gentle catchlight on product surface, contact shadow grounds the object.",
+  3: "Natural daylight as base, slight key light from 45 degrees creates dimension on action area, no flat lighting.",
+  4: "Soft golden-hour-like glow, forgiving light on face, warm tones predominate, gentle backlight on hair edges."
+};
+
 const SEEDANCE_EXPRESSION_DIRECTION = {
   1: "Expression direction: eyes drift off-camera then back (not staring at lens), brow furrows asymmetrically, lips pressed thin with slight downturn, small head shakes, hand brushes hair back, shoulders sag, defeated half-shrug, natural blinks every 2-3 seconds, brief lip-bite, occasional eye-rub. Real human imperfection — never posed.",
   // Scene 2 has no person at all — drop the expression block. Anything that
@@ -286,11 +300,11 @@ const SEEDANCE_EXPRESSION_DIRECTION = {
 // that Seedance has an unwritten UGC mode that turns on when the first words
 // frame the clip as amateur phone footage rather than commercial production.
 // Sits at parts[0] so it's the very first thing the model reads.
-const UGC_MODE_TRIGGER = "UGC creator, iPhone handheld phone footage, real organic lighting, slightly imperfect framing, no commercial polish, no studio production.";
+const UGC_MODE_TRIGGER = "Photorealistic UGC creator content, iPhone handheld phone footage, natural light, no CGI artifacting, 99% sRGB color accuracy, sharp focus, real human imperfections, slightly imperfect framing, no commercial polish, no studio production.";
 
 const SEEDANCE_AUTO_EXPOSURE = "Natural iPhone auto-exposure adjustment visible — slight image warming/cooling as the light shifts, no stable studio exposure.";
 
-const SEEDANCE_SILENT = "Silent footage, no audio, no spoken dialogue, mouth movements minimal and natural — lips part softly between phrases but no clear words form.";
+const SEEDANCE_SILENT = "Silent footage but with PHYSICAL PRESENCE — natural breathing rhythm visible, subtle ambient room presence, tactile physicality in all interactions, fabric whispers and product sounds implied through motion. No spoken dialogue, mouth movements minimal and natural — lips part softly between phrases but no clear words form.";
 
 const SEEDANCE_NEGATIVES = "NEGATIVES: no AI artifacts, no face distortion, stable anatomy, no unnatural movement, no reflections, no mirrors, no glass reflections, no reflective screens, no puddles, no studio polish, no dramatic lighting, no over-saturated colors, no cinematic color grade, no lens flares, not breathtaking, not stunning, not flawless, not seamless, not effortless, no perfect symmetry, no plastic skin, no AI smoothing, no uncanny valley, no melting hands, no extra limbs, NEVER show a phone or mobile device in scene, no smooth gimbal stabilization, no rack focus, no dolly zoom, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays.";
 
@@ -361,6 +375,8 @@ export function buildSeedancePrompt(rawPromptIn, beat, productName, opts = {}) {
     cameraPhysics,
     raw,
     expression,
+    SEEDANCE_MACRO_DETAIL[beatKey],
+    SEEDANCE_LIGHT_DIRECTION[beatKey],
     SEEDANCE_AUTO_EXPOSURE,
     productLockBlock,
     styleCloser,
@@ -384,6 +400,8 @@ export function buildSeedancePrompt(rawPromptIn, beat, productName, opts = {}) {
       cameraPhysics,
       truncatedRaw,
       expression,
+      SEEDANCE_MACRO_DETAIL[beatKey],
+      SEEDANCE_LIGHT_DIRECTION[beatKey],
       SEEDANCE_AUTO_EXPOSURE,
       productLockBlock,
       styleCloser,
