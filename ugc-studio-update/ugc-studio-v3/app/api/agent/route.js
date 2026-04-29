@@ -393,13 +393,20 @@ async function generateScript(productName, productDesc, applicationArea, hook, v
     ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'/'מובכת'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר. אל תערבב לשון נקבה.`
     : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה. אל תערבב לשון זכר.`;
   const callClaude = async (extra = '') => anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514', max_tokens: 2500,
+    model: 'claude-sonnet-4-20250514', max_tokens: 8192,
     messages: [{ role: 'user', content: `You are a UGC ad expert writing scripts in Hebrew. Create a viral 4-scene ad for: "${productName}".
 Description: ${productDesc}
 How to use: ${applicationArea}
 mode: product
 auto_detected_category: ${detectedCategory}
 auto_detected_hebrew_plural: ${detectedPlural}
+
+CRITICAL OUTPUT CONSTRAINTS:
+- Output VALID JSON only — no markdown fences (no \`\`\`json), no preamble, no commentary
+- Each kling_prompt: 400-800 chars maximum
+- Each nb_prompt: 200-400 chars maximum
+- Total response under 6000 chars
+- Start response with { and end with }
 
 STEP 0 — CATEGORY DETECTION (REQUIRED OUTPUT FIELD):
 Before writing the script, classify the product into EXACTLY ONE of these categories:
@@ -1254,6 +1261,7 @@ async function runJob(jobId, body) {
         },
         pollInterval: 5000
       });
+      console.log(`[Seedance Scene ${i+1}] FULL RESULT:`, JSON.stringify(result).slice(0, 500));
       const videoUrl = result.data.video?.url || null;
       const videoMeta = result.data.video || null;
 
@@ -1310,10 +1318,16 @@ async function runJob(jobId, body) {
             return { frame: null, video: videoUrl };
           }
           console.error(`[Seedance] Scene ${i+1} attempt ${attempt} REJECTED — url=${videoUrl ? videoUrl.slice(0, 100) : '(null)'}, reason=${reason || 'unknown'}`);
-        } catch (e) {
-          const status = e.status || e.statusCode || 'unknown';
-          const body = e.body || e.message || String(e);
+        } catch (error) {
+          const status = error?.status || error?.statusCode || 'unknown';
+          const body = error?.body || error?.message || String(error);
           console.error(`[Seedance] Scene ${i+1} attempt ${attempt} ERROR — status: ${status}, body:`, JSON.stringify(body).slice(0, 600));
+          console.error(`[Seedance Scene ${i+1}] EXCEPTION:`, {
+            message: error?.message,
+            status: error?.status,
+            body: error?.body,
+            fullError: JSON.stringify(error, Object.getOwnPropertyNames(error || {})).slice(0, 1000),
+          });
         }
         if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
       }
@@ -1824,7 +1838,7 @@ async function generateBusinessScript(name, desc, hook, voiceGender) {
   };
 
   const callClaude = async (extra = '') => anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514', max_tokens: 2500,
+    model: 'claude-sonnet-4-20250514', max_tokens: 8192,
     messages: [{ role: 'user', content: `You are a UGC ad expert writing Hebrew scripts for LOCAL BUSINESSES. Redesigned business-video format:
 
 Business name: "${name}"
@@ -1832,6 +1846,13 @@ Business description: ${desc}
 mode: business
 auto_detected_category: ${detectedCategory}
 Venue: ${venue}
+
+CRITICAL OUTPUT CONSTRAINTS:
+- Output VALID JSON only — no markdown fences (no \`\`\`json), no preamble, no commentary
+- Each kling_prompt: 400-800 chars maximum
+- Each nb_prompt: 200-400 chars maximum
+- Total response under 6000 chars
+- Start response with { and end with }
 Uniform: ${uniform}
 Close-up action: ${closeUp}
 Scene-3 activity: ${scene3Action}
