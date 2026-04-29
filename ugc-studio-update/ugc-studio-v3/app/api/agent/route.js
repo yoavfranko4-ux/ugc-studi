@@ -12,7 +12,7 @@ import { createRequire } from 'module'
 import sharp from 'sharp'
 import { prewarmVideos } from '../../../lib/video-cache.js'
 import { buildKlingPrompt, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
-import { generateVideo as higgsfieldGenerateVideo, isHiggsfieldConfigured, uploadToHiggsfield } from '../../../lib/higgsfield-client.js'
+import { generateVideo as higgsfieldGenerateVideo, generateFullVideo as higgsfieldGenerateFullVideo, isHiggsfieldConfigured, uploadToHiggsfield } from '../../../lib/higgsfield-client.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -1181,172 +1181,221 @@ async function runJob(jobId, body) {
     // scene-relevant reference image (avatar for 1/3/4, product for UGC scene
     // 2). No fal.ai, no NanoBanana — fal credits are exhausted and BytePlus
     // was rejecting our Seedream-generated avatars under its content filter.
-    console.log(`[Job ${jobId}] Starting Higgsfield-only scene generation (sharp static as fallback)...`);
+    console.log(`[Job ${jobId}] Starting Higgsfield single-shot 15s generation (sharp static as fallback)...`);
     const higgsfieldReady = isHiggsfieldConfigured();
     if (!higgsfieldReady) {
-      console.warn(`[Job ${jobId}] Higgsfield not configured (missing HIGGSFIELD_TOKEN/ANTHROPIC_API_KEY) — every scene will use the static fallback`);
+      console.warn(`[Job ${jobId}] Higgsfield not configured (missing HIGGSFIELD_TOKEN/ANTHROPIC_API_KEY) — full video will use the static fallback`);
     }
-    const videoMeta = new Array(4).fill('none'); // 'higgsfield' | 'static' | 'none'
-    // Per-scene token usage from the Anthropic API (one entry per successful
-    // Higgsfield call). Used after Promise.all to log a job-wide cost summary
-    // and warn if spend exceeds $5.
-    const sceneUsages = new Array(4).fill(null);
+    // Single 'higgsfield' | 'static' | 'none' status for the one full video.
+    let videoMeta = 'none';
+    // Token usage from the single Anthropic API call (used for the cost
+    // summary printed after the call).
+    let fullVideoUsage = null;
 
-    // computeSceneInputs — returns the per-scene reference image list and
-    // the wrapped video prompt for the Higgsfield call.
-    const computeSceneInputs = async (i) => {
-      const beat = i + 1;
-      const klingScene4Context = i === 3;
+    // Per-scene reference list — same logic as before, but now collected
+    // upfront so we can build ONE unified beat-marked prompt + ONE merged
+    // reference-image list for the single 15s call.
+    const computeSceneRefs = (i) => {
       const klingIsBusinessCraft = videoType === 'business';
-      const klingProductOnly = (i === 1) && !klingIsBusinessCraft;
-
-      // Reuse the upfront-resolved URLs (no per-scene re-resolution).
       const avatarFalUrl = refAvatarUrl;
       const productFalUrl = refProductUrl;
-
-      const referenceImages = (() => {
-        if (klingIsBusinessCraft) {
-          if (i === 1) return refBusinessPhotos.slice(0, 3);
-          if (i === 0) return [avatarFalUrl].filter(Boolean);
-          return [avatarFalUrl, refBusinessPhotos[0]].filter(Boolean);
-        }
-        switch (i + 1) {
-          case 1: return [avatarFalUrl].filter(Boolean);
-          case 2: return [productFalUrl].filter(Boolean);
-          case 3:
-          case 4: return [avatarFalUrl, productFalUrl].filter(Boolean);
-          default: return [];
-        }
-      })();
-
-      const wrappedKlingPrompt = buildKlingPrompt(
-        scenes[i].kling_prompt,
-        beat,
-        productName,
-        {
-          isBusinessCraft: klingIsBusinessCraft,
-          scene4Context: klingScene4Context,
-          productOnly: klingProductOnly
-        }
-      );
-
-      return { avatarFalUrl, productFalUrl, referenceImages, wrappedKlingPrompt };
+      if (klingIsBusinessCraft) {
+        if (i === 1) return refBusinessPhotos.slice(0, 3);
+        if (i === 0) return [avatarFalUrl].filter(Boolean);
+        return [avatarFalUrl, refBusinessPhotos[0]].filter(Boolean);
+      }
+      switch (i + 1) {
+        case 1: return [avatarFalUrl].filter(Boolean);
+        case 2: return [productFalUrl].filter(Boolean);
+        case 3:
+        case 4: return [avatarFalUrl, productFalUrl].filter(Boolean);
+        default: return [];
+      }
     };
 
-    // generateSceneVideoHiggsfield — Anthropic Messages API + Higgsfield MCP
-    // connector. Claude orchestrates media_upload + generate_video
-    // (seedance_2_0) and returns a video URL. Higgsfield trusts Seedream-
-    // generated avatars, which BytePlus's content filter rejected. The
-    // returned `usage` is captured into sceneUsages[i] for the job-wide cost
-    // summary printed after Promise.all.
-    const generateSceneVideoHiggsfield = async (i) => {
+    // Trim a per-scene kling_prompt down to its visual core. The skill
+    // produces verbose, layered prompts (~600-800 chars each) optimized for
+    // a per-scene 5s call where every wrapper helps. In the merged 15s
+    // prompt those wrappers would repeat 3× and inflate the prompt past 5K
+    // chars — that's exactly what tripped the moderation flag in the
+    // 4-call layout. We keep just the user-facing visual description.
+    const trimKlingForBeat = (raw, maxChars) => {
+      if (!raw) return '';
+      let s = String(raw).trim();
+      // Drop the leading UGC_MODE_TRIGGER / NEGATIVES wrappers if a caller
+      // somehow handed us an already-wrapped prompt.
+      s = s.replace(/^Photorealistic UGC[^.]*\.\s*/i, '');
+      s = s.replace(/NEGATIVES:[\s\S]*$/i, '').trim();
+      // Collapse whitespace for compactness.
+      s = s.replace(/\s+/g, ' ');
+      if (s.length <= maxChars) return s;
+      // Truncate at the last sentence boundary that fits.
+      const cut = s.slice(0, maxChars);
+      const lastDot = cut.lastIndexOf('. ');
+      return (lastDot > maxChars * 0.6 ? cut.slice(0, lastDot + 1) : cut).trim();
+    };
+
+    // Build the merged 3-beat 15-second prompt. Beat layout:
+    //   Beat 1 (0-4s)  PAIN     — uses scenes[0].kling_prompt (avatar only)
+    //   Beat 2 (4-7s)  PRODUCT  — uses scenes[1].kling_prompt (product only)
+    //   Beat 3 (7-15s) WIN      — merges scenes[2] + scenes[3] (avatar + product)
+    // The lip-lock rule and negatives appear ONCE at the top so the prompt
+    // does not repeat itself (which is what triggered the
+    // "copyright restrictions" rejection on the 4-call layout).
+    const buildMergedFullPrompt = () => {
+      const isBusiness = videoType === 'business';
+      const beat1 = trimKlingForBeat(scenes[0]?.kling_prompt, 220);
+      const beat2 = trimKlingForBeat(scenes[1]?.kling_prompt, 220);
+      const beat3a = trimKlingForBeat(scenes[2]?.kling_prompt, 180);
+      const beat3b = trimKlingForBeat(scenes[3]?.kling_prompt, 180);
+      const productLabel = productName || (isBusiness ? (businessName || 'the business') : 'the product');
+      const beat2Subject = isBusiness
+        ? `the storefront / craft of ${productLabel} (Image 1)`
+        : `the ${productLabel} bottle / package (Image 1)`;
+
+      const lines = [
+        `15-second UGC video, 9:16 vertical, iPhone selfie style, 3 distinct beats with HARD CUTS between them.`,
+        ``,
+        `CRITICAL — NO LIP MOVEMENT: Lips stay closed for the entire video. No talking, no singing, no mouth opening. The voiceover is added externally in Hebrew. All emotion comes from the eyes, eyebrows, and closed-mouth micro-expressions.`,
+        ``,
+        `ANATOMY: Same woman (Image 2) recognizable in beats 1 and 3. ZERO people in beat 2 — only ${productLabel}. 2 arms, 2 hands, 5 fingers each. Stable face throughout.`,
+        ``,
+        `==== BEAT 1 — PAIN (0-4s) ====`,
+        `[HARD CUT IN]`,
+        beat1,
+        ``,
+        `==== BEAT 2 — PRODUCT HERO (4-7s) ====`,
+        `[HARD CUT to product close-up]`,
+        beat2,
+        `NO PERSON in this beat. Only ${beat2Subject}. Hero shot, light catches the product.`,
+        ``,
+        `==== BEAT 3 — SOLUTION & WIN (7-15s) ====`,
+        `[HARD CUT to using product]`,
+        `First half (7-11s): ${beat3a}`,
+        `Second half (11-15s): ${beat3b}`,
+        ``,
+        `STYLE: Authentic UGC, natural light, slight handheld wobble, flat color grading.`,
+        `PRODUCT LOCK: ${productLabel} (Image 1) IDENTICAL to reference — same shape, same label, same color.`,
+        `NEGATIVES: no mirrors, no reflective surfaces, no on-screen text, no logos other than the product, no talking, no mouth opening, no AI face distortion, no extra limbs, no melting hands, no lens flares, no over-saturated color grade.`
+      ];
+      return lines.join('\n');
+    };
+
+    // Merged reference image list — avatar + product (or business photo)
+    // covers all three beats. The MCP uploads each one once and Claude
+    // hands them to generate_video as reference frames.
+    const mergedReferenceImages = (() => {
+      if (videoType === 'business') {
+        const avatar = refAvatarUrl;
+        const businessHero = refBusinessPhotos[0] || null;
+        return [businessHero, avatar].filter(Boolean);
+      }
+      return [refProductUrl, refAvatarUrl].filter(Boolean);
+    })();
+
+    // generateFullVideoHiggsfield — single-shot 15s replacement for the old
+    // 4-parallel-call layout. One Anthropic call, one Higgsfield render,
+    // one merged prompt. Avoids the 30K tok/min rate limit and the
+    // "copyright restrictions" trigger we saw with the duplicated 4-call
+    // prompts.
+    const generateFullVideoHiggsfield = async () => {
       try {
-        const { wrappedKlingPrompt, referenceImages } = await computeSceneInputs(i);
-        console.log(`[Higgsfield] Scene ${i+1} sending ${referenceImages.filter(Boolean).length} reference images, prompt length=${wrappedKlingPrompt.length}`);
-        const { videoUrl, usage } = await higgsfieldGenerateVideo({
-          prompt: wrappedKlingPrompt,
-          imageUrls: referenceImages.filter(Boolean),
-          duration: 5
+        const mergedPrompt = buildMergedFullPrompt();
+        console.log(`[Higgsfield] Full 15s video: ${mergedReferenceImages.length} refs, prompt length=${mergedPrompt.length}`);
+        const { videoUrl, usage } = await higgsfieldGenerateFullVideo({
+          prompt: mergedPrompt,
+          imageUrls: mergedReferenceImages,
+          duration: 15
         });
-        if (usage) sceneUsages[i] = usage;
+        if (usage) fullVideoUsage = usage;
         return videoUrl || null;
       } catch (e) {
-        console.error(`[Video scene ${i+1}] Higgsfield direct failed: ${e?.message}`);
+        console.error(`[Full video] Higgsfield direct failed: ${e?.message}`);
         return null;
       }
     };
 
-    // tryScene — single source of truth for video output:
-    //   1) Higgsfield MCP via Anthropic Messages API (only generation provider)
-    //   2) Static MP4 (data: URL) built via sharp + ffmpeg from a single
-    //      scene-relevant reference image when Higgsfield fails.
-    //
-    // Returns { frame, video } per scene. `frame` stays null when Higgsfield
-    // succeeds; on static fallback it's the reference image used.
-    const tryScene = async (i) => {
-      // 1) Higgsfield MCP via Anthropic Messages API
+    // tryFullVideo — single source of truth for video output:
+    //   1) Higgsfield MCP via Anthropic (single 15s call)
+    //   2) Static MP4 (data: URL) built via sharp + ffmpeg from the avatar
+    //      (or first business photo) when Higgsfield fails.
+    const tryFullVideo = async () => {
       if (higgsfieldReady) {
         try {
-          console.log(`[Job ${jobId}] Higgsfield scene ${i+1}: attempting...`);
-          const bpUrl = await generateSceneVideoHiggsfield(i);
-          if (bpUrl) {
-            const v = await validateKlingVideo(bpUrl);
+          console.log(`[Job ${jobId}] Higgsfield full video: attempting...`);
+          const fvUrl = await generateFullVideoHiggsfield();
+          if (fvUrl) {
+            const v = await validateKlingVideo(fvUrl);
             if (v.valid) {
-              console.log(`[Job ${jobId}] Higgsfield scene ${i+1}: OK — ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s`);
-              videoMeta[i] = 'higgsfield';
-              return { frame: null, video: bpUrl };
+              console.log(`[Job ${jobId}] Higgsfield full video: OK — ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s`);
+              videoMeta = 'higgsfield';
+              return { frame: null, video: fvUrl };
             }
-            console.warn(`[Job ${jobId}] Higgsfield scene ${i+1} url failed validation: ${v.reason}`);
+            console.warn(`[Job ${jobId}] Higgsfield full video failed validation: ${v.reason}`);
           } else {
-            console.warn(`[Job ${jobId}] Higgsfield scene ${i+1} returned no url`);
+            console.warn(`[Job ${jobId}] Higgsfield full video returned no url`);
           }
         } catch (e) {
-          console.error(`[Job ${jobId}] Higgsfield scene ${i+1} threw: ${e?.message}`);
+          console.error(`[Job ${jobId}] Higgsfield full video threw: ${e?.message}`);
         }
       } else {
-        console.error(`[Job ${jobId}] Higgsfield not configured (no HIGGSFIELD_TOKEN/ANTHROPIC_API_KEY) — going straight to static fallback`);
+        console.error(`[Job ${jobId}] Higgsfield not configured — going straight to static fallback`);
       }
 
-      // 2) Static fallback — single scene-relevant image, sharp cover-fit to
-      // 720x1280, ffmpeg loop into 5-sec MP4 returned as data: URL.
-      //   Scene 1 (hook):     avatar
-      //   Scene 2 (UGC):      product
-      //   Scene 2 (business): first business photo (avatar fallback)
-      //   Scene 3 (solution): avatar
-      //   Scene 4 (result):   avatar
-      const isScene2 = i === 1;
-      const ugcProductScene = isScene2 && videoType !== 'business';
-      let fallbackImage;
-      if (ugcProductScene) {
-        fallbackImage = preparedProduct;
-      } else if (videoType === 'business' && isScene2) {
-        fallbackImage = preparedBusinessPhotos[0] || preparedAvatar;
-      } else {
-        fallbackImage = preparedAvatar;
-      }
+      // Static fallback — single 15s MP4 from the avatar (or first business
+      // photo for business mode). The product-only middle beat is sacrificed
+      // here, but a single static fallback is just a placeholder so the user
+      // can see the script + voiceover and re-run.
+      const fallbackImage = (videoType === 'business')
+        ? (preparedBusinessPhotos[0] || preparedAvatar)
+        : preparedAvatar;
 
       if (fallbackImage) {
         try {
-          const staticUrl = await buildStaticFallbackVideo(fallbackImage, 5);
+          const staticUrl = await buildStaticFallbackVideo(fallbackImage, 15);
           if (staticUrl) {
-            console.log(`[Job ${jobId}] Static fallback scene ${i+1}: OK (${staticUrl.length} chars data URL)`);
-            videoMeta[i] = 'static';
+            console.log(`[Job ${jobId}] Static fallback full video: OK (${staticUrl.length} chars data URL)`);
+            videoMeta = 'static';
             return { frame: fallbackImage, video: staticUrl };
           }
         } catch (e) {
-          console.error(`[Job ${jobId}] Static fallback scene ${i+1} crashed:`, e.message);
+          console.error(`[Job ${jobId}] Static fallback full video crashed:`, e.message);
         }
       } else {
-        console.error(`[Job ${jobId}] Scene ${i+1}: no fallback image available (avatar=${!!preparedAvatar}, product=${!!preparedProduct}, business=${preparedBusinessPhotos.length})`);
+        console.error(`[Job ${jobId}] Full video: no fallback image available (avatar=${!!preparedAvatar}, business=${preparedBusinessPhotos.length})`);
       }
 
-      videoMeta[i] = 'none';
+      videoMeta = 'none';
       return { frame: null, video: null };
     };
 
-    const [voiceResult, sceneResults] = await Promise.all([
+    const [voiceResult, fullResult] = await Promise.all([
       generateVoice(voiceover, voiceId),
-      Promise.all([0, 1, 2, 3].map(tryScene))
+      tryFullVideo()
     ]);
     const audioBase64 = voiceResult?.base64 || null;
     const wordTimestamps = voiceResult?.wordTimestamps || null;
-    const frames = sceneResults.map(r => r.frame);
-    const videos = sceneResults.map(r => r.video);
+    // Frames/videos arrays kept at length 4 so existing job-result consumers
+    // (studio editor, regenerate-scene, jobs lookup) don't break. The full
+    // 15s clip lives in slot 0; the rest stay null. The studio editor
+    // detects this layout via fullVideoUrl and renders one player.
+    const fullVideoUrl = fullResult.video;
+    const frames = [fullResult.frame, null, null, null];
+    const videos = [fullVideoUrl, null, null, null];
 
-    console.log(`[Job ${jobId}] Video sources:`, videoMeta.map((m, i) => `scene${i+1}=${m}`).join(', '));
+    console.log(`[Job ${jobId}] Full video source: ${videoMeta}`);
 
-    // Anthropic API cost summary across all 4 scenes. Higgsfield's MCP
-    // doesn't bill us — Anthropic does, since Claude is the MCP client.
+    // Anthropic API cost summary for the single full-video call. Higgsfield's
+    // MCP doesn't bill us — Anthropic does, since Claude is the MCP client.
     // Warn loudly if a single video burns more than $5 in tokens; that
     // usually means a prompt blew up (e.g., reference URL re-sent multiple
     // times in a retry loop) and is worth investigating.
-    {
-      const successfulUsages = sceneUsages.filter(Boolean);
-      const totalCost = successfulUsages.reduce((s, u) => s + (u.cost_usd || 0), 0);
-      const totalIn = successfulUsages.reduce((s, u) => s + (u.input_tokens || 0), 0);
-      const totalOut = successfulUsages.reduce((s, u) => s + (u.output_tokens || 0), 0);
-      const totalElapsed = successfulUsages.reduce((s, u) => s + (u.elapsed_s || 0), 0);
-      console.log(`[Job ${jobId}] Anthropic cost summary: ${successfulUsages.length}/4 scenes, in=${totalIn} out=${totalOut} elapsed=${totalElapsed.toFixed(1)}s ≈ $${totalCost.toFixed(4)}`);
+    if (fullVideoUsage) {
+      const totalCost = fullVideoUsage.cost_usd || 0;
+      const totalIn = fullVideoUsage.input_tokens || 0;
+      const totalOut = fullVideoUsage.output_tokens || 0;
+      const totalElapsed = fullVideoUsage.elapsed_s || 0;
+      console.log(`[Job ${jobId}] Anthropic cost summary: 1 full video, in=${totalIn} out=${totalOut} elapsed=${totalElapsed.toFixed(1)}s ≈ $${totalCost.toFixed(4)}`);
       if (totalCost > 5) {
         console.warn(`[Job ${jobId}] ⚠️  COST ALERT: Anthropic spend exceeded $5 ($${totalCost.toFixed(2)}) for this single video. Investigate prompt size or retry loops.`);
       }
@@ -1356,6 +1405,11 @@ async function runJob(jobId, body) {
       story: { scenes, hebrew_voice: voiceover },
       frames,
       videos,
+      // New single-shot 15s field — studio editor uses this when present
+      // to render one player instead of the legacy 4-clip stack. Older job
+      // records (without this field) keep working through the videos array.
+      fullVideoUrl,
+      fullVideoDuration: fullVideoUrl ? 15 : null,
       audioBase64,
       wordTimestamps,
       hebrewVoice: voiceover,

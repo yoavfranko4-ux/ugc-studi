@@ -34,6 +34,11 @@ const CLAUDE_MODEL = 'claude-sonnet-4-20250514'
 // full job is bounded by the slowest scene, not the sum.
 const SCENE_TIMEOUT_MS = 20 * 60 * 1000
 
+// Single 15-second video render takes longer than a 5s scene (more frames +
+// often deeper queue position). 45 min covers the worst case without
+// abandoning a job that is actually about to finish.
+const FULL_VIDEO_TIMEOUT_MS = 45 * 60 * 1000
+
 // Pricing for token-cost logging (USD per 1M tokens, Sonnet 4 list price).
 // Update if the model id changes. Used only for log messages — no business
 // logic depends on these.
@@ -264,6 +269,125 @@ export async function generateVideo({ prompt, imageUrls = [], duration = 5 } = {
   }
 
   console.log(`[Higgsfield] scene OK in ${elapsed}s → ${videoUrl.slice(0, 100)}`)
+  return { videoUrl, usage: usageWithElapsed }
+}
+
+// generateFullVideo — single-call replacement for the per-scene loop. Sends
+// ONE merged 15-second prompt with 3 internal beats and both reference images
+// (avatar + product) instead of four parallel 5-second calls. This avoids both
+// the Anthropic 30K-tok/min rate limit (4 concurrent calls were tripping it)
+// and the "copyright restrictions" rejections we saw when four nearly
+// identical prompts hit content moderation in the same minute.
+//
+// Same return shape as generateVideo so callers stay simple.
+export async function generateFullVideo({ prompt, imageUrls = [], duration = 15 } = {}) {
+  if (!prompt || typeof prompt !== 'string') {
+    throw new Error('generateFullVideo: prompt must be a non-empty string')
+  }
+  const cleanImageUrls = (imageUrls || []).filter(
+    (u) => typeof u === 'string' && u.length > 0
+  )
+
+  const { anthropicKey, higgsfieldToken } = getConfig()
+
+  const body = {
+    model: CLAUDE_MODEL,
+    max_tokens: 4096,
+    mcp_servers: [
+      {
+        type: 'url',
+        url: MCP_SERVER_URL,
+        name: MCP_SERVER_NAME,
+        authorization_token: higgsfieldToken
+      }
+    ],
+    system: buildSystemPrompt(),
+    // No NO_LIP_PREFIX wrap here — the merged prompt built in route.js
+    // already declares the lip-lock once, cleanly, near the top. Wrapping
+    // again would duplicate the rule and re-trigger the moderation flag we
+    // saw with the 4-call layout.
+    messages: [
+      {
+        role: 'user',
+        content: buildUserMessage({
+          prompt,
+          imageUrls: cleanImageUrls,
+          duration
+        })
+      }
+    ]
+  }
+
+  const t0 = Date.now()
+  console.log(
+    `[Higgsfield] dispatching full video: refs=${cleanImageUrls.length} duration=${duration}s promptLen=${prompt.length} promptPreview="${prompt.slice(0, 100).replace(/\s+/g, ' ')}..."`
+  )
+
+  let res
+  try {
+    res = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key': anthropicKey,
+        'anthropic-version': ANTHROPIC_VERSION,
+        'anthropic-beta': ANTHROPIC_BETA,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FULL_VIDEO_TIMEOUT_MS)
+    })
+  } catch (e) {
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+    if (e?.name === 'TimeoutError' || /aborted/i.test(e?.message || '')) {
+      throw new Error(
+        `Higgsfield full video timed out after ${elapsed}s (limit ${FULL_VIDEO_TIMEOUT_MS / 1000}s)`
+      )
+    }
+    throw new Error(`Higgsfield request failed: ${e.message}`)
+  }
+
+  const text = await res.text()
+  let data
+  try {
+    data = JSON.parse(text)
+  } catch {
+    data = { raw: text }
+  }
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+
+  if (!res.ok) {
+    console.error(
+      `[Higgsfield] Anthropic API HTTP ${res.status} after ${elapsed}s: ${text.slice(0, 400)}`
+    )
+    throw new Error(
+      `Anthropic API HTTP ${res.status}: ${text.slice(0, 200)}`
+    )
+  }
+
+  const usage = summarizeUsage(data?.usage)
+  logTokenUsage(`full video (${elapsed}s)`, usage)
+  const usageWithElapsed = usage ? { ...usage, elapsed_s: Number(elapsed) } : null
+
+  if (data?.stop_reason === 'error' || data?.type === 'error') {
+    const msg = data?.error?.message || data?.error || 'unknown error'
+    throw new Error(`Higgsfield/Claude error: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`)
+  }
+
+  const claudeError = extractError(data?.content)
+  if (claudeError) {
+    throw new Error(`Higgsfield generation reported failure: ${claudeError}`)
+  }
+
+  const videoUrl = extractVideoUrl(data?.content)
+  if (!videoUrl) {
+    const dump = JSON.stringify(data?.content || data || {}).slice(0, 600)
+    console.error(
+      `[Higgsfield] no VIDEO_URL in response after ${elapsed}s. stop_reason=${data?.stop_reason}. content preview: ${dump}`
+    )
+    throw new Error('Higgsfield returned no video URL')
+  }
+
+  console.log(`[Higgsfield] full video OK in ${elapsed}s → ${videoUrl.slice(0, 100)}`)
   return { videoUrl, usage: usageWithElapsed }
 }
 

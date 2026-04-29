@@ -332,6 +332,14 @@ export default function Home() {
   const [exportProgress, setExportProgress] = useState('')
   // Editor state
   const [clipOrder, setClipOrder] = useState([0, 1, 2, 3])
+  // Adapt clipOrder when the job is the new single-shot 15s layout
+  // (result.fullVideoUrl present → only slot 0 has a clip). Older jobs
+  // without that field keep the legacy 4-clip flow. We don't overwrite a
+  // user-saved order that's already shorter than 4.
+  useEffect(() => {
+    if (!result?.fullVideoUrl) return
+    setClipOrder(prev => (Array.isArray(prev) && prev.length === 1 && prev[0] === 0) ? prev : [0])
+  }, [result?.fullVideoUrl])
   const [dragIdx, setDragIdx] = useState(null)
   const [subtitleStyle, setSubtitleStyle] = useState('classic')
   const [sfxEnabled, setSfxEnabled] = useState(true)
@@ -1291,8 +1299,14 @@ export default function Home() {
         const subtitle = result.story?.scenes?.[sceneIdx]?.subtitle || ''
         const elapsed = activeVid.currentTime
         const segments = result.subtitleSegments || null
-        const sceneStart = idx * 5
-        const lines = getSubtitleLinesAtTime(subtitle, elapsed, 5, segments, sceneStart)
+        // Single-shot 15s layout: one clip plays the entire voiceover, so
+        // global time = local time and the scene duration is whatever the
+        // backend reported (default 15). Legacy 4-clip layout: each clip is
+        // 5s and the scene starts at idx * 5 in the global voiceover.
+        const isFullVideoMode = !!result?.fullVideoUrl
+        const sceneDuration = isFullVideoMode ? (result?.fullVideoDuration || 15) : 5
+        const sceneStart = isFullVideoMode ? 0 : idx * 5
+        const lines = getSubtitleLinesAtTime(subtitle, elapsed, sceneDuration, segments, sceneStart)
         drawSubtitlePreview(ctx, lines, canvas.width, canvas.height, subtitleStyle)
       }
       requestAnimationFrame(subtitleTick)
@@ -1414,12 +1428,19 @@ export default function Home() {
       }
       console.log(`[Studio Export] SUMMARY — ${videoClipsB64.length} clips encoded, total base64 chars: ${videoClipsB64.reduce((a, b) => a + (b?.length || 0), 0)}`)
 
-      // Build subtitles array with timestamps
+      // Build subtitles array with timestamps. The /api/export route
+      // prefers wordTimestamps (word-level ASS) over this array when both
+      // are sent — this fallback path only matters if wordTimestamps is
+      // empty. Per-clip duration is 5s in the legacy 4-clip layout and
+      // whatever fullVideoDuration says (default 15) for the single-shot
+      // 15s layout.
+      const isFullVideoMode = !!result?.fullVideoUrl
+      const perClipDuration = isFullVideoMode ? (result?.fullVideoDuration || 15) : 5
       let timeOffset = 0
       const subtitles = orderedScenes.map(i => {
         const text = result.story?.scenes?.[i]?.subtitle || ''
-        const sub = { text, start: timeOffset, duration: 5 }
-        timeOffset += 5
+        const sub = { text, start: timeOffset, duration: perClipDuration }
+        timeOffset += perClipDuration
         return sub
       })
 
