@@ -265,7 +265,7 @@ export function generateUGCPrompt({
 const SEEDANCE_HARD_LIMIT = 2480;
 
 const SEEDANCE_CAMERA_PHYSICS = {
-  1: "Phone held in right hand at arm's length, selfie angle, below eye level, tilted ~12-15 degrees off-axis (NOT centered). Irregular hand tremor (not smooth pattern), small framing drift every 1-2 seconds, occasional auto-focus hunt. Real skin texture: visible pores, faint under-eye shadow, slight facial asymmetry, NO airbrushed look. iPhone front camera limits: noise in shadows, chromatic fringing on hair, mild lens softness at edges. Seated — no walking bob.",
+  1: "Phone held in right hand at arm's length, selfie angle, below eye level, tilted ~12-15 degrees off-axis (NOT centered). Irregular hand tremor (not smooth pattern), small framing drift every 1-2 seconds, occasional auto-focus hunt. Detailed skin texture rendering: visible pores, faint under-eye shadow, slight facial asymmetry, NO airbrushed look. iPhone front camera limits: noise in shadows, chromatic fringing on hair, mild lens softness at edges. Seated — no walking bob.",
   2: "The phone is propped on a small dresser/shelf facing the scene. Static phone position but VERY subtle ambient motion — gentle light shift through window, soft parallax as warm air moves the camera ~1mm, slight focus breathing. Product alone in frame, no person, no hands. The shot is ALIVE not frozen — like a real iPhone left propped recording.",
   3: "Phone in her left hand at arm's length, selfie angle. Hand tremor from the phone-hand throughout, right hand free to use the product. Slight reframe when product moves — phone-hand tilts ~5 degrees to fit action in shot. Brief focus hunting between her face and the product when it enters frame.",
   4: "Phone in her right hand at arm's length, selfie angle, slightly below eye level. Tremor only, no walking bob. Marginal drift as arm relaxes. Slight auto-exposure adjustment when product comes into frame."
@@ -286,7 +286,7 @@ const SEEDANCE_LIGHT_DIRECTION = {
 };
 
 const SEEDANCE_EXPRESSION_DIRECTION = {
-  1: "Expression direction: eyes drift off-camera then back (not staring at lens), brow furrows asymmetrically, lips pressed thin with slight downturn, small head shakes, hand brushes hair back, shoulders sag, defeated half-shrug, natural blinks every 2-3 seconds, brief lip-bite, occasional eye-rub. Real human imperfection — never posed.",
+  1: "Expression direction: eyes drift off-camera then back (not staring at lens), brow furrows asymmetrically, lips pressed thin with slight downturn, small head shakes, hand brushes hair back, shoulders sag, defeated half-shrug, natural blinks every 2-3 seconds, brief lip-bite, occasional eye-rub. Natural unposed feel — never posed.",
   // Scene 2 has no person at all — drop the expression block. Anything that
   // mentions "she", "her face", or "free hand" pulls Seedance back toward
   // generating a random woman to fill the avatar slot.
@@ -300,7 +300,7 @@ const SEEDANCE_EXPRESSION_DIRECTION = {
 // that Seedance has an unwritten UGC mode that turns on when the first words
 // frame the clip as amateur phone footage rather than commercial production.
 // Sits at parts[0] so it's the very first thing the model reads.
-const UGC_MODE_TRIGGER = "Photorealistic UGC, iPhone handheld phone footage, natural light, sharp focus, real human imperfections, no CGI artifacting, no commercial polish.";
+const UGC_MODE_TRIGGER = "Photorealistic UGC, iPhone handheld phone footage, natural light, sharp focus, natural texture detail, no CGI artifacting, no commercial polish.";
 
 const SEEDANCE_AUTO_EXPOSURE = "Natural iPhone auto-exposure adjustment visible — slight image warming/cooling as the light shifts, no stable studio exposure.";
 
@@ -329,12 +329,12 @@ export function buildSeedancePrompt(rawPromptIn, beat, productName, opts = {}) {
     }
     switch (beatKey) {
       case 1:
-        return "@Image1 is the woman (character reference for identity consistency).";
+        return "@Image1 is a fictional digital character (stylized AI-generated portrait, not a real person).";
       case 2:
         return "@Image1 is the product (the only subject in this scene — no person should appear).";
       case 3:
       case 4:
-        return "@Image1 is the woman (character reference for identity consistency). @Image2 is the product she holds.";
+        return "@Image1 is a fictional digital character (stylized AI-generated portrait, not a real person). @Image2 is the product she holds.";
       default:
         return "@Image1 is the woman (character reference). @Image2 is the product.";
     }
