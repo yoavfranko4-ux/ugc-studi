@@ -1250,7 +1250,7 @@ async function runJob(jobId, body) {
         }));
       }
 
-      const result = await fal.subscribe('bytedance/seedance-2.0/pro/reference-to-video', {
+      const result = await fal.subscribe('bytedance/seedance-2.0/reference-to-video', {
         input: {
           prompt: wrappedKlingPrompt,
           image_urls: referenceImages,
