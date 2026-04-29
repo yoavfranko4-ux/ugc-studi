@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import { prewarmVideos } from '../../../lib/video-cache.js'
 import { generateNBFrame, buildKlingPrompt, mapAvatarToActorId, mapAvatarToActorInfo, applyFlatColorGrading, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
+import { generateVideo as byteplusGenerateVideo, isByteplusConfigured } from '../../../lib/byteplus-client.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -1221,8 +1222,18 @@ async function runJob(jobId, body) {
     // frame), so each successful Seedance scene was paying ~$0.20 of NB cost
     // for nothing. Saves ~$0.80/job.
     console.log(`[Job ${jobId}] Starting Seedance-first scene generation (NB only as fallback)...`);
-    const videoMeta = new Array(4).fill('none'); // 'kling' | 'static' | 'avatar-static' | 'none'
-    const runKlingOnce = async (i) => {
+    const byteplusReady = isByteplusConfigured();
+    if (byteplusReady) {
+      console.log(`[Job ${jobId}] BytePlus ModelArk (Seedance 2.0) is configured — using direct API first, falling back to fal.ai`);
+    } else {
+      console.log(`[Job ${jobId}] BytePlus direct API not configured (no ARK_API_KEY) — using fal.ai/Seedance only`);
+    }
+    const videoMeta = new Array(4).fill('none'); // 'byteplus' | 'kling' | 'static' | 'avatar-static' | 'none'
+
+    // computeSceneInputs — shared by both BytePlus direct and fal.ai paths.
+    // Returns the per-scene reference image list and the wrapped Kling/Seedance
+    // prompt so the two providers see identical inputs.
+    const computeSceneInputs = async (i) => {
       const beat = i + 1;
       const klingScene4Context = i === 3;
       const klingIsBusinessCraft = videoType === 'business';
@@ -1231,11 +1242,6 @@ async function runJob(jobId, body) {
       const avatarFalUrl = avatarUrl ? await ensureFalUrl(avatarUrl) : null;
       const productFalUrl = productImageUrl ? await ensureFalUrl(productImageUrl) : null;
 
-      // Per-scene reference list. Reference-to-video doesn't accept the NB
-      // still as a starting frame — it composes from the references plus the
-      // prompt — so each scene gets only the identities it actually needs.
-      // Scene 2 deliberately ships ONLY the product reference so Seedance can't
-      // hallucinate a random woman to fill an avatar slot.
       const referenceImages = (() => {
         if (klingIsBusinessCraft) {
           if (i === 1) return seedanceBusinessPhotos.slice(0, 3);
@@ -1251,9 +1257,6 @@ async function runJob(jobId, body) {
         }
       })();
 
-      // Wrap Claude's kling_prompt with the same skill layers we use for the
-      // NanoBanana frame: PRODUCT_LOCK + realism + negatives. The wrapper now
-      // also injects per-scene tag declarations that match the references.
       const wrappedKlingPrompt = buildKlingPrompt(
         scenes[i].kling_prompt,
         beat,
@@ -1264,6 +1267,31 @@ async function runJob(jobId, body) {
           productOnly: klingProductOnly
         }
       );
+
+      return { avatarFalUrl, productFalUrl, referenceImages, wrappedKlingPrompt };
+    };
+
+    // generateSceneVideoByteplus — direct BytePlus ModelArk Seedance 2.0 call.
+    // ModelArk trusts face-containing outputs from Seedream models, bypassing
+    // fal.ai's content filter on real-person reference frames.
+    const generateSceneVideoByteplus = async (i) => {
+      try {
+        const { wrappedKlingPrompt, referenceImages } = await computeSceneInputs(i);
+        console.log(`[BytePlus] Scene ${i+1} sending ${referenceImages.filter(Boolean).length} reference images, prompt length=${wrappedKlingPrompt.length}`);
+        const { videoUrl } = await byteplusGenerateVideo({
+          prompt: wrappedKlingPrompt,
+          imageUrls: referenceImages.filter(Boolean),
+          duration: 5
+        });
+        return videoUrl || null;
+      } catch (e) {
+        console.error(`[Video scene ${i+1}] BytePlus direct failed: ${e?.message}`);
+        return null;
+      }
+    };
+
+    const runKlingOnce = async (i) => {
+      const { avatarFalUrl, productFalUrl, referenceImages, wrappedKlingPrompt } = await computeSceneInputs(i);
       console.log(`[Kling Scene ${i+1}] FINAL prompt length: ${wrappedKlingPrompt.length}`);
       if (wrappedKlingPrompt.length > 2500) {
         console.error(`[Kling Scene ${i+1}] ⚠️ STILL TOO LONG: ${wrappedKlingPrompt.length}`);
@@ -1340,6 +1368,31 @@ async function runJob(jobId, body) {
     // stays null when Seedance succeeds — we no longer pay for NB frames the
     // user never sees.
     const tryScene = async (i) => {
+      // 0) BytePlus ModelArk direct API — single attempt before falling back to
+      // fal.ai. Used only when ARK_API_KEY + ARK_BASE_URL are set. Bypasses
+      // fal.ai's content filter on real-person reference frames because
+      // ModelArk trusts Seedream-generated avatars.
+      if (byteplusReady) {
+        try {
+          console.log(`[Job ${jobId}] BytePlus direct scene ${i+1}: attempting...`);
+          const bpUrl = await generateSceneVideoByteplus(i);
+          if (bpUrl) {
+            const v = await validateKlingVideo(bpUrl);
+            if (v.valid) {
+              console.log(`[Job ${jobId}] BytePlus direct scene ${i+1}: OK — ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s`);
+              const processedUrl = await applyFlatColorGrading(bpUrl, `Scene ${i+1}`);
+              videoMeta[i] = 'byteplus';
+              return { frame: null, video: processedUrl };
+            }
+            console.warn(`[Job ${jobId}] BytePlus direct scene ${i+1} url failed validation: ${v.reason} — falling back to fal.ai`);
+          } else {
+            console.warn(`[Job ${jobId}] BytePlus direct scene ${i+1} returned no url — falling back to fal.ai`);
+          }
+        } catch (e) {
+          console.error(`[Job ${jobId}] BytePlus direct scene ${i+1} threw: ${e?.message} — falling back to fal.ai`);
+        }
+      }
+
       // 1) Seedance — 3 attempts, 3s backoff, full error logging.
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {

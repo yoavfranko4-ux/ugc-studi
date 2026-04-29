@@ -1,0 +1,40 @@
+{
+  "avatars": [
+    {
+      "id": 1,
+      "name": "Maya",
+      "gender": "female",
+      "prompt": "Full body shot of young Israeli woman, 28 years old, Mediterranean features, long wavy brown hair, light olive skin, warm brown eyes, wearing cream cropped sweater with high-waisted blue jeans, standing naturally in modern bright apartment with soft natural window light, neutral wall background, casual confident posture, photo-realistic UGC influencer aesthetic, vertical 9:16 portrait, head to mid-thigh framing, face takes 15% of image height. Natural skin texture, no glamour pose, authentic real-life feel."
+    },
+    {
+      "id": 2,
+      "name": "Noa",
+      "gender": "female",
+      "prompt": "Full body shot of young Israeli woman, 30 years old, Mediterranean features, shoulder-length dark brown straight hair, fair skin with light freckles, hazel eyes, wearing soft pink button-up shirt with beige wide-leg pants, standing in modern apartment with neutral background, soft natural lighting, casual relaxed posture, photo-realistic UGC style, vertical 9:16, head to mid-thigh framing. Authentic look, no studio lighting."
+    },
+    {
+      "id": 3,
+      "name": "Adam",
+      "gender": "male",
+      "prompt": "Full body shot of young Israeli man, 28 years old, Mediterranean features, short dark brown hair with light stubble, olive skin, brown eyes, wearing fitted gray t-shirt with dark blue jeans, standing in modern apartment with neutral background, natural window lighting, casual confident posture, photo-realistic UGC style, vertical 9:16, head to mid-thigh framing. Real authentic feel."
+    },
+    {
+      "id": 4,
+      "name": "Yoav",
+      "gender": "male",
+      "prompt": "Full body shot of young Israeli man, 32 years old, Mediterranean features, short black hair clean-shaven, tan skin, dark brown eyes, wearing navy blue button-up casual shirt with khaki chinos, standing in modern bright apartment, soft natural lighting, relaxed approachable posture, photo-realistic UGC influencer style, vertical 9:16, head to mid-thigh framing."
+    },
+    {
+      "id": 5,
+      "name": "Lior",
+      "gender": "female",
+      "prompt": "Full body shot of young Israeli woman, 25 years old, Mediterranean features, curly medium-length black hair, olive skin, dark eyes, wearing white oversized t-shirt tucked into beige cargo pants, standing in modern apartment with neutral wall, natural lighting from left, casual confident posture, photo-realistic UGC aesthetic, vertical 9:16, head to mid-thigh framing."
+    },
+    {
+      "id": 6,
+      "name": "Dana",
+      "gender": "female",
+      "prompt": "Full body shot of young Israeli woman, 28 years old, Mediterranean features, blonde shoulder-length straight hair with side bangs, fair skin, blue-green eyes, wearing soft beige knit cardigan with light wash jeans, standing in modern bright apartment, soft natural window lighting, calm relaxed posture, photo-realistic UGC style, vertical 9:16, head to mid-thigh framing."
+    }
+  ]
+}
