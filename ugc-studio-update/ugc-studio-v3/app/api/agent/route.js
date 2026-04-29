@@ -1199,6 +1199,9 @@ async function runJob(jobId, body) {
       const klingIsBusinessCraft = videoType === 'business';
       const klingProductOnly = (i === 1) && !klingIsBusinessCraft;
 
+      const avatarFalUrl = avatarUrl ? await ensureFalUrl(avatarUrl) : null;
+      const productFalUrl = productImageUrl ? await ensureFalUrl(productImageUrl) : null;
+
       // Per-scene reference list. Reference-to-video doesn't accept the NB
       // still as a starting frame — it composes from the references plus the
       // prompt — so each scene gets only the identities it actually needs.
@@ -1207,14 +1210,14 @@ async function runJob(jobId, body) {
       const referenceImages = (() => {
         if (klingIsBusinessCraft) {
           if (i === 1) return seedanceBusinessPhotos.slice(0, 3);
-          if (i === 0) return [seedanceAvatarUrl].filter(Boolean);
-          return [seedanceAvatarUrl, seedanceBusinessPhotos[0]].filter(Boolean);
+          if (i === 0) return [avatarFalUrl].filter(Boolean);
+          return [avatarFalUrl, seedanceBusinessPhotos[0]].filter(Boolean);
         }
         switch (i + 1) {
-          case 1: return [seedanceAvatarUrl].filter(Boolean);
-          case 2: return [seedanceProductUrl].filter(Boolean);
+          case 1: return [avatarFalUrl].filter(Boolean);
+          case 2: return [productFalUrl].filter(Boolean);
           case 3:
-          case 4: return [seedanceAvatarUrl, seedanceProductUrl].filter(Boolean);
+          case 4: return [avatarFalUrl, productFalUrl].filter(Boolean);
           default: return [];
         }
       })();
@@ -1236,6 +1239,8 @@ async function runJob(jobId, body) {
       if (wrappedKlingPrompt.length > 2500) {
         console.error(`[Kling Scene ${i+1}] ⚠️ STILL TOO LONG: ${wrappedKlingPrompt.length}`);
       }
+      console.log('[Seedance] avatar URL:', avatarFalUrl);
+      console.log('[Seedance] product URL:', productFalUrl);
       console.log(`[Seedance Scene ${i+1}] sending ${referenceImages.length} reference images`);
       // Scene 1 is the "hook" — if it keeps failing we want the full request
       // dumped so we can see whether the references or prompt is what's making
