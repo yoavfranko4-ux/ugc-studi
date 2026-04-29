@@ -272,17 +272,17 @@ const SEEDANCE_CAMERA_PHYSICS = {
 };
 
 const SEEDANCE_MACRO_DETAIL = {
-  1: "Subtle macro element: visible skin texture with natural pores, faint under-eye shadow, individual eyelashes catching light, real human imperfections.",
-  2: "Subtle macro element: product surface texture visible, label edges sharp, light refraction on packaging materials, soft contact shadow grounds the product.",
-  3: "Subtle macro element: fingers/hands texture detail, subtle skin reflection, product surface interaction visible at micro level, tangible physicality.",
-  4: "Subtle macro element: eyes catch light naturally, genuine micro-expressions, skin texture preserved, no airbrushed look, slight asymmetry in smile."
+  1: "Macro: skin pores, eyelash detail, faint under-eye shadow.",
+  2: "Macro: product label edges sharp, light refraction, contact shadow.",
+  3: "Macro: finger/hand skin texture, tactile product interaction.",
+  4: "Macro: eyes catch light, micro-expressions, asymmetric smile."
 };
 
 const SEEDANCE_LIGHT_DIRECTION = {
-  1: "Window light from her left at ~45 degrees, soft diffuse with slight directional shadow on right side of face, no harsh contrast.",
-  2: "Warm practical light from side + soft window backlight separation, gentle catchlight on product surface, contact shadow grounds the object.",
-  3: "Natural daylight as base, slight key light from 45 degrees creates dimension on action area, no flat lighting.",
-  4: "Soft golden-hour-like glow, forgiving light on face, warm tones predominate, gentle backlight on hair edges."
+  1: "Light: window from left ~45°, soft diffuse, no harsh contrast.",
+  2: "Light: warm practical + window backlight, catchlight on product.",
+  3: "Light: natural daylight + 45° key on action, dimensional not flat.",
+  4: "Light: soft golden-hour glow, warm tones, hair backlight."
 };
 
 const SEEDANCE_EXPRESSION_DIRECTION = {
@@ -300,11 +300,11 @@ const SEEDANCE_EXPRESSION_DIRECTION = {
 // that Seedance has an unwritten UGC mode that turns on when the first words
 // frame the clip as amateur phone footage rather than commercial production.
 // Sits at parts[0] so it's the very first thing the model reads.
-const UGC_MODE_TRIGGER = "Photorealistic UGC creator content, iPhone handheld phone footage, natural light, no CGI artifacting, 99% sRGB color accuracy, sharp focus, real human imperfections, slightly imperfect framing, no commercial polish, no studio production.";
+const UGC_MODE_TRIGGER = "Photorealistic UGC, iPhone handheld phone footage, natural light, sharp focus, real human imperfections, no CGI artifacting, no commercial polish.";
 
 const SEEDANCE_AUTO_EXPOSURE = "Natural iPhone auto-exposure adjustment visible — slight image warming/cooling as the light shifts, no stable studio exposure.";
 
-const SEEDANCE_SILENT = "Silent footage but with PHYSICAL PRESENCE — natural breathing rhythm visible, subtle ambient room presence, tactile physicality in all interactions, fabric whispers and product sounds implied through motion. No spoken dialogue, mouth movements minimal and natural — lips part softly between phrases but no clear words form.";
+const SEEDANCE_SILENT = "Silent footage with physical presence — natural breathing, tactile physicality, fabric/product motion implied. No spoken dialogue, lips part softly but no clear words form.";
 
 const SEEDANCE_NEGATIVES = "NEGATIVES: no AI artifacts, no face distortion, stable anatomy, no unnatural movement, no reflections, no mirrors, no glass reflections, no reflective screens, no puddles, no studio polish, no dramatic lighting, no over-saturated colors, no cinematic color grade, no lens flares, not breathtaking, not stunning, not flawless, not seamless, not effortless, no perfect symmetry, no plastic skin, no AI smoothing, no uncanny valley, no melting hands, no extra limbs, NEVER show a phone or mobile device in scene, no smooth gimbal stabilization, no rack focus, no dolly zoom, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays.";
 
