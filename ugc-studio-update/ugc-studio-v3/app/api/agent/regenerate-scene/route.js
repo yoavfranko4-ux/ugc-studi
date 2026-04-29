@@ -35,25 +35,46 @@ fal.config({ credentials: FAL_KEY });
 // regenerations_used column is live and we want tier gating.
 const MAX_REGENS_PER_SCENE = 3;
 
-// Mirror of route.js — reference-to-video needs http(s) URLs in image_urls,
-// so any user-uploaded data: payload has to round-trip through fal.storage.
+// Mirror of route.js — reference-to-video needs http(s) URLs in image_urls.
+// Beyond data: uploads, we also re-host external http(s) URLs (e.g. Railway
+// avatars) on fal.storage to bypass Seedance's untrusted-domain filter.
 async function ensureFalUrl(u) {
   if (!u || typeof u !== 'string') return null;
-  if (u.startsWith('http://') || u.startsWith('https://')) return u;
-  if (!u.startsWith('data:')) return u;
-  try {
-    const m = u.match(/^data:([^;]+);base64,(.+)$/);
-    if (!m) throw new Error('malformed data url');
-    const buf = Buffer.from(m[2], 'base64');
-    const blob = new Blob([buf], { type: m[1] || 'image/png' });
-    const uploaded = await fal.storage.upload(blob);
-    if (!uploaded) throw new Error('fal.storage.upload returned empty');
-    console.log('[regenerate-scene][ensureFalUrl] uploaded data URL:', uploaded.slice(0, 80));
-    return uploaded;
-  } catch (e) {
-    console.warn('[regenerate-scene][ensureFalUrl] failed:', e.message);
-    return u;
+  if (u.includes('fal.media') || u.includes('fal.storage')) return u;
+  if (u.startsWith('data:')) {
+    try {
+      const m = u.match(/^data:([^;]+);base64,(.+)$/);
+      if (!m) throw new Error('malformed data url');
+      const buf = Buffer.from(m[2], 'base64');
+      const blob = new Blob([buf], { type: m[1] || 'image/png' });
+      const uploaded = await fal.storage.upload(blob);
+      if (!uploaded) throw new Error('fal.storage.upload returned empty');
+      console.log('[regenerate-scene][ensureFalUrl] uploaded data URL:', uploaded.slice(0, 80));
+      return uploaded;
+    } catch (e) {
+      console.warn('[regenerate-scene][ensureFalUrl] data URL upload failed:', e.message);
+      return u;
+    }
   }
+  if (u.startsWith('http://') || u.startsWith('https://')) {
+    try {
+      const response = await fetch(u);
+      if (!response.ok) throw new Error(`fetch ${u} returned ${response.status}`);
+      const buffer = await response.arrayBuffer();
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      const blob = new Blob([buffer], { type: contentType });
+      const filename = (u.split('/').pop() || '').split('?')[0] || 'image.jpg';
+      const file = new File([blob], filename, { type: contentType });
+      const uploaded = await fal.storage.upload(file);
+      if (!uploaded) throw new Error('fal.storage.upload returned empty');
+      console.log(`[regenerate-scene][ensureFalUrl] re-uploaded ${u.slice(0, 80)} → ${uploaded.slice(0, 80)}`);
+      return uploaded;
+    } catch (e) {
+      console.error(`[regenerate-scene][ensureFalUrl] http(s) re-upload failed for ${u.slice(0, 80)}:`, e.message);
+      return u;
+    }
+  }
+  return u;
 }
 
 // Minimal Seedance call — 3 attempts, basic "is it a URL" check. We do NOT

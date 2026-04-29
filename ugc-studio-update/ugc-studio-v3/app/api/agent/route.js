@@ -1097,26 +1097,48 @@ async function frameToStaticVideo(frameUrl, durationSec = 5) {
 // mapAvatarToActorId moved to lib/agent-pipeline.js so the regenerate-scene
 // route can share the same mapping. Imported above.
 
-// reference-to-video requires real http(s) URLs in image_urls — data: payloads
-// from product uploads aren't accepted. Upload them to fal.storage on demand
-// and pass through anything that's already an http(s) URL.
+// reference-to-video requires real http(s) URLs in image_urls. Beyond accepting
+// data: uploads, we also re-host external http(s) URLs (e.g. Railway-served
+// avatars) on fal.storage — Seedance's content filter has been observed to
+// reject references served from untrusted domains, and re-hosting on fal.media
+// bypasses that.
 async function ensureFalUrl(u) {
   if (!u || typeof u !== 'string') return null;
-  if (u.startsWith('http://') || u.startsWith('https://')) return u;
-  if (!u.startsWith('data:')) return u;
-  try {
-    const m = u.match(/^data:([^;]+);base64,(.+)$/);
-    if (!m) throw new Error('malformed data url');
-    const buf = Buffer.from(m[2], 'base64');
-    const blob = new Blob([buf], { type: m[1] || 'image/png' });
-    const uploaded = await fal.storage.upload(blob);
-    if (!uploaded) throw new Error('fal.storage.upload returned empty');
-    console.log('[ensureFalUrl] uploaded data URL to fal.storage:', uploaded.slice(0, 80));
-    return uploaded;
-  } catch (e) {
-    console.warn('[ensureFalUrl] failed, returning original:', e.message);
-    return u;
+  if (u.includes('fal.media') || u.includes('fal.storage')) return u;
+  if (u.startsWith('data:')) {
+    try {
+      const m = u.match(/^data:([^;]+);base64,(.+)$/);
+      if (!m) throw new Error('malformed data url');
+      const buf = Buffer.from(m[2], 'base64');
+      const blob = new Blob([buf], { type: m[1] || 'image/png' });
+      const uploaded = await fal.storage.upload(blob);
+      if (!uploaded) throw new Error('fal.storage.upload returned empty');
+      console.log('[ensureFalUrl] uploaded data URL to fal.storage:', uploaded.slice(0, 80));
+      return uploaded;
+    } catch (e) {
+      console.warn('[ensureFalUrl] data URL upload failed, returning original:', e.message);
+      return u;
+    }
   }
+  if (u.startsWith('http://') || u.startsWith('https://')) {
+    try {
+      const response = await fetch(u);
+      if (!response.ok) throw new Error(`fetch ${u} returned ${response.status}`);
+      const buffer = await response.arrayBuffer();
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      const blob = new Blob([buffer], { type: contentType });
+      const filename = (u.split('/').pop() || '').split('?')[0] || 'image.jpg';
+      const file = new File([blob], filename, { type: contentType });
+      const uploaded = await fal.storage.upload(file);
+      if (!uploaded) throw new Error('fal.storage.upload returned empty');
+      console.log(`[ensureFalUrl] re-uploaded ${u.slice(0, 80)} → ${uploaded.slice(0, 80)}`);
+      return uploaded;
+    } catch (e) {
+      console.error(`[ensureFalUrl] http(s) re-upload failed for ${u.slice(0, 80)}:`, e.message);
+      return u;
+    }
+  }
+  return u;
 }
 
 async function runJob(jobId, body) {
