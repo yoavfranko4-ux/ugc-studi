@@ -1301,6 +1301,16 @@ async function runJob(jobId, body) {
     const generateFullVideoHiggsfield = async () => {
       try {
         const mergedPrompt = buildMergedFullPrompt();
+        // Anthropic Tier 1 rate limit cooldown: 30K input tokens/min. The
+        // script generation step (and any retries for broken-sentence regen)
+        // can burn ~10-20K tokens by itself, and the Higgsfield MCP call adds
+        // another ~10K. Sleep 70s here — physically adjacent to the dispatch,
+        // inside the same async function — so there is no way the Anthropic
+        // call leaves before the per-minute window has rolled over. Remove
+        // this once we're on Tier 2+.
+        console.log(`[Job ${jobId}] Waiting 70s for Anthropic rate limit cooldown before video generation...`);
+        await new Promise(r => setTimeout(r, 70000));
+        console.log(`[Job ${jobId}] Cooldown complete, dispatching Higgsfield call now.`);
         console.log(`[Higgsfield] Full 15s video: ${mergedReferenceImages.length} refs, prompt length=${mergedPrompt.length}`);
         const { videoUrl, usage } = await higgsfieldGenerateFullVideo({
           prompt: mergedPrompt,
@@ -1369,15 +1379,11 @@ async function runJob(jobId, body) {
       return { frame: null, video: null };
     };
 
-    // Anthropic Tier 1 rate limit cooldown: 30K input tokens/min. The script
-    // generation step (and any retries for broken-sentence regen) can burn
-    // ~10-20K tokens by itself, and the Higgsfield MCP call adds another ~10K.
-    // Sleep 70s here to make sure the per-minute window has rolled over before
-    // we dispatch the video call. Remove this once we're on Tier 2+.
-    console.log(`[Job ${jobId}] Waiting 70s for Anthropic rate limit cooldown before video generation...`);
-    await new Promise(r => setTimeout(r, 70000));
-    console.log(`[Job ${jobId}] Cooldown complete, starting video generation...`);
-
+    // The 70s Anthropic rate-limit cooldown lives INSIDE
+    // generateFullVideoHiggsfield (right before the dispatch) so it is
+    // unambiguously sequential with the Higgsfield call — no Promise.all
+    // race possible. generateVoice is ElevenLabs (not Anthropic) and is
+    // safe to run in parallel with the cooldown.
     const [voiceResult, fullResult] = await Promise.all([
       generateVoice(voiceover, voiceId),
       tryFullVideo()
