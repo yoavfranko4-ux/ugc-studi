@@ -391,17 +391,31 @@ export async function generateFullVideo({ prompt, imageUrls = [], duration = 15 
   return { videoUrl, usage: usageWithElapsed }
 }
 
-// uploadToHiggsfield — pass-through resolver matching the byteplus client's
-// uploadToByteplusFiles. Higgsfield's MCP `media_upload` accepts public URLs
-// directly, so all we need to do here is normalize relative paths to absolute
-// https URLs. data: URIs are returned as-is and Claude will hand them to
-// media_upload (which accepts inline base64).
+// uploadToHiggsfield — resolves any input shape into a fetchable HTTPS URL.
+// http(s) URLs pass through unchanged; relative paths get the deploy origin
+// prepended; data: URIs (custom user uploads from /api/upload) are stashed
+// in the in-process image cache and returned as /api/temp-image/<id> URLs.
+//
+// Why we no longer pass data: URIs through to the prompt: Anthropic counts
+// the user-message text against the 200K-token input limit, and a single
+// 1MP base64-encoded image is ~150K chars ≈ 50-100K tokens. Two reference
+// images (avatar + product) blew past 200K and got rejected with HTTP 400.
+// By converting data: URIs to URLs upfront, the prompt only carries small
+// strings and the MCP `media_upload` tool fetches the actual bytes from us.
+import { dataUriToPublicUrl } from './image-cache.js'
+
 export async function uploadToHiggsfield(input, opts = {}) {
   if (!input || typeof input !== 'string') {
     throw new Error('uploadToHiggsfield: input must be a non-empty string')
   }
   if (input.startsWith('http://') || input.startsWith('https://')) return input
-  if (input.startsWith('data:')) return input
+  if (input.startsWith('data:')) {
+    const url = dataUriToPublicUrl(input, opts.baseUrl)
+    if (url && url.startsWith('http')) return url
+    // Fallback — should never trigger, but keeps the old behavior so a
+    // malformed data: URI doesn't take down the whole flow.
+    return input
+  }
   if (input.startsWith('/')) {
     const base =
       opts.baseUrl ||
