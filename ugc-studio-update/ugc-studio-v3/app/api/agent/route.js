@@ -13,6 +13,7 @@ import sharp from 'sharp'
 import { prewarmVideos } from '../../../lib/video-cache.js'
 import { buildKlingPrompt, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
 import { generateVideo as higgsfieldGenerateVideo, generateFullVideo as higgsfieldGenerateFullVideo, isHiggsfieldConfigured, uploadToHiggsfield } from '../../../lib/higgsfield-client.js'
+import { generateMarketingStudioVideo, isMarketingStudioConfigured } from '../../../lib/marketing-studio-client.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -1192,11 +1193,31 @@ async function runJob(jobId, body) {
     if (!higgsfieldReady) {
       console.warn(`[Job ${jobId}] Higgsfield not configured (missing HIGGSFIELD_TOKEN/ANTHROPIC_API_KEY) — full video will use the static fallback`);
     }
-    // Single 'higgsfield' | 'static' | 'none' status for the one full video.
-    let videoMeta = 'none';
-    // Token usage from the single Anthropic API call (used for the cost
-    // summary printed after the call).
+    // 3-tier fallback status for the one full video. Values:
+    //   'marketing_studio' — Tier 1: Higgsfield Marketing Studio (UGC preset)
+    //   'seedance'         — Tier 2: Higgsfield Seedance 2.0
+    //   'static'           — Tier 3: ffmpeg-built static MP4 from a single image
+    //   'none'             — all three tiers failed
+    let videoSource = 'none';
+    // Token usage from the Anthropic API calls. Accumulates across tiers so
+    // the cost summary reflects total spend even if Tier 1 burned tokens
+    // before falling back to Tier 2.
     let fullVideoUsage = null;
+    const accumulateUsage = (tierUsage) => {
+      if (!tierUsage) return;
+      if (!fullVideoUsage) {
+        fullVideoUsage = { ...tierUsage };
+        return;
+      }
+      fullVideoUsage = {
+        input_tokens: (fullVideoUsage.input_tokens || 0) + (tierUsage.input_tokens || 0),
+        output_tokens: (fullVideoUsage.output_tokens || 0) + (tierUsage.output_tokens || 0),
+        cache_read_input_tokens: (fullVideoUsage.cache_read_input_tokens || 0) + (tierUsage.cache_read_input_tokens || 0),
+        cache_creation_input_tokens: (fullVideoUsage.cache_creation_input_tokens || 0) + (tierUsage.cache_creation_input_tokens || 0),
+        cost_usd: (fullVideoUsage.cost_usd || 0) + (tierUsage.cost_usd || 0),
+        elapsed_s: (fullVideoUsage.elapsed_s || 0) + (tierUsage.elapsed_s || 0)
+      };
+    };
 
     // Per-scene reference list — same logic as before, but now collected
     // upfront so we can build ONE unified beat-marked prompt + ONE merged
@@ -1299,13 +1320,71 @@ async function runJob(jobId, body) {
       return [refProductUrl, refAvatarUrl].filter(Boolean);
     })();
 
-    // generateFullVideoHiggsfield — single-shot 15s replacement for the old
-    // 4-parallel-call layout. One Anthropic call, one Higgsfield render,
-    // one merged prompt. Avoids the 30K tok/min rate limit and the
-    // "copyright restrictions" trigger we saw with the duplicated 4-call
-    // prompts.
-    const generateFullVideoHiggsfield = async () => {
+    // 3-tier fallback for the full 15s video.
+    //
+    //   Tier 1 — Marketing Studio (Higgsfield `marketing_studio_video`, UGC
+    //            preset). Higher-quality UGC look. Requires both avatar and
+    //            product reference URLs, so it's UGC-mode only — business
+    //            mode skips straight to Tier 2.
+    //   Tier 2 — Seedance 2.0 (existing higgsfield-client `generateFullVideo`).
+    //            Reference-driven, identity-strong. Handles both UGC and
+    //            business modes via the existing `mergedReferenceImages`.
+    //   Tier 3 — Static MP4 built locally with sharp + ffmpeg from a single
+    //            reference image. Placeholder so the user can see the script
+    //            + voiceover and re-run; not a real ad.
+
+    const tryMarketingStudio = async () => {
+      // Marketing Studio's UGC preset is built around exactly two references:
+      // the avatar (subject) and the product. Business mode has no product
+      // image, so we skip Tier 1 and let Seedance handle it.
+      if (videoType === 'business') {
+        console.log(`[Job ${jobId}] Tier 1 skipped: business mode has no product reference (Marketing Studio is UGC-only)`);
+        return null;
+      }
+      if (!isMarketingStudioConfigured()) {
+        console.log(`[Job ${jobId}] Tier 1 skipped: Marketing Studio not configured (missing ANTHROPIC_API_KEY/HIGGSFIELD_TOKEN)`);
+        return null;
+      }
+      if (!refAvatarUrl || !refProductUrl) {
+        console.log(`[Job ${jobId}] Tier 1 skipped: missing avatar (${!!refAvatarUrl}) or product (${!!refProductUrl}) reference URL`);
+        return null;
+      }
       try {
+        console.log(`[Job ${jobId}] Tier 1: Trying Marketing Studio UGC...`);
+        const mergedPrompt = buildMergedFullPrompt();
+        console.log(`[MarketingStudio] Full 15s video: 2 refs, prompt length=${mergedPrompt.length}`);
+        const { videoUrl, usage } = await generateMarketingStudioVideo({
+          avatarUrl: refAvatarUrl,
+          productUrl: refProductUrl,
+          prompt: mergedPrompt,
+          duration: 15
+        });
+        accumulateUsage(usage);
+        if (!videoUrl) {
+          console.warn(`[Job ${jobId}] Tier 1 returned no url — falling back to Tier 2`);
+          return null;
+        }
+        const v = await validateKlingVideo(videoUrl);
+        if (!v.valid) {
+          console.warn(`[Job ${jobId}] Tier 1 failed validation: ${v.reason} — falling back to Tier 2`);
+          return null;
+        }
+        console.log(`[Job ${jobId}] Tier 1 succeeded! → ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s, ${videoUrl.slice(0, 100)}`);
+        videoSource = 'marketing_studio';
+        return { frame: null, video: videoUrl };
+      } catch (e) {
+        console.error(`[Job ${jobId}] Tier 1 failed: ${e?.message} — falling back to Tier 2`);
+        return null;
+      }
+    };
+
+    const trySeedance = async () => {
+      if (!higgsfieldReady) {
+        console.log(`[Job ${jobId}] Tier 2 skipped: Higgsfield not configured`);
+        return null;
+      }
+      try {
+        console.log(`[Job ${jobId}] Tier 2: Trying Seedance...`);
         const mergedPrompt = buildMergedFullPrompt();
         console.log(`[Higgsfield] Full 15s video: ${mergedReferenceImages.length} refs, prompt length=${mergedPrompt.length}`);
         const { videoUrl, usage } = await higgsfieldGenerateFullVideo({
@@ -1313,45 +1392,38 @@ async function runJob(jobId, body) {
           imageUrls: mergedReferenceImages,
           duration: 15
         });
-        if (usage) fullVideoUsage = usage;
-        return videoUrl || null;
+        accumulateUsage(usage);
+        if (!videoUrl) {
+          console.warn(`[Job ${jobId}] Tier 2 returned no url — falling back to Tier 3`);
+          return null;
+        }
+        const v = await validateKlingVideo(videoUrl);
+        if (!v.valid) {
+          console.warn(`[Job ${jobId}] Tier 2 failed validation: ${v.reason} — falling back to Tier 3`);
+          return null;
+        }
+        console.log(`[Job ${jobId}] Tier 2 succeeded! → ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s, ${videoUrl.slice(0, 100)}`);
+        videoSource = 'seedance';
+        return { frame: null, video: videoUrl };
       } catch (e) {
-        console.error(`[Full video] Higgsfield direct failed: ${e?.message}`);
+        console.error(`[Job ${jobId}] Tier 2 failed: ${e?.message} — falling back to Tier 3`);
         return null;
       }
     };
 
-    // tryFullVideo — single source of truth for video output:
-    //   1) Higgsfield MCP via Anthropic (single 15s call)
-    //   2) Static MP4 (data: URL) built via sharp + ffmpeg from the avatar
-    //      (or first business photo) when Higgsfield fails.
     const tryFullVideo = async () => {
-      if (higgsfieldReady) {
-        try {
-          console.log(`[Job ${jobId}] Higgsfield full video: attempting...`);
-          const fvUrl = await generateFullVideoHiggsfield();
-          if (fvUrl) {
-            const v = await validateKlingVideo(fvUrl);
-            if (v.valid) {
-              console.log(`[Job ${jobId}] Higgsfield full video: OK — ${v.width}x${v.height}, codec=${v.codec}, duration=${v.duration}s`);
-              videoMeta = 'higgsfield';
-              return { frame: null, video: fvUrl };
-            }
-            console.warn(`[Job ${jobId}] Higgsfield full video failed validation: ${v.reason}`);
-          } else {
-            console.warn(`[Job ${jobId}] Higgsfield full video returned no url`);
-          }
-        } catch (e) {
-          console.error(`[Job ${jobId}] Higgsfield full video threw: ${e?.message}`);
-        }
-      } else {
-        console.error(`[Job ${jobId}] Higgsfield not configured — going straight to static fallback`);
-      }
+      // Tier 1: Marketing Studio
+      const t1 = await tryMarketingStudio();
+      if (t1) return t1;
 
-      // Static fallback — single 15s MP4 from the avatar (or first business
-      // photo for business mode). The product-only middle beat is sacrificed
-      // here, but a single static fallback is just a placeholder so the user
-      // can see the script + voiceover and re-run.
+      // Tier 2: Seedance
+      const t2 = await trySeedance();
+      if (t2) return t2;
+
+      // Tier 3: Static fallback — single 15s MP4 from the avatar (or first
+      // business photo for business mode). Placeholder so the user can see
+      // the script + voiceover and re-run.
+      console.log(`[Job ${jobId}] Tier 3: Static fallback...`);
       const fallbackImage = (videoType === 'business')
         ? (preparedBusinessPhotos[0] || preparedAvatar)
         : preparedAvatar;
@@ -1360,26 +1432,25 @@ async function runJob(jobId, body) {
         try {
           const staticUrl = await buildStaticFallbackVideo(fallbackImage, 15);
           if (staticUrl) {
-            console.log(`[Job ${jobId}] Static fallback full video: OK (${staticUrl.length} chars data URL)`);
-            videoMeta = 'static';
+            console.log(`[Job ${jobId}] Tier 3 succeeded (${staticUrl.length} chars data URL)`);
+            videoSource = 'static';
             return { frame: fallbackImage, video: staticUrl };
           }
         } catch (e) {
-          console.error(`[Job ${jobId}] Static fallback full video crashed:`, e.message);
+          console.error(`[Job ${jobId}] Tier 3 crashed: ${e.message}`);
         }
       } else {
-        console.error(`[Job ${jobId}] Full video: no fallback image available (avatar=${!!preparedAvatar}, business=${preparedBusinessPhotos.length})`);
+        console.error(`[Job ${jobId}] Tier 3: no fallback image available (avatar=${!!preparedAvatar}, business=${preparedBusinessPhotos.length})`);
       }
 
-      videoMeta = 'none';
+      videoSource = 'none';
       return { frame: null, video: null };
     };
 
-    // The 70s Anthropic rate-limit cooldown lives INSIDE
-    // generateFullVideoHiggsfield (right before the dispatch) so it is
-    // unambiguously sequential with the Higgsfield call — no Promise.all
-    // race possible. generateVoice is ElevenLabs (not Anthropic) and is
-    // safe to run in parallel with the cooldown.
+    // tryFullVideo runs the 3-tier fallback (Marketing Studio → Seedance →
+    // static) sequentially, each tier with its own internal cooldown if any.
+    // generateVoice is ElevenLabs (not Anthropic) and is safe to run in
+    // parallel with the video pipeline.
     const [voiceResult, fullResult] = await Promise.all([
       generateVoice(voiceover, voiceId),
       tryFullVideo()
@@ -1394,7 +1465,7 @@ async function runJob(jobId, body) {
     const frames = [fullResult.frame, null, null, null];
     const videos = [fullVideoUrl, null, null, null];
 
-    console.log(`[Job ${jobId}] Full video source: ${videoMeta}`);
+    console.log(`[Job ${jobId}] Full video source: ${videoSource}`);
 
     // Anthropic API cost summary for the single full-video call. Higgsfield's
     // MCP doesn't bill us — Anthropic does, since Claude is the MCP client.
@@ -1421,6 +1492,10 @@ async function runJob(jobId, body) {
       // records (without this field) keep working through the videos array.
       fullVideoUrl,
       fullVideoDuration: fullVideoUrl ? 15 : null,
+      // Which tier of the 3-tier fallback produced the video. Useful for
+      // analytics ("what % of jobs hit Marketing Studio vs Seedance vs
+      // static") and for the editor to badge the video source.
+      videoSource,
       audioBase64,
       wordTimestamps,
       hebrewVoice: voiceover,
