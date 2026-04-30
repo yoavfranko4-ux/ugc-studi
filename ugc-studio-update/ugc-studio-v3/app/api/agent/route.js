@@ -1138,6 +1138,12 @@ async function runJob(jobId, body) {
       Promise.all(preparedBusinessPhotos.map(u => uploadToHiggsfield(u))).then(arr => arr.filter(Boolean))
     ]);
 
+    console.log(`[Job ${jobId}] Post-upload refs:`, {
+      refAvatarUrl: refAvatarUrl ? (refAvatarUrl.startsWith('data:') ? '❌ STILL data URL!' : refAvatarUrl.substring(0, 100)) : 'null',
+      refProductUrl: refProductUrl ? (refProductUrl.startsWith('data:') ? '❌ STILL data URL!' : refProductUrl.substring(0, 100)) : 'null',
+      refBusinessPhotosCount: refBusinessPhotos?.length || 0
+    });
+
     const voiceGender = voiceId === 'nBiC8Jexp2XGyIxATg9S' ? 'male' : 'female';
 
     // Script — branch by mode
