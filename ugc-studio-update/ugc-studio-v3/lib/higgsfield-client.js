@@ -162,6 +162,133 @@ function extractError(content) {
   return null
 }
 
+// Higher per-turn budget — the polling loop can emit several tool_use /
+// tool_result blocks plus the final text. 4096 tokens was leaving us at
+// stop_reason=pause_turn before Claude got to write VIDEO_URL, even though
+// Higgsfield had already returned the finished video.
+const MAX_TOKENS_PER_TURN = 16384
+
+// Cap on pause_turn continuations. With MCP polling, Anthropic can pause
+// Claude's turn while a tool is still running and ask the caller to resume.
+// Each resume re-sends the conversation with the assistant's partial content
+// appended. 10 continuations is well above what a single Higgsfield render
+// needs (typically 2-4 turns) and bounds wallclock + cost.
+const MAX_PAUSE_TURN_CONTINUATIONS = 10
+
+// One-shot Anthropic call that transparently follows pause_turn until Claude
+// either finishes (end_turn / tool_use exhaustion) or we hit the cap. Returns
+// a synthetic `data` object whose `content` array is the concatenation of
+// every assistant turn — so extractVideoUrl / extractError see the whole
+// conversation, not just the last fragment.
+async function callAnthropicWithPauseTurn({ body, timeoutMs, label }) {
+  const { anthropicKey } = getConfig()
+  let messages = body.messages
+  let lastData = null
+  let totalInput = 0
+  let totalOutput = 0
+  let totalCacheRead = 0
+  let totalCacheCreate = 0
+  const accumulatedAssistantContent = []
+  const t0 = Date.now()
+
+  for (let turn = 0; turn <= MAX_PAUSE_TURN_CONTINUATIONS; turn++) {
+    const reqBody = { ...body, messages }
+    let res
+    try {
+      res = await fetch(ANTHROPIC_API_URL, {
+        method: 'POST',
+        headers: {
+          'x-api-key': anthropicKey,
+          'anthropic-version': ANTHROPIC_VERSION,
+          'anthropic-beta': ANTHROPIC_BETA,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify(reqBody),
+        signal: AbortSignal.timeout(timeoutMs)
+      })
+    } catch (e) {
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      if (e?.name === 'TimeoutError' || /aborted/i.test(e?.message || '')) {
+        throw new Error(
+          `Higgsfield ${label} timed out after ${elapsed}s (limit ${timeoutMs / 1000}s)`
+        )
+      }
+      throw new Error(`Higgsfield ${label} request failed: ${e.message}`)
+    }
+
+    const text = await res.text()
+    let data
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = { raw: text }
+    }
+    const elapsedSoFar = ((Date.now() - t0) / 1000).toFixed(1)
+
+    if (!res.ok) {
+      console.error(
+        `[Higgsfield] ${label} Anthropic API HTTP ${res.status} after ${elapsedSoFar}s (turn ${turn + 1}): ${text.slice(0, 400)}`
+      )
+      throw new Error(
+        `Anthropic API HTTP ${res.status}: ${text.slice(0, 200)}`
+      )
+    }
+
+    if (data?.usage) {
+      totalInput += data.usage.input_tokens || 0
+      totalOutput += data.usage.output_tokens || 0
+      totalCacheRead += data.usage.cache_read_input_tokens || 0
+      totalCacheCreate += data.usage.cache_creation_input_tokens || 0
+    }
+
+    lastData = data
+    const stopReason = data?.stop_reason
+    const blocks = Array.isArray(data?.content) ? data.content : []
+    console.log(
+      `[Higgsfield] ${label} turn ${turn + 1}: stop_reason=${stopReason}, content_blocks=${blocks.length}, elapsed=${elapsedSoFar}s`
+    )
+
+    if (data?.stop_reason === 'error' || data?.type === 'error') {
+      const msg = data?.error?.message || data?.error || 'unknown error'
+      throw new Error(
+        `Higgsfield/Claude error: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`
+      )
+    }
+
+    accumulatedAssistantContent.push(...blocks)
+
+    if (stopReason !== 'pause_turn') {
+      break
+    }
+
+    // pause_turn → resume by appending Claude's partial assistant turn and
+    // re-sending. No new user message is required.
+    messages = [...messages, { role: 'assistant', content: blocks }]
+
+    if (turn === MAX_PAUSE_TURN_CONTINUATIONS) {
+      console.warn(
+        `[Higgsfield] ${label} hit MAX_PAUSE_TURN_CONTINUATIONS=${MAX_PAUSE_TURN_CONTINUATIONS}; bailing out and returning whatever we have`
+      )
+    }
+  }
+
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+  const mergedUsage = {
+    input_tokens: totalInput,
+    output_tokens: totalOutput,
+    cache_read_input_tokens: totalCacheRead,
+    cache_creation_input_tokens: totalCacheCreate
+  }
+  return {
+    data: {
+      ...lastData,
+      content: accumulatedAssistantContent,
+      usage: mergedUsage
+    },
+    elapsed
+  }
+}
+
 // generateVideo — drop-in replacement for byteplusGenerateVideo. Same input
 // shape and same `{ videoUrl }` return shape so route.js doesn't need to know
 // it switched providers.
@@ -173,11 +300,11 @@ export async function generateVideo({ prompt, imageUrls = [], duration = 5 } = {
     (u) => typeof u === 'string' && u.length > 0
   )
 
-  const { anthropicKey, higgsfieldToken } = getConfig()
+  const { higgsfieldToken } = getConfig()
 
   const body = {
     model: CLAUDE_MODEL,
-    max_tokens: 4096,
+    max_tokens: MAX_TOKENS_PER_TURN,
     mcp_servers: [
       {
         type: 'url',
@@ -199,60 +326,19 @@ export async function generateVideo({ prompt, imageUrls = [], duration = 5 } = {
     ]
   }
 
-  const t0 = Date.now()
   console.log(
     `[Higgsfield] dispatching scene: refs=${cleanImageUrls.length} duration=${duration}s promptPreview="${prompt.slice(0, 80).replace(/\s+/g, ' ')}..."`
   )
 
-  let res
-  try {
-    res = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'x-api-key': anthropicKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-        'anthropic-beta': ANTHROPIC_BETA,
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(SCENE_TIMEOUT_MS)
-    })
-  } catch (e) {
-    const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-    if (e?.name === 'TimeoutError' || /aborted/i.test(e?.message || '')) {
-      throw new Error(
-        `Higgsfield scene timed out after ${elapsed}s (limit ${SCENE_TIMEOUT_MS / 1000}s)`
-      )
-    }
-    throw new Error(`Higgsfield request failed: ${e.message}`)
-  }
-
-  const text = await res.text()
-  let data
-  try {
-    data = JSON.parse(text)
-  } catch {
-    data = { raw: text }
-  }
-  const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-
-  if (!res.ok) {
-    console.error(
-      `[Higgsfield] Anthropic API HTTP ${res.status} after ${elapsed}s: ${text.slice(0, 400)}`
-    )
-    throw new Error(
-      `Anthropic API HTTP ${res.status}: ${text.slice(0, 200)}`
-    )
-  }
+  const { data, elapsed } = await callAnthropicWithPauseTurn({
+    body,
+    timeoutMs: SCENE_TIMEOUT_MS,
+    label: 'scene'
+  })
 
   const usage = summarizeUsage(data?.usage)
   logTokenUsage(`scene (${elapsed}s)`, usage)
   const usageWithElapsed = usage ? { ...usage, elapsed_s: Number(elapsed) } : null
-
-  if (data?.stop_reason === 'error' || data?.type === 'error') {
-    const msg = data?.error?.message || data?.error || 'unknown error'
-    throw new Error(`Higgsfield/Claude error: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`)
-  }
 
   const claudeError = extractError(data?.content)
   if (claudeError) {
@@ -288,11 +374,11 @@ export async function generateFullVideo({ prompt, imageUrls = [], duration = 15 
     (u) => typeof u === 'string' && u.length > 0
   )
 
-  const { anthropicKey, higgsfieldToken } = getConfig()
+  const { higgsfieldToken } = getConfig()
 
   const body = {
     model: CLAUDE_MODEL,
-    max_tokens: 4096,
+    max_tokens: MAX_TOKENS_PER_TURN,
     mcp_servers: [
       {
         type: 'url',
@@ -318,60 +404,19 @@ export async function generateFullVideo({ prompt, imageUrls = [], duration = 15 
     ]
   }
 
-  const t0 = Date.now()
   console.log(
     `[Higgsfield] dispatching full video: refs=${cleanImageUrls.length} duration=${duration}s promptLen=${prompt.length} promptPreview="${prompt.slice(0, 100).replace(/\s+/g, ' ')}..."`
   )
 
-  let res
-  try {
-    res = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'x-api-key': anthropicKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-        'anthropic-beta': ANTHROPIC_BETA,
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(FULL_VIDEO_TIMEOUT_MS)
-    })
-  } catch (e) {
-    const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-    if (e?.name === 'TimeoutError' || /aborted/i.test(e?.message || '')) {
-      throw new Error(
-        `Higgsfield full video timed out after ${elapsed}s (limit ${FULL_VIDEO_TIMEOUT_MS / 1000}s)`
-      )
-    }
-    throw new Error(`Higgsfield request failed: ${e.message}`)
-  }
-
-  const text = await res.text()
-  let data
-  try {
-    data = JSON.parse(text)
-  } catch {
-    data = { raw: text }
-  }
-  const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-
-  if (!res.ok) {
-    console.error(
-      `[Higgsfield] Anthropic API HTTP ${res.status} after ${elapsed}s: ${text.slice(0, 400)}`
-    )
-    throw new Error(
-      `Anthropic API HTTP ${res.status}: ${text.slice(0, 200)}`
-    )
-  }
+  const { data, elapsed } = await callAnthropicWithPauseTurn({
+    body,
+    timeoutMs: FULL_VIDEO_TIMEOUT_MS,
+    label: 'full video'
+  })
 
   const usage = summarizeUsage(data?.usage)
   logTokenUsage(`full video (${elapsed}s)`, usage)
   const usageWithElapsed = usage ? { ...usage, elapsed_s: Number(elapsed) } : null
-
-  if (data?.stop_reason === 'error' || data?.type === 'error') {
-    const msg = data?.error?.message || data?.error || 'unknown error'
-    throw new Error(`Higgsfield/Claude error: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`)
-  }
 
   const claudeError = extractError(data?.content)
   if (claudeError) {
