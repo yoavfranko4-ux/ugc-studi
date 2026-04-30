@@ -1369,6 +1369,15 @@ async function runJob(jobId, body) {
       return { frame: null, video: null };
     };
 
+    // Anthropic Tier 1 rate limit cooldown: 30K input tokens/min. The script
+    // generation step (and any retries for broken-sentence regen) can burn
+    // ~10-20K tokens by itself, and the Higgsfield MCP call adds another ~10K.
+    // Sleep 70s here to make sure the per-minute window has rolled over before
+    // we dispatch the video call. Remove this once we're on Tier 2+.
+    console.log(`[Job ${jobId}] Waiting 70s for Anthropic rate limit cooldown before video generation...`);
+    await new Promise(r => setTimeout(r, 70000));
+    console.log(`[Job ${jobId}] Cooldown complete, starting video generation...`);
+
     const [voiceResult, fullResult] = await Promise.all([
       generateVoice(voiceover, voiceId),
       tryFullVideo()
