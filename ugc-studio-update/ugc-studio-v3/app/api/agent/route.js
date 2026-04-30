@@ -1301,16 +1301,6 @@ async function runJob(jobId, body) {
     const generateFullVideoHiggsfield = async () => {
       try {
         const mergedPrompt = buildMergedFullPrompt();
-        // Anthropic Tier 1 rate limit cooldown: 30K input tokens/min. The
-        // script generation step (and any retries for broken-sentence regen)
-        // can burn ~10-20K tokens by itself, and the Higgsfield MCP call adds
-        // another ~10K. Sleep 70s here — physically adjacent to the dispatch,
-        // inside the same async function — so there is no way the Anthropic
-        // call leaves before the per-minute window has rolled over. Remove
-        // this once we're on Tier 2+.
-        console.log(`[Job ${jobId}] Waiting 70s for Anthropic rate limit cooldown before video generation...`);
-        await new Promise(r => setTimeout(r, 70000));
-        console.log(`[Job ${jobId}] Cooldown complete, dispatching Higgsfield call now.`);
         console.log(`[Higgsfield] Full 15s video: ${mergedReferenceImages.length} refs, prompt length=${mergedPrompt.length}`);
         const { videoUrl, usage } = await higgsfieldGenerateFullVideo({
           prompt: mergedPrompt,
