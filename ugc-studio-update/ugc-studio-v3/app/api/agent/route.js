@@ -1271,36 +1271,30 @@ async function runJob(jobId, body) {
     // "copyright restrictions" rejection on the 4-call layout).
     const buildMergedFullPrompt = () => {
       const isBusiness = videoType === 'business';
-      const beat1 = trimKlingForBeat(scenes[0]?.kling_prompt, 160);
-      const beat2 = trimKlingForBeat(scenes[1]?.kling_prompt, 160);
-      const beat3 = trimKlingForBeat(scenes[2]?.kling_prompt, 160);
-      const beat4 = trimKlingForBeat(scenes[3]?.kling_prompt, 160);
-      const productLabel = productName || (isBusiness ? (businessName || 'the business') : 'the product');
-      const beat2Subject = isBusiness
-        ? `the storefront / craft of ${productLabel} (Image 1)`
+      const beat1 = trimKlingForBeat(scenes[0]?.kling_prompt, 200);
+      const beat2 = trimKlingForBeat(scenes[1]?.kling_prompt, 200);
+      const beat3 = trimKlingForBeat(scenes[2]?.kling_prompt, 200);
+      const beat4 = trimKlingForBeat(scenes[3]?.kling_prompt, 200);
+      const productLabel = productName
+        || (isBusiness ? (businessName || 'the business') : 'the product');
+      const productRef = isBusiness
+        ? `the ${productLabel} storefront (Image 1)`
         : `the ${productLabel} (Image 1)`;
 
       const lines = [
-        `15-second UGC video, 9:16 vertical, iPhone selfie style, 4 beats with HARD CUTS between them.`,
+        `Style: UGC iPhone front camera, vertical 9:16, natural handheld feel, real skin tones, natural light, no filters. 15 seconds total with quick scene transitions between 4 emotional beats.`,
         ``,
-        `CRITICAL — NO LIP MOVEMENT: Lips stay closed for the entire video. No talking, no mouth opening. Voiceover is added externally. All emotion through the eyes and closed-mouth micro-expressions.`,
+        `ABSOLUTE RULE — NO LIP MOVEMENT: The person's mouth never opens. Lips stay completely sealed throughout. No talking, no mouth movement. Voiceover is added externally — the visual must be silent. All emotion through the eyes, eyebrows, and closed-mouth micro-expressions.`,
         ``,
-        `==== BEAT 1 — PAIN (0-4s) ====`,
-        `[HARD CUT IN]`,
-        beat1,
+        `The woman from Image 2 — same face, same outfit, same hair throughout (when she appears).`,
         ``,
-        `==== BEAT 2 — PRODUCT (4-7s) ====`,
-        `[HARD CUT to product]`,
-        `${beat2Subject}, hero shot, no person in frame.`,
-        beat2,
+        `Beat 1 (0-4s) — Pain: She ${beat1} - closed-mouth frown, disappointed eyes.`,
         ``,
-        `==== BEAT 3 — SOLUTION (7-11s) ====`,
-        `[HARD CUT to using product]`,
-        beat3,
+        `Beat 2 (4-7s) — Product hero: Cut to ${productRef} alone, no person in frame. Hero shot, natural light catches the product. ${beat2}`,
         ``,
-        `==== BEAT 4 — WIN (11-15s) ====`,
-        `[HARD CUT to result]`,
-        beat4,
+        `Beat 3 (7-11s) — Solution: Cut back to her using ${productRef} naturally - ${beat3} - eyes lighting up with closed-mouth satisfaction.`,
+        ``,
+        `Beat 4 (11-15s) — Win: She holds ${productRef} with a confident closed-mouth smile, eyes sparkling. ${beat4}`
       ];
       return lines.join('\n');
     };
