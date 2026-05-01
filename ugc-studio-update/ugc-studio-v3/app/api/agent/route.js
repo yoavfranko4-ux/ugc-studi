@@ -1271,39 +1271,36 @@ async function runJob(jobId, body) {
     // "copyright restrictions" rejection on the 4-call layout).
     const buildMergedFullPrompt = () => {
       const isBusiness = videoType === 'business';
-      const beat1 = trimKlingForBeat(scenes[0]?.kling_prompt, 220);
-      const beat2 = trimKlingForBeat(scenes[1]?.kling_prompt, 220);
-      const beat3a = trimKlingForBeat(scenes[2]?.kling_prompt, 180);
-      const beat3b = trimKlingForBeat(scenes[3]?.kling_prompt, 180);
+      const beat1 = trimKlingForBeat(scenes[0]?.kling_prompt, 160);
+      const beat2 = trimKlingForBeat(scenes[1]?.kling_prompt, 160);
+      const beat3 = trimKlingForBeat(scenes[2]?.kling_prompt, 160);
+      const beat4 = trimKlingForBeat(scenes[3]?.kling_prompt, 160);
       const productLabel = productName || (isBusiness ? (businessName || 'the business') : 'the product');
       const beat2Subject = isBusiness
         ? `the storefront / craft of ${productLabel} (Image 1)`
-        : `the ${productLabel} bottle / package (Image 1)`;
+        : `the ${productLabel} (Image 1)`;
 
       const lines = [
-        `15-second UGC video, 9:16 vertical, iPhone selfie style, 3 distinct beats with HARD CUTS between them.`,
+        `15-second UGC video, 9:16 vertical, iPhone selfie style, 4 beats with HARD CUTS between them.`,
         ``,
-        `CRITICAL — NO LIP MOVEMENT: Lips stay closed for the entire video. No talking, no singing, no mouth opening. The voiceover is added externally in Hebrew. All emotion comes from the eyes, eyebrows, and closed-mouth micro-expressions.`,
-        ``,
-        `ANATOMY: Same woman (Image 2) recognizable in beats 1 and 3. ZERO people in beat 2 — only ${productLabel}. 2 arms, 2 hands, 5 fingers each. Stable face throughout.`,
+        `CRITICAL — NO LIP MOVEMENT: Lips stay closed for the entire video. No talking, no mouth opening. Voiceover is added externally. All emotion through the eyes and closed-mouth micro-expressions.`,
         ``,
         `==== BEAT 1 — PAIN (0-4s) ====`,
         `[HARD CUT IN]`,
         beat1,
         ``,
-        `==== BEAT 2 — PRODUCT HERO (4-7s) ====`,
-        `[HARD CUT to product close-up]`,
+        `==== BEAT 2 — PRODUCT (4-7s) ====`,
+        `[HARD CUT to product]`,
+        `${beat2Subject}, hero shot, no person in frame.`,
         beat2,
-        `NO PERSON in this beat. Only ${beat2Subject}. Hero shot, light catches the product.`,
         ``,
-        `==== BEAT 3 — SOLUTION & WIN (7-15s) ====`,
+        `==== BEAT 3 — SOLUTION (7-11s) ====`,
         `[HARD CUT to using product]`,
-        `First half (7-11s): ${beat3a}`,
-        `Second half (11-15s): ${beat3b}`,
+        beat3,
         ``,
-        `STYLE: Authentic UGC, natural light, slight handheld wobble, flat color grading.`,
-        `PRODUCT LOCK: ${productLabel} (Image 1) IDENTICAL to reference — same shape, same label, same color.`,
-        `NEGATIVES: no mirrors, no reflective surfaces, no on-screen text, no logos other than the product, no talking, no mouth opening, no AI face distortion, no extra limbs, no melting hands, no lens flares, no over-saturated color grade.`
+        `==== BEAT 4 — WIN (11-15s) ====`,
+        `[HARD CUT to result]`,
+        beat4,
       ];
       return lines.join('\n');
     };
