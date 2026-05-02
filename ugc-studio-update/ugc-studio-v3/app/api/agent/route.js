@@ -1282,7 +1282,7 @@ async function runJob(jobId, body) {
         : `the ${productLabel} (Image 1)`;
 
       const lines = [
-        `Style: UGC iPhone front camera, vertical 9:16, natural handheld feel, real skin tones, natural light, no filters. 15 seconds total with quick scene transitions between 4 emotional beats.`,
+        `Vertical 9:16 selfie-style UGC, shot on iPhone front camera, warm natural window light from behind subject creating soft rim glow, shallow depth of field with softly blurred background, real skin tones with subtle natural imperfections, no filters or color grading, authentic phone-native handheld energy with slight micro-shake, lived-in real-world environment with natural clutter and warmth. 15 seconds total with quick scene transitions between 4 emotional beats.`,
         ``,
         `ABSOLUTE RULE — NO LIP MOVEMENT: The person's mouth never opens. Lips stay completely sealed throughout. No talking, no mouth movement. Voiceover is added externally — the visual must be silent. All emotion through the eyes, eyebrows, and closed-mouth micro-expressions.`,
         ``,
