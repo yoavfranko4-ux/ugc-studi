@@ -78,21 +78,21 @@ function Nav() {
 /* ---------- HERO ---------- */
 const PHONE_VIDEOS = [
   {
-    src: '/hero-videos/whitening.mp4',
-    label: <>אבקת <span className="accent">הלבנה</span><br />חיוך לבן ב-30 שניות</>,
-    badge: '● אבקת הלבנה',
+    src: '/hero-videos/moka.mp4',
+    label: <>בית קפה <span className="accent">MOKA</span><br />הסלון הביתי שלך</>,
+    badge: '● בית קפה MOKA',
     layer: 'l1',
+  },
+  {
+    src: '/hero-videos/alma.mp4',
+    label: <>סרום <span className="accent">ALMA</span><br />זוהר טבעי בשבועיים</>,
+    badge: '● סרום ALMA',
+    layer: 'l2',
   },
   {
     src: '/hero-videos/perfume.mp4',
     label: <>בושם <span className="accent">שמש</span><br />שנשאר 12 שעות</>,
     badge: '● בושם שמש',
-    layer: 'l2',
-  },
-  {
-    src: '/hero-videos/barbershop.mp4',
-    label: <>ברבר שופ <span className="accent">הצמרת</span><br />במרכז העיר</>,
-    badge: '● ברבר שופ הצמרת',
     layer: 'l3',
   },
 ]
@@ -261,7 +261,7 @@ function Hero() {
         <div className="studio-mock">
           <div className="studio-bar">
             <span className="dot r" /><span className="dot y" /><span className="dot g" />
-            <span className="path">studio.yotzr / <span className="accent">whitening-ad</span> / preview</span>
+            <span className="path">studio.yotzr / <span className="accent">moka-cafe-ad</span> / preview</span>
           </div>
           <div className="badge"><span className="rec" />REC · 00:17</div>
           <div className="studio-grid">
@@ -318,38 +318,38 @@ function Hero() {
 
 /* ---------- FLOW ---------- */
 const PRODUCTS = {
-  whitening: {
-    script: 'אבקת הלבנת שיניים טבעית 100% על בסיס פחם פעיל. מלבינה ומנקה מבלי לפגוע באמייל. רק 30 שניות ביום לחיוך לבן ובוהק.',
-    image: '/examples/whitening-product.jpg',
-    video: '/examples/whitening-video.mp4',
+  moka: {
+    script: 'נמאס לכם מבתי קפה רועשים עם קפה גנרי וכיסאות קשים? MOKA הוא הסלון הביתי שלכם בלב העיר — קפה specialty, מאפים טריים מהבוקר, ואווירה שגורמת לכם להישאר שעות.',
+    image: '/examples/moka-business.jpg',
+    video: '/examples/moka-video.mp4',
     layer: 'l1',
-    selected: 2,
+    selected: 1,
+    cat: 'עסק',
+    emoji: '☕',
+    label: 'בית קפה MOKA',
+  },
+  alma: {
+    script: 'עור עייף עם הילה אפורה ופנים שלא זוהרות בבוקר? סרום ALMA עם ויטמין C מחזיר זוהר טבעי תוך שבועיים בלי דקירות בקליניקה ובלי כימיקלים.',
+    image: '/examples/alma-product.jpg',
+    video: '/examples/alma-video.mp4',
+    layer: 'l2',
+    selected: 0,
     cat: 'מוצר',
-    emoji: '🦷',
-    label: 'אבקת הלבנה',
+    emoji: '🧴',
+    label: 'סרום ALMA',
   },
   perfume: {
     script: 'בושם שמש — תערובת ייחודית של פירות הדר ופרחים בלזמיים. ניחוח רענן ליום, חם ומפנק לערב. נשאר על העור 12 שעות.',
     image: '/examples/perfume-product.jpg',
     video: '/examples/perfume-video.mp4',
-    layer: 'l2',
+    layer: 'l3',
     selected: 2,
     cat: 'מוצר',
     emoji: '🌸',
     label: 'בושם שמש',
   },
-  barbershop: {
-    script: 'ברבר שופ הצמרת — מספרת גברים בוטיק במרכז העיר. תספורות מודרניות, גילוח קלאסי בסכין, אווירה מקצועית. תור היום, מראה חדש מחר.',
-    image: '/examples/barbershop-business.jpg',
-    video: '/examples/barbershop-video.mp4',
-    layer: 'l3',
-    selected: 1,
-    cat: 'עסק',
-    emoji: '💈',
-    label: 'ברבר שופ',
-  },
 }
-const PRODUCT_KEYS = ['whitening', 'perfume', 'barbershop']
+const PRODUCT_KEYS = ['moka', 'alma', 'perfume']
 
 function DropImage({ layer, src }) {
   const [err, setErr] = useState(false)
@@ -471,7 +471,7 @@ function ResultVideo({ data }) {
 }
 
 function FlowSection() {
-  const [active, setActive] = useState('whitening')
+  const [active, setActive] = useState('moka')
   const [typed, setTyped] = useState('')
   const [hasImage, setHasImage] = useState(false)
   const [voice, setVoice] = useState('noa')
@@ -492,7 +492,7 @@ function FlowSection() {
   }
 
   useEffect(() => {
-    retype(PRODUCTS.whitening.script)
+    retype(PRODUCTS.moka.script)
     const t = setTimeout(() => setHasImage(true), 2200)
     return () => {
       clearTimeout(t)
