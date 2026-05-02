@@ -406,6 +406,7 @@ export async function POST(req) {
     const {
       videoClipsB64,
       videoUrls,
+      clipDurations, // NEW: per-clip duration in seconds. Falls back to 5 per clip when missing (legacy 4×5s layout).
       nbFrameUrls,   // NEW: per-scene NB frame URLs / data: URIs — used as visual fallback
       audioBase64,
       audioFormat,
@@ -416,6 +417,13 @@ export async function POST(req) {
       subtitleStyle,
       fastExport,
     } = body
+
+    // Per-clip duration accessor. Defaults to 5s for legacy callers and for fallback
+    // slots that have no real source clip.
+    const clipDur = (i) => {
+      const d = Number(Array.isArray(clipDurations) ? clipDurations[i] : NaN)
+      return Number.isFinite(d) && d > 0 ? d : 5
+    }
 
     const hasB64Clips = Array.isArray(videoClipsB64) && videoClipsB64.some(Boolean)
     const hasUrls = Array.isArray(videoUrls) && videoUrls.some(Boolean)
@@ -556,7 +564,7 @@ export async function POST(req) {
         '-loop', '1',
         '-framerate', String(TARGET_FPS),
         '-i', resolved,
-        '-t', '5',
+        '-t', String(clipDur(i)),
         '-c:v', 'libx264',
         '-preset', PRESET,
         '-pix_fmt', 'yuv420p',
@@ -586,7 +594,7 @@ export async function POST(req) {
         '-y',
         '-threads', '1',
         '-f', 'lavfi', '-i', `color=c=black:s=${TARGET_W}x${TARGET_H}:r=${TARGET_FPS}`,
-        '-t', '5',
+        '-t', String(clipDur(i)),
         '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF,
         '-pix_fmt', 'yuv420p',
         '-max_muxing_queue_size', '1024',
@@ -675,7 +683,7 @@ export async function POST(req) {
       console.warn(`[Export] ⚠️ Fallbacks: ${nbFallbackCount} NB-frame static + ${blackFallbackCount} pure-black (of ${expectedCount} clips)`)
     }
 
-    const totalDuration = validPaths.length * 5
+    const totalDuration = validPaths.reduce((sum, _, i) => sum + clipDur(i), 0)
 
     // -----------------------------------------------------------
     // 4. Normalize-skip detection requires ffprobe, which is unreliable here.
@@ -729,7 +737,7 @@ export async function POST(req) {
           '-i', inPath,
           '-vf', vfChain,
           '-r', String(TARGET_FPS),
-          '-t', '5',
+          '-t', String(clipDur(i)),
           '-pix_fmt', 'yuv420p',
           '-c:v', 'libx264',
           '-preset', PRESET,

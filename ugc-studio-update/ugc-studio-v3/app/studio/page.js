@@ -1443,6 +1443,7 @@ export default function Home() {
         timeOffset += perClipDuration
         return sub
       })
+      const clipDurations = orderedScenes.map(() => perClipDuration)
 
       setExportProgress('שולח לשרת... 20%')
 
@@ -1475,6 +1476,7 @@ export default function Home() {
         body: JSON.stringify({
           videoUrls,
           videoClipsB64,
+          clipDurations,
           nbFrameUrls,
           audioBase64: voiceAudioB64,
           audioFormat,
