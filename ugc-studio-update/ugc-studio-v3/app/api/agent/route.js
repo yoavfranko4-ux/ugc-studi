@@ -1286,16 +1286,34 @@ async function runJob(jobId, body) {
       const beat2 = trimKlingForBeat(scenes[1]?.kling_prompt, 400);
       const beat3 = trimKlingForBeat(scenes[2]?.kling_prompt, 400);
       const beat4 = trimKlingForBeat(scenes[3]?.kling_prompt, 400);
-      const productLabel = productName
-        || (isBusiness ? (businessName || 'the business') : 'the product');
-      const productRef = isBusiness
-        ? `the ${productLabel} storefront (Image 1)`
-        : `the ${productLabel} (Image 1)`;
+
+      if (isBusiness) {
+        const businessLabel = businessName || 'the location';
+
+        const lines = [
+          `Vertical 9:16 selfie-style UGC location moment, shot on iPhone front camera, natural daylight at the location, handheld authentic energy, "showing my favorite spot" vibe, real skin tones with subtle imperfections, no filters, lived-in real-world environment.`,
+          ``,
+          `The woman from Image 2 — same face, same hair, same warm presence throughout — visiting or working at ${businessLabel} (Image 1). The location stays identical to the reference image — same storefront, same signage, same atmosphere, no alterations.`,
+          ``,
+          `Action sequence: ${beat1}`,
+          ``,
+          `Then, ${beat2}`,
+          ``,
+          `Next, ${beat3}`,
+          ``,
+          `Finally, ${beat4}`,
+          ``,
+          `CRITICAL RULE: She never opens her mouth throughout. Lips stay completely closed. No talking, no lip movement, no sound. All emotion through eyes, eyebrows, and closed-mouth micro-expressions. Voiceover added externally — the visual must be silent.`
+        ];
+        return lines.join('\n');
+      }
+
+      const productLabel = productName || 'the product';
 
       const lines = [
         `Vertical 9:16 selfie-style UGC product moment, shot on iPhone front camera, natural daylight, handheld authentic energy, warm natural light, real skin tones with subtle imperfections, no filters, lived-in real-world environment.`,
         ``,
-        `The woman from Image 2 — same face, same hair, same warm presence throughout. ${productRef} stays identical to the reference image — same colors, same shape, same branding details, no alterations.`,
+        `The woman from Image 2 — same face, same hair, same warm presence throughout. She holds ${productLabel} (Image 1) — keep the product identical to the reference image, same colors, same shape, same branding details, no alterations.`,
         ``,
         `Action sequence: ${beat1}`,
         ``,
