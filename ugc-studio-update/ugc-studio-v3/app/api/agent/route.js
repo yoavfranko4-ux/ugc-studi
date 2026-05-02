@@ -414,6 +414,17 @@ CRITICAL OUTPUT CONSTRAINTS:
 - Total response under 6000 chars
 - Start response with { and end with }
 
+STYLE DIRECTION (apply within all kling_prompts):
+- Aim for Marketing Studio Director quality — rich visual cinematography
+- Specify lighting source and direction (warm window light from left, golden hour from behind, soft overhead diffused)
+- Specify environment textures (fabric throws, wooden surfaces, natural clutter that suggests lived-in space)
+- Specify wardrobe materials (cream knit sweater, oversized cotton tee, worn denim — texture matters)
+- Specify product interactions with sensory detail (fingers tracing texture, light catching the surface, weight of the object)
+- Specify micro-expressions (eyebrows lifting, eyes lighting up, small content nods, closed-mouth smile)
+- Background should be softly out of focus (shallow depth of field)
+- Mood: intimate, authentic, like she's showing this to a close friend
+- These descriptors enrich Rule 11 gestures, they don't replace them
+
 STEP 0 — CATEGORY DETECTION (REQUIRED OUTPUT FIELD):
 Before writing the script, classify the product into EXACTLY ONE of these categories:
   - "accessory" — כיפה, שרשרת, צמיד, שעון, משקפיים, טבעת, תיק, חגורה, כובע, צעיף, עניבה
@@ -1271,10 +1282,10 @@ async function runJob(jobId, body) {
     // "copyright restrictions" rejection on the 4-call layout).
     const buildMergedFullPrompt = () => {
       const isBusiness = videoType === 'business';
-      const beat1 = trimKlingForBeat(scenes[0]?.kling_prompt, 200);
-      const beat2 = trimKlingForBeat(scenes[1]?.kling_prompt, 200);
-      const beat3 = trimKlingForBeat(scenes[2]?.kling_prompt, 200);
-      const beat4 = trimKlingForBeat(scenes[3]?.kling_prompt, 200);
+      const beat1 = trimKlingForBeat(scenes[0]?.kling_prompt, 400);
+      const beat2 = trimKlingForBeat(scenes[1]?.kling_prompt, 400);
+      const beat3 = trimKlingForBeat(scenes[2]?.kling_prompt, 400);
+      const beat4 = trimKlingForBeat(scenes[3]?.kling_prompt, 400);
       const productLabel = productName
         || (isBusiness ? (businessName || 'the business') : 'the product');
       const productRef = isBusiness
@@ -1282,19 +1293,19 @@ async function runJob(jobId, body) {
         : `the ${productLabel} (Image 1)`;
 
       const lines = [
-        `Vertical 9:16 selfie-style UGC, shot on iPhone front camera, warm natural window light from behind subject creating soft rim glow, shallow depth of field with softly blurred background, real skin tones with subtle natural imperfections, no filters or color grading, authentic phone-native handheld energy with slight micro-shake, lived-in real-world environment with natural clutter and warmth. 15 seconds total with quick scene transitions between 4 emotional beats.`,
+        `Vertical 9:16 selfie-style UGC product moment, shot on iPhone front camera, natural daylight, handheld authentic energy, warm natural light, real skin tones with subtle imperfections, no filters, lived-in real-world environment.`,
         ``,
-        `ABSOLUTE RULE — NO LIP MOVEMENT: The person's mouth never opens. Lips stay completely sealed throughout. No talking, no mouth movement. Voiceover is added externally — the visual must be silent. All emotion through the eyes, eyebrows, and closed-mouth micro-expressions.`,
+        `The woman from Image 2 — same face, same hair, same warm presence throughout. ${productRef} stays identical to the reference image — same colors, same shape, same branding details, no alterations.`,
         ``,
-        `The woman from Image 2 — same face, same outfit, same hair throughout (when she appears).`,
+        `Action sequence: ${beat1}`,
         ``,
-        `Beat 1 (0-4s) — Pain: She ${beat1} - closed-mouth frown, disappointed eyes.`,
+        `Then, ${beat2}`,
         ``,
-        `Beat 2 (4-7s) — Product hero: Cut to ${productRef} alone, no person in frame. Hero shot, natural light catches the product. ${beat2}`,
+        `Next, ${beat3}`,
         ``,
-        `Beat 3 (7-11s) — Solution: Cut back to her using ${productRef} naturally - ${beat3} - eyes lighting up with closed-mouth satisfaction.`,
+        `Finally, ${beat4}`,
         ``,
-        `Beat 4 (11-15s) — Win: She holds ${productRef} with a confident closed-mouth smile, eyes sparkling. ${beat4}`
+        `CRITICAL RULE: She never opens her mouth throughout. Lips stay completely closed. No talking, no lip movement, no sound. All emotion through eyes, eyebrows, and closed-mouth micro-expressions. Voiceover added externally — the visual must be silent.`
       ];
       return lines.join('\n');
     };
