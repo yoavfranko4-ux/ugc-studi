@@ -280,7 +280,7 @@ function drawVideoCover(ctx, vid, cw, ch) {
 }
 
 const AVATARS = [
-  { id: 1, url: '/avatars/avatar-1.jpg', name: 'Maya' },
+  { id: 1, url: '/avatars/avatar-1.jpg', name: 'Liel' },
   { id: 2, url: '/avatars/avatar-2.jpg', name: 'Noa' },
   { id: 3, url: '/avatars/avatar-3.jpg', name: 'Adam' },
   { id: 4, url: '/avatars/avatar-4.jpg', name: 'Yoav' },

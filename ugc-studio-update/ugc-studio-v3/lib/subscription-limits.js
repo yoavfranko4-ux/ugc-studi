@@ -19,7 +19,7 @@ export const LIMITS = {
   },
   basic: {
     videos: 4,
-    avatarIds: ['Noa', 'Adam', 'Maya'],                         // 3 avatars
+    avatarIds: ['Noa', 'Adam', 'Liel'],                         // 3 avatars
     voiceIds: ['cp6q5qJLs8rR7eAWOepf', 'nBiC8Jexp2XGyIxATg9S'],
     voiceRegensPerVideo: 1,
     sceneRegensPerVideo: 1,
