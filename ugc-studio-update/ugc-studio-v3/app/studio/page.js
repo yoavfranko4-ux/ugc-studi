@@ -974,8 +974,17 @@ export default function Home() {
         storyDescription,
         productImageUrl,
       }
+      // Server requires Authorization: Bearer <supabase-jwt> on /api/agent.
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        throw new Error('יש להתחבר לפני יצירת סרטון')
+      }
       const agentRes = await fetch('/api/agent', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, elevenKey, voiceId, userId })
       })
       if (!agentRes.ok) throw new Error('Agent failed')

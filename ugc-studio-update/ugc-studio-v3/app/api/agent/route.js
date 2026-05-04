@@ -14,6 +14,8 @@ import { prewarmVideos } from '../../../lib/video-cache.js'
 import { buildKlingPrompt, SCENE_DURATIONS as SHARED_SCENE_DURATIONS, STABLE as SHARED_STABLE, PRODUCT_LOCK as SHARED_PRODUCT_LOCK, BUSINESS_CRAFT_LOCK as SHARED_BUSINESS_CRAFT_LOCK } from '../../../lib/agent-pipeline.js'
 import { generateVideo as higgsfieldGenerateVideo, generateFullVideo as higgsfieldGenerateFullVideo, isHiggsfieldConfigured, uploadToHiggsfield } from '../../../lib/higgsfield-client.js'
 import { generateMarketingStudioVideo, isMarketingStudioConfigured } from '../../../lib/marketing-studio-client.js'
+import { getUserFromRequest } from '../../../lib/auth-server.js'
+import { canCreateVideo, insertVideoJob, incrementVideoCount, updateVideoJobStatus } from '../../../lib/quota.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -894,29 +896,26 @@ export async function POST(req) {
       return Response.json({ error: 'Supabase not configured' }, { status: 500 });
     }
 
-    // Soft subscription-quota gate. If the client passes userId and the users
-    // table has subscription_tier populated, enforce remainingVideos. When
-    // data/schema isn't ready we silently pass through — payments aren't wired
-    // yet (see Yotzr migration plan).
-    if (body?.userId) {
-      try {
-        const { data: u } = await supabase
-          .from('users')
-          .select('subscription_tier, videos_used_this_period')
-          .eq('id', body.userId)
-          .maybeSingle();
-        if (u?.subscription_tier) {
-          const left = remainingVideos(u);
-          if (left <= 0) {
-            return Response.json(
-              { error: 'נגמרו לך הסרטונים החודש. שדרג לפרו לעוד 8 סרטונים.' },
-              { status: 403 }
-            );
-          }
-        }
-      } catch (err) {
-        console.warn('[Agent] quota check skipped:', err?.message || err);
-      }
+    // Auth — JWT-based, replaces the legacy soft check on users.subscription_tier.
+    // Required: every POST must carry an Authorization: Bearer <supabase-jwt> header.
+    const { user, error: authError } = await getUserFromRequest(req);
+    if (!user) {
+      return Response.json({ error: authError || 'unauthorized' }, { status: 401 });
+    }
+    body.userId = user.id; // Trust the JWT; ignore client-supplied userId.
+
+    // Quota gate — fail-closed. Blocks on no_subscription / quota_exceeded /
+    // quota_exceeded_topup_available. Caller can branch on `reason` to show
+    // an upgrade modal vs a topup CTA.
+    const gate = await canCreateVideo(user.id);
+    if (!gate.allowed) {
+      return Response.json({
+        error: gate.reason,
+        plan: gate.plan,
+        used: gate.used,
+        limit: gate.limit,
+        canTopup: gate.canTopup,
+      }, { status: 403 });
     }
 
     // Create a pending job. Persist the generation inputs alongside it so
@@ -950,6 +949,16 @@ export async function POST(req) {
       console.error('Job insert error:', insertError.message);
       return Response.json({ error: 'Failed to create job' }, { status: 500 });
     }
+
+    // Quota tracking row — separate from the legacy `jobs` table. Inserted
+    // with status='pending' here; flipped to 'completed'/'failed' inside runJob.
+    await insertVideoJob({
+      userId: user.id,
+      jobId: job.id,
+      productName: body?.productName || body?.businessName || '',
+      videoType: body?.videoType || 'ugc',
+      isTopup: false,
+    });
 
     // Fire and forget — do NOT await
     runJob(job.id, body).catch(err => console.error('Background job crashed:', err.message));
@@ -1531,36 +1540,12 @@ async function runJob(jobId, body) {
 
     console.log(`[Job ${jobId}] Completed successfully`);
 
-    // Increment the user's quota counters now that the job actually succeeded.
-    // Done here (not at job INSERT) so failed jobs don't burn quota. Trial =
-    // lifetime cap; paid tiers also bump videos_used_this_period. All errors
-    // are swallowed — quota drift is preferable to failing a finished job.
+    // Quota: count this video against the user's plan and mark video_jobs row done.
+    // All errors swallowed inside helpers — quota drift > failing a finished job.
     if (body?.userId) {
-      try {
-        const { data: u } = await supabase
-          .from('users')
-          .select('subscription_tier, videos_used_this_period, lifetime_videos_used')
-          .eq('id', body.userId)
-          .maybeSingle();
-        if (u) {
-          const updates = {
-            lifetime_videos_used: (u.lifetime_videos_used || 0) + 1,
-            videos_used_this_period: (u.videos_used_this_period || 0) + 1,
-          };
-          const { error: incErr } = await supabase
-            .from('users')
-            .update(updates)
-            .eq('id', body.userId);
-          if (incErr) {
-            console.warn(`[Job ${jobId}] counter increment failed:`, incErr.message);
-          } else {
-            console.log(`[Job ${jobId}] counters incremented for user ${body.userId} (tier=${u.subscription_tier})`);
-          }
-        }
-      } catch (e) {
-        console.warn(`[Job ${jobId}] counter increment skipped:`, e?.message || e);
-      }
+      await incrementVideoCount(body.userId, false);
     }
+    await updateVideoJobStatus(jobId, 'completed', null);
 
     // Fire-and-forget: pre-warm the Railway video cache so the editor opens
     // with all clips already resident in memory. data: URLs (the static
@@ -1576,6 +1561,9 @@ async function runJob(jobId, body) {
       .from('jobs')
       .update({ status: 'error', error: e.message })
       .eq('id', jobId);
+    // Mark video_jobs row failed too. Quota counter is NOT incremented —
+    // failed generations don't count against the user's plan.
+    await updateVideoJobStatus(jobId, 'failed', null);
   }
 }
 
