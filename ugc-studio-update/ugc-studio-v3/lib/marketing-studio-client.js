@@ -50,13 +50,47 @@ const HEARTBEAT_MS = 30_000
 const NO_LIP_PREFIX =
   'ABSOLUTE RULE: The person never opens their mouth. Lips stay completely sealed throughout the entire clip. No talking, no singing, no mouth movement at all. Voiceover is added externally — the visual must be silent. All emotion is conveyed only through the eyes, eyebrows, and CLOSED-MOUTH micro-expressions. '
 
+// Canonical Marketing Studio mode slugs from Higgsfield's
+// fnf-mcp-server/.../marketing-studio-video.ts. Mirrored from
+// scripts/_skills-import/higgsfield-generate/references/marketing-modes.md.
+// Order matches the reference doc.
+export const MODES = Object.freeze([
+  'ugc',
+  'tutorial',
+  'ugc_unboxing',
+  'hyper_motion',
+  'product_review',
+  'tv_spot',
+  'wild_card',
+  'ugc_virtual_try_on',
+  'virtual_try_on'
+])
+
+const MODE_DESCRIPTIONS = {
+  ugc:                'Default. Casual, organic, presenter-led',
+  tutorial:           'How-to / step-by-step demonstration',
+  ugc_unboxing:       "'Just got this in the mail' reveal energy",
+  hyper_motion:       'Clean polished product highlight',
+  product_review:     'Presenter giving honest opinion',
+  tv_spot:            'Broadcast-style commercial',
+  wild_card:          'Experimental, model picks the vibe',
+  ugc_virtual_try_on: 'Trying on clothing — UGC vibe',
+  virtual_try_on:     'Trying on clothing — polished'
+}
+
 export function isMarketingStudioConfigured() {
   return isMcpConfigured()
 }
 
-function buildSystemPrompt() {
+function buildSystemPrompt(mode) {
+  const modesList = MODES.map(m => `  - ${m}: ${MODE_DESCRIPTIONS[m]}`).join('\n')
   return [
-    'You are a video-generation orchestrator following the Higgsfield Marketing Studio Director skill (UGC preset). You have access to the Higgsfield MCP server, which exposes `media_upload`, `generate_video`, and `job_display` (among other tools).',
+    `You are a video-generation orchestrator for Higgsfield Marketing Studio. The active mode for this request is "${mode}". You have access to the Higgsfield MCP server, which exposes \`media_upload\`, \`generate_video\`, and \`job_display\` (among other tools).`,
+    '',
+    '=== AVAILABLE MODES (use exactly the mode passed by the client) ===',
+    modesList,
+    '',
+    'CRITICAL: Use the mode that was passed to you. Do not switch modes mid-process. Do not invent new modes.',
     '',
     '=== Marketing Studio Director — UGC preset rules ===',
     'Authentic phone-shot UGC look. The video MUST follow these constraints:',
@@ -74,7 +108,7 @@ function buildSystemPrompt() {
     '  1. Upload BOTH reference image URLs (avatar first, product second) via `media_upload` and collect the resulting media ids. Use the URLs exactly as the user provides them.',
     '  2. Call `generate_video` with these EXACT params:',
     '       model: "marketing_studio_video"',
-    '       mode: "UGC"',
+    `       mode: "${mode}"`,
     '       duration: <user-requested seconds, default 15 — never above 15>',
     '       resolution: "720p"',
     '       aspect_ratio: "9:16"',
@@ -96,12 +130,12 @@ function buildSystemPrompt() {
   ].join('\n')
 }
 
-function buildUserMessage({ avatarUrl, productUrl, prompt, duration }) {
+function buildUserMessage({ avatarUrl, productUrl, prompt, duration, mode }) {
   const promptWithLock = prompt.startsWith('ABSOLUTE RULE')
     ? prompt
     : NO_LIP_PREFIX + prompt
   const lines = [
-    `Generate a ${duration}-second 9:16 720p Marketing Studio UGC video.`,
+    `Generate a ${duration}-second 9:16 720p Marketing Studio video (mode=${mode}).`,
     '',
     'Reference images (upload BOTH via media_upload first, in this order, then pass them as `medias` to generate_video with role="image"):',
     `  1. Avatar (subject):  ${avatarUrl}`,
@@ -109,7 +143,7 @@ function buildUserMessage({ avatarUrl, productUrl, prompt, duration }) {
     '',
     'generate_video params (use EXACTLY these values):',
     '  model: marketing_studio_video',
-    '  mode: UGC',
+    `  mode: ${mode}`,
     `  duration: ${duration}`,
     '  resolution: 720p',
     '  aspect_ratio: 9:16',
@@ -125,7 +159,8 @@ export async function generateMarketingStudioVideo({
   avatarUrl,
   productUrl,
   prompt,
-  duration = 15
+  duration = 15,
+  mode = 'ugc'
 } = {}) {
   if (!prompt || typeof prompt !== 'string') {
     throw new Error('generateMarketingStudioVideo: prompt must be a non-empty string')
@@ -135,6 +170,11 @@ export async function generateMarketingStudioVideo({
   }
   if (!productUrl || typeof productUrl !== 'string') {
     throw new Error('generateMarketingStudioVideo: productUrl must be a non-empty string')
+  }
+  if (!MODES.includes(mode)) {
+    throw new Error(
+      `generateMarketingStudioVideo: invalid mode "${mode}". Allowed: ${MODES.join(', ')}`
+    )
   }
 
   const { higgsfieldToken } = getMcpConfig()
@@ -150,20 +190,20 @@ export async function generateMarketingStudioVideo({
         authorization_token: higgsfieldToken
       }
     ],
-    system: buildSystemPrompt(),
+    system: buildSystemPrompt(mode),
     messages: [
       {
         role: 'user',
-        content: buildUserMessage({ avatarUrl, productUrl, prompt, duration })
+        content: buildUserMessage({ avatarUrl, productUrl, prompt, duration, mode })
       }
     ]
   }
 
   console.log(
-    `[MarketingStudio] Full ${duration}s video: 2 refs, prompt length=${prompt.length}`
+    `[MarketingStudio] Full ${duration}s video: 2 refs, prompt length=${prompt.length}, mode=${mode}`
   )
   console.log(
-    `[MarketingStudio] dispatching: model=marketing_studio_video mode=UGC res=720p ratio=9:16 duration=${duration}s avatar=${avatarUrl.slice(0, 80)} product=${productUrl.slice(0, 80)}`
+    `[MarketingStudio] dispatching: model=marketing_studio_video mode=${mode} res=720p ratio=9:16 duration=${duration}s avatar=${avatarUrl.slice(0, 80)} product=${productUrl.slice(0, 80)}`
   )
 
   const { data, elapsed } = await callAnthropicWithPauseTurn({
