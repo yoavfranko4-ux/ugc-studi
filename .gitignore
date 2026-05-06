@@ -4,3 +4,4 @@ node_modules/
 .env.local
 .env.production
 *.higgsfield-token.json
+.higgsfield-token-device.json
