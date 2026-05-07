@@ -24,7 +24,6 @@ import {
   MCP_SERVER_NAME,
   CLAUDE_MODEL,
   MAX_TOKENS_PER_TURN,
-  getMcpConfig,
   isMcpConfigured,
   summarizeUsage,
   logTokenUsage,
@@ -32,6 +31,7 @@ import {
   extractError,
   callAnthropicWithPauseTurn
 } from './_anthropic-mcp-shared.js'
+import { getValidAccessToken } from './higgsfield-auth.js'
 
 // Each scene gets its own 20-minute window. Higgsfield queue + render is
 // usually 5–10 min; 20 min covers the long tail without holding the whole job
@@ -101,7 +101,7 @@ export async function generateVideo({ prompt, imageUrls = [], duration = 5 } = {
     (u) => typeof u === 'string' && u.length > 0
   )
 
-  const { higgsfieldToken } = getMcpConfig()
+  const higgsfieldToken = await getValidAccessToken()
 
   const body = {
     model: CLAUDE_MODEL,
@@ -176,7 +176,7 @@ export async function generateFullVideo({ prompt, imageUrls = [], duration = 15 
     (u) => typeof u === 'string' && u.length > 0
   )
 
-  const { higgsfieldToken } = getMcpConfig()
+  const higgsfieldToken = await getValidAccessToken()
 
   const body = {
     model: CLAUDE_MODEL,

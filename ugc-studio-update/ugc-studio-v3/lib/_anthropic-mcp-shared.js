@@ -56,12 +56,17 @@ export function getMcpConfig() {
   const anthropicKey = process.env.ANTHROPIC_API_KEY || ''
   const higgsfieldToken = process.env.HIGGSFIELD_TOKEN || ''
   if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY must be set')
-  if (!higgsfieldToken) throw new Error('HIGGSFIELD_TOKEN must be set')
+  // higgsfieldToken is no longer required here — clients fetch a fresh
+  // token via lib/higgsfield-auth.js (refresh_token grant). The legacy
+  // field is still returned so any non-migrated caller keeps working.
   return { anthropicKey, higgsfieldToken }
 }
 
 export function isMcpConfigured() {
-  return !!(process.env.ANTHROPIC_API_KEY && process.env.HIGGSFIELD_TOKEN)
+  return !!(
+    process.env.ANTHROPIC_API_KEY &&
+    (process.env.HIGGSFIELD_TOKEN || process.env.HIGGSFIELD_REFRESH_TOKEN)
+  )
 }
 
 export function summarizeUsage(usage) {

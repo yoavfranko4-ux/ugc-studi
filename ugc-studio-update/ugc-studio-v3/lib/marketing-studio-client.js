@@ -23,7 +23,6 @@ import {
   MCP_SERVER_NAME,
   CLAUDE_MODEL,
   MAX_TOKENS_PER_TURN,
-  getMcpConfig,
   isMcpConfigured,
   summarizeUsage,
   logTokenUsage,
@@ -31,6 +30,7 @@ import {
   extractError,
   callAnthropicWithPauseTurn
 } from './_anthropic-mcp-shared.js'
+import { getValidAccessToken } from './higgsfield-auth.js'
 
 // 30 minutes — Marketing Studio renders are typically 5-15 min. 30 min is
 // the user-requested upper bound; longer than that and we'd rather fail and
@@ -171,7 +171,7 @@ export async function generateMarketingStudioVideo({
     )
   }
 
-  const { higgsfieldToken } = getMcpConfig()
+  const higgsfieldToken = await getValidAccessToken()
 
   const body = {
     model: CLAUDE_MODEL,
