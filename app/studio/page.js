@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
+import { SETTINGS } from '../../lib/settings-prompts'
 
 // === Subtitle Styles ===
 const SUBTITLE_STYLES = [
@@ -211,6 +212,7 @@ export default function Home() {
   const [applicationArea, setApplicationArea] = useState('')
   const [productImage, setProductImage] = useState(null)
   const [storyDescription, setStoryDescription] = useState('')
+  const [selectedSetting, setSelectedSetting] = useState('auto')
   // API keys are now server-side only — no client exposure
   const [agentStatus, setAgentStatus] = useState({})
   const [result, setResult] = useState(null)
@@ -336,7 +338,7 @@ export default function Home() {
       }
       const agentRes = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl, businessType })
+        body: JSON.stringify({ product: productDesc, productName, applicationArea, storyDescription, avatarUrl: finalAvatarUrl, productImageUrl, businessType, setting: selectedSetting })
       })
       if (!agentRes.ok) throw new Error('Agent failed')
       addLog('מקבל תוצאות מה-Agent...')
@@ -719,6 +721,24 @@ export default function Home() {
             <label style={lblS}>תיאור סיפור מותאם (אופציונלי)</label>
             <textarea value={storyDescription} onChange={e => setStoryDescription(e.target.value)} placeholder="תאר סיפור מותאם אישית..." style={{ ...inpS, height: 80, direction: 'rtl', fontFamily: 'Heebo,sans-serif', resize: 'none', marginTop: 6 }} />
           </div>
+        </div>
+      </div>
+
+      {/* Setting / Scene Location Selector */}
+      <div style={cardS}>
+        <div style={secTitle}>מיקום הסצנה</div>
+        <div style={{ fontSize: 12, color: '#52525b', marginBottom: 12 }}>בחר היכן יצולם הסרטון</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(95px, 1fr))', gap: 8 }}>
+          {Object.values(SETTINGS).map(s => {
+            const sel = selectedSetting === s.id
+            return (
+              <div key={s.id} onClick={() => setSelectedSetting(s.id)} title={s.name}
+                style={{ padding: '12px 8px', background: sel ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${sel ? 'rgba(168,85,247,0.5)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 12, cursor: 'pointer', textAlign: 'center', boxShadow: sel ? '0 0 18px rgba(168,85,247,0.18)' : 'none', transition: 'all 300ms ease' }}>
+                <div style={{ fontSize: 22, marginBottom: 4 }}>{s.icon}</div>
+                <div style={{ fontSize: 12, color: sel ? '#f0f0ff' : '#a1a1aa', fontWeight: 600 }}>{s.nameHe}</div>
+              </div>
+            )
+          })}
         </div>
       </div>
 

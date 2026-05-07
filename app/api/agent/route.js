@@ -3,6 +3,7 @@ import { checkRateLimit } from '../middleware/rateLimit.js'
 import { validateProductInput, sanitizeForLLM } from '../middleware/validate.js'
 import { cleanHebrewText } from '../../../lib/hebrew-tts.js'
 import { generateVideo as byteplusGenerateVideo, isByteplusConfigured } from '../../../lib/byteplus-client.js'
+import { SETTINGS } from '../../../lib/settings-prompts.js'
 
 export async function POST(req) {
   // Rate limiting
@@ -10,8 +11,13 @@ export async function POST(req) {
   if (rateLimitRes) return rateLimitRes
 
   const req_data = await req.json()
-  const { avatarUrl, productImageUrl, businessType, voiceId: requestedVoiceId } = req_data
+  const { avatarUrl, productImageUrl, businessType, voiceId: requestedVoiceId, setting: requestedSetting } = req_data
   const isBusiness = businessType === 'business'
+
+  // Resolve setting → promptText. 'auto' (or missing/unknown) → empty string (AI decides)
+  const settingKey = requestedSetting && SETTINGS[requestedSetting] ? requestedSetting : 'auto'
+  const settingPromptText = SETTINGS[settingKey]?.promptText || ''
+  console.log('Setting selected:', settingKey, settingPromptText ? '(injected)' : '(auto — empty)')
 
   // Input validation
   const validation = validateProductInput({
@@ -173,7 +179,7 @@ export async function POST(req) {
     try {
       const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
       const promptContent = isBusiness
-            ? `You are a UGC ad director and AI video prompt engineer for LOCAL BUSINESSES and SERVICES.
+            ? `${settingPromptText ? settingPromptText + '\n\n' : ''}You are a UGC ad director and AI video prompt engineer for LOCAL BUSINESSES and SERVICES.
 Create a CONNECTED 4-scene TikTok story for: ${pName} - ${product}. What customers get: ${pUse}
 
 The 4 scenes must feel like ONE continuous TikTok story.
@@ -238,7 +244,7 @@ Return ONLY JSON:
   ],
   "hebrew_voice": "concatenation of the 4 scene voiceover chunks exactly, no extra words"
 }`
-            : `You are a UGC ad director and AI video prompt engineer.
+            : `${settingPromptText ? settingPromptText + '\n\n' : ''}You are a UGC ad director and AI video prompt engineer.
 Create a CONNECTED 4-scene TikTok story for: ${pName} - ${product}. Usage: ${pUse}
 
 The 4 scenes must feel like ONE continuous story with the SAME person in the SAME setting.
