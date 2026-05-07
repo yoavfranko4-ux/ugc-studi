@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { canUseAvatar, canUseVoice, remainingVideos } from '../../lib/subscription-limits'
+import { SETTINGS } from '../../lib/settings-prompts'
 
 // === Subtitle Styles ===
 const SUBTITLE_STYLES = [
@@ -309,6 +310,7 @@ export default function Home() {
   const [applicationArea, setApplicationArea] = useState('')
   const [productImage, setProductImage] = useState(null)
   const [storyDescription, setStoryDescription] = useState('')
+  const [selectedSetting, setSelectedSetting] = useState('auto')
   // Business mode state
   const [businessName, setBusinessName] = useState('')
   const [businessDescription, setBusinessDescription] = useState('')
@@ -985,7 +987,7 @@ export default function Home() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, elevenKey, voiceId, userId })
+        body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, elevenKey, voiceId, userId, setting: selectedSetting })
       })
       if (!agentRes.ok) throw new Error('Agent failed')
       const { jobId } = await agentRes.json()
@@ -1859,6 +1861,24 @@ export default function Home() {
                     </div>
                   </div>
                 )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Setting / Scene Location Selector */}
+      <div style={cardS}>
+        <div style={secTitle}>מיקום הסצנה</div>
+        <div style={{ fontSize: 12, color: '#52525b', marginBottom: 12 }}>בחר היכן יצולם הסרטון</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(95px, 1fr))', gap: 8 }}>
+          {Object.values(SETTINGS).map(s => {
+            const sel = selectedSetting === s.id
+            return (
+              <div key={s.id} onClick={() => setSelectedSetting(s.id)} title={s.name}
+                style={{ padding: '12px 8px', background: sel ? 'rgba(255,0,128,0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${sel ? 'rgba(255,0,128,0.5)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 12, cursor: 'pointer', textAlign: 'center', boxShadow: sel ? '0 0 18px rgba(255,0,128,0.18)' : 'none', transition: 'all 300ms ease' }}>
+                <div style={{ fontSize: 22, marginBottom: 4 }}>{s.icon}</div>
+                <div style={{ fontSize: 12, color: sel ? '#F5F5F4' : '#a1a1aa', fontWeight: 600 }}>{s.nameHe}</div>
               </div>
             )
           })}

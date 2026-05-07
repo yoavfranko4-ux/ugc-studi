@@ -16,6 +16,7 @@ import { generateVideo as higgsfieldGenerateVideo, generateFullVideo as higgsfie
 import { generateMarketingStudioVideo, isMarketingStudioConfigured } from '../../../lib/marketing-studio-client.js'
 import { getUserFromRequest } from '../../../lib/auth-server.js'
 import { canCreateVideo, insertVideoJob, incrementVideoCount, updateVideoJobStatus } from '../../../lib/quota.js'
+import { SETTINGS } from '../../../lib/settings-prompts.js'
 
 const require = createRequire(import.meta.url)
 let ffmpegStaticPath = null
@@ -1135,7 +1136,12 @@ async function runJob(jobId, body) {
       productName, productDesc, applicationArea,
       avatarUrl, productImageUrl, voiceId,
       businessName, businessDescription, businessPhotos,
+      setting: requestedSetting,
     } = body;
+    // Resolve setting → promptText. 'auto' (or missing/unknown) → empty string (AI decides)
+    const settingKey = requestedSetting && SETTINGS[requestedSetting] ? requestedSetting : 'auto';
+    const settingPromptText = SETTINGS[settingKey]?.promptText || '';
+    console.log(`[Job ${jobId}] Setting selected: ${settingKey}${settingPromptText ? ' (injected)' : ' (auto — empty)'}`);
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
     const prepareUrl = (u) => u
       ? (u.startsWith('http') || u.startsWith('data:')
@@ -1300,6 +1306,7 @@ async function runJob(jobId, body) {
         const businessLabel = businessName || 'the location';
 
         const lines = [
+          ...(settingPromptText ? [settingPromptText, ``] : []),
           `Vertical 9:16 selfie-style UGC location moment, shot on iPhone front camera, natural daylight at the location, handheld authentic energy, "showing my favorite spot" vibe, real skin tones with subtle imperfections, no filters, lived-in real-world environment.`,
           ``,
           `The woman from Image 2 — same face, same hair, same warm presence throughout — visiting or working at ${businessLabel} (Image 1). The location stays identical to the reference image — same storefront, same signage, same atmosphere, no alterations.`,
@@ -1320,6 +1327,7 @@ async function runJob(jobId, body) {
       const productLabel = productName || 'the product';
 
       const lines = [
+        ...(settingPromptText ? [settingPromptText, ``] : []),
         `Vertical 9:16 selfie-style UGC product moment, shot on iPhone front camera, natural daylight, handheld authentic energy, warm natural light, real skin tones with subtle imperfections, no filters, lived-in real-world environment.`,
         ``,
         `The woman from Image 2 — same face, same hair, same warm presence throughout. She holds ${productLabel} (Image 1) — keep the product identical to the reference image, same colors, same shape, same branding details, no alterations.`,
