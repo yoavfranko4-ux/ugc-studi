@@ -141,6 +141,7 @@ function buildUserMessage({ avatarUrl, productUrl, prompt, duration }) {
     `  duration: ${duration}`,
     '  resolution: 720p',
     '  aspect_ratio: 9:16',
+    '  generate_audio: false',
     '  medias: [{ value: <avatar media_id>, role: "image" }, { value: <product media_id>, role: "image" }]',
     '',
     'Prompt for generate_video:',

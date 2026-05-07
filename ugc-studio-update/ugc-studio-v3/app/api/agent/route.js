@@ -1332,13 +1332,13 @@ async function runJob(jobId, body) {
         ``,
         `The woman from Image 2 — same face, same hair, same warm presence throughout. She holds ${productLabel} (Image 1) — keep the product identical to the reference image, same colors, same shape, same branding details, no alterations.`,
         ``,
-        `Action sequence: ${beat1}`,
+        `Action sequence: ${beat1} — NO product visible in this beat (empty hands or hands on head, product NEVER appears yet).`,
         ``,
         `Then, ${beat2}`,
         ``,
         `Next, ${beat3}`,
         ``,
-        `Finally, ${beat4}`,
+        `Finally, ${beat4} — Product firmly held in one hand OR resting on a clear stable surface, NEVER floating in air.`,
         ``,
         `CRITICAL RULE: She never opens her mouth throughout. Lips stay completely closed. No talking, no lip movement, no sound. All emotion through eyes, eyebrows, and closed-mouth micro-expressions. Voiceover added externally — the visual must be silent.`
       ];
