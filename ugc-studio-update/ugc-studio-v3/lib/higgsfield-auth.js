@@ -26,9 +26,10 @@ let cachedToken = null
 let expiresAt = 0          // epoch ms; 0 means "never minted"
 let refreshing = null      // Promise<string> | null
 let lastRefreshAt = 0      // epoch ms; 0 means "never refreshed"
+let mutableRefreshToken = null  // overrides env when server rotates the refresh_token mid-process
 
 export async function getValidAccessToken() {
-  const refreshToken = process.env.HIGGSFIELD_REFRESH_TOKEN
+  const refreshToken = mutableRefreshToken || process.env.HIGGSFIELD_REFRESH_TOKEN
 
   if (!refreshToken) {
     const legacy = process.env.HIGGSFIELD_TOKEN
@@ -107,9 +108,8 @@ async function doRefresh(refreshToken) {
   )
 
   if (data.refresh_token && data.refresh_token !== refreshToken) {
-    console.warn(
-      `[HiggsfieldAuth] refresh_token rotated by server - update Railway env: ${data.refresh_token}`
-    )
+    mutableRefreshToken = data.refresh_token
+    console.log('[HiggsfieldAuth] refresh_token rotated - new token cached in memory')
   }
 
   return cachedToken
