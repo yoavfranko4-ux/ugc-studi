@@ -372,6 +372,11 @@ export default function Home() {
   const [rerecording, setRerecording] = useState(false)
   const [showRerecordPanel, setShowRerecordPanel] = useState(false)
   const [rerecordText, setRerecordText] = useState('')
+  // User video history — fetched once when userId is known. The API returns
+  // up to 50 rows; the UI slices to 12 for display.
+  const [userVideos, setUserVideos] = useState([])
+  const [videosLoading, setVideosLoading] = useState(false)
+  const [videosError, setVideosError] = useState(null)
   const videoRef = useRef(null)           // legacy single ref (still used in some places)
   const videoRefs = useRef([])            // one <video> element per clip — enables seamless back-to-back playback
   const audioRef = useRef(null)
@@ -421,6 +426,36 @@ export default function Home() {
       }
     }).catch(e => console.warn('[Studio] Failed to load Noto Sans Hebrew:', e.message))
   }, [])
+
+  // Fetch the caller's completed video history once the user id is known.
+  // Cancellation guards against React 18 strict-mode double-invoke and against
+  // the user logging out mid-fetch.
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    const run = async () => {
+      setVideosLoading(true); setVideosError(null)
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.access_token) {
+          if (!cancelled) setVideosLoading(false)
+          return
+        }
+        const r = await fetch('/api/videos', {
+          headers: { 'Authorization': `Bearer ${session.access_token}` }
+        })
+        if (!r.ok) throw new Error('fetch_failed')
+        const j = await r.json()
+        if (!cancelled) setUserVideos(Array.isArray(j.videos) ? j.videos : [])
+      } catch (e) {
+        if (!cancelled) setVideosError(e?.message || 'error')
+      } finally {
+        if (!cancelled) setVideosLoading(false)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [userId])
 
   // Auth check + restore saved edit from ?editId= query param
   useEffect(() => {
@@ -1891,6 +1926,46 @@ export default function Home() {
           הפעל Agent — צור 4 סצנות מחוברות
         </span>
       </button>
+
+      {/* User video history — last 12 completed videos. API returns up to 50; UI slices to 12. */}
+      <div style={{ ...cardS, marginTop: 24 }}>
+        <div style={secTitle}>הסרטונים שלך</div>
+        {videosLoading && (
+          <div style={{ textAlign: 'center', padding: 20, color: '#71717a', fontSize: 13 }}>
+            <div style={{ width: 24, height: 24, border: '2px solid rgba(255,0,128,0.2)', borderTopColor: '#FF0080', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block', marginBottom: 8 }} />
+            <div>טוען היסטוריה...</div>
+          </div>
+        )}
+        {!videosLoading && videosError && (
+          <div style={{ textAlign: 'center', padding: 20, color: '#ef4444', fontSize: 13 }}>
+            שגיאה בטעינת היסטוריה
+          </div>
+        )}
+        {!videosLoading && !videosError && userVideos.length === 0 && (
+          <div style={{ textAlign: 'center', padding: 24, color: '#52525b', fontSize: 14 }}>
+            אין לך עדיין סרטונים — צור את הראשון!
+          </div>
+        )}
+        {!videosLoading && !videosError && userVideos.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 14 }}>
+            {userVideos.slice(0, 12).map(v => (
+              <div key={v.jobId} style={{ background: 'rgba(255,255,255,0.02)', border: BORDER, borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <video src={v.videoUrl} controls preload="metadata" style={{ width: '100%', aspectRatio: '9/16', background: '#000', display: 'block' }} />
+                <div style={{ padding: '10px 12px', direction: 'rtl', fontFamily: 'Heebo,sans-serif' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#e4e4e7', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {v.productName || (v.videoType === 'business' ? 'סרטון עסק' : 'סרטון UGC')}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#52525b' }}>
+                    {new Date(v.createdAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
 

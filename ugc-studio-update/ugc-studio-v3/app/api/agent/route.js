@@ -1553,7 +1553,7 @@ async function runJob(jobId, body) {
     if (body?.userId) {
       await incrementVideoCount(body.userId, false);
     }
-    await updateVideoJobStatus(jobId, 'completed', null);
+    await updateVideoJobStatus(jobId, 'completed', fullVideoUrl);
 
     // Fire-and-forget: pre-warm the Railway video cache so the editor opens
     // with all clips already resident in memory. data: URLs (the static
