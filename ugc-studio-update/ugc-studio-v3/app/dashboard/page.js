@@ -15,11 +15,34 @@ export default function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
+    let authSub = null
+    let onVis = null
+    let currentUserId = null
+
+    // Loading saved_edits is split out so we can re-run it on auth events
+    // (TOKEN_REFRESHED / SIGNED_IN) and on tab refocus. Without that, a
+    // first-paint race on navigation from /studio left the dashboard empty
+    // until the user pressed F5.
+    const loadSavedEdits = async (userId) => {
+      if (!supabase || !userId) return
+      const { data: edits, error } = await supabase
+        .from('saved_edits')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+      if (cancelled) return
+      if (error) { console.warn('Failed to load saved_edits:', error.message); return }
+      if (edits) setSavedEdits(edits)
+    }
+
     const checkUser = async () => {
       if (!supabase) { setLoading(false); return }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { window.location.replace('/login'); return }
+      if (cancelled) return
       setUser(user)
+      currentUserId = user.id
 
       const { data } = await supabase
         .from('subscriptions')
@@ -27,7 +50,7 @@ export default function DashboardPage() {
         .eq('user_id', user.id)
         .eq('status', 'active')
         .single()
-      setSubscription(data)
+      if (!cancelled) setSubscription(data)
 
       // Load the users row (subscription_tier + counters) — source of truth
       // for quota. Falls through silently when columns are missing so the
@@ -38,27 +61,38 @@ export default function DashboardPage() {
           .select('subscription_tier, subscription_expires_at, videos_used_this_period, lifetime_videos_used, subscription_period_start, trial_started_at')
           .eq('id', user.id)
           .maybeSingle()
-        if (u) setUserRow(u)
+        if (u && !cancelled) setUserRow(u)
       } catch {}
 
       try {
         const saved = localStorage.getItem(`videos_${user.id}`)
-        if (saved) setVideos(JSON.parse(saved))
+        if (saved && !cancelled) setVideos(JSON.parse(saved))
       } catch {}
 
-      // Load saved edits from Supabase
-      try {
-        const { data: edits } = await supabase
-          .from('saved_edits')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-        if (edits) setSavedEdits(edits)
-      } catch {}
+      await loadSavedEdits(user.id)
 
-      setLoading(false)
+      const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
+          const uid = session?.user?.id || currentUserId
+          if (uid) loadSavedEdits(uid)
+        }
+      })
+      authSub = sub?.subscription
+
+      onVis = () => {
+        if (document.visibilityState === 'visible') loadSavedEdits(currentUserId)
+      }
+      document.addEventListener('visibilitychange', onVis)
+
+      if (!cancelled) setLoading(false)
     }
     checkUser()
+
+    return () => {
+      cancelled = true
+      authSub?.unsubscribe?.()
+      if (onVis) document.removeEventListener('visibilitychange', onVis)
+    }
   }, [])
 
   const handleLogout = async () => {
