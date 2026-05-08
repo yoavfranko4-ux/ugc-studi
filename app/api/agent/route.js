@@ -255,14 +255,41 @@ ${transitionRule}
 
 ANATOMY RULE (CRITICAL): Every nb_prompt MUST START with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST include: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body". For scenes where hands hold the product, say explicitly: "person holding product with ONE hand only, other hand visible and relaxed at side". Never describe multiple items held simultaneously.
 
-HOOK RULE (CRITICAL): voiceover_scene1 MUST name the EXACT specific problem of THIS product — never use 'הבעיה הזאת' alone without naming what the problem is. Examples: for teeth whitening say 'שיניים צהובות שמביכות אותי בכל תמונה', for face cream say 'כתמים ואקנה שמופיעים כל בוקר', for dress say 'לא מוצאת שמלה שמחמיאה לדמות שלי'. Be specific to the product.
+PAIN ANALYSIS RULES (CRITICAL — read BEFORE writing any scene):
+1. Read carefully the product description "${product}" and usage "${pUse}".
+2. Identify the SPECIFIC, CONCRETE pain context — never generic "frustration" or "tiredness".
+3. Pain category examples (use as patterns, not literally):
+   - Energy drink → "afternoon work crash at desk", "morning sluggishness pre-coffee", "pre-workout tiredness in gym bag"
+   - Skincare → "mirror moment noticing fine lines", "tired skin after long day", "first wrinkles in morning light"
+   - Coffee → "instant coffee disappointment in mug", "underwhelming espresso machine", "morning rush no time"
+   - Cleaning → "stubborn stain that won't come out", "dirty surface frustration with old product"
+   - Supplements → "low energy mid-day", "feeling sluggish after meal"
+4. Beat 1 (PAIN, 0-5s) MUST be:
+   - VISUALLY SPECIFIC: a concrete moment, not "person looking sad"
+   - CONTEXTUALLY RELEVANT: the location/object/time matches the product domain
+   - EMOTIONALLY AUTHENTIC: real, subtle frustration — never theatrical
+5. Examples of GOOD beat 1 nb_prompt descriptions:
+   - For an energy product: "same person from reference photo, at desk 3pm, head resting on hands, empty coffee cup beside laptop, eyes barely open, slumped posture, soft afternoon light. NO product visible."
+   - For a skincare product: "same person from reference photo, at bathroom mirror leaning close, fingertip touching fine lines around eyes, soft disappointment, morning light. NO product visible."
+   - For a coffee product: "same person from reference photo, staring at instant coffee in mug, underwhelmed expression, pushing cup away slightly, kitchen counter morning light. NO product visible."
+
+HOOK RULE (CRITICAL): voiceover_scene1 is a 5–10-word Hebrew sentence that:
+- SPEAKS DIRECTLY to the specific pain identified in PAIN ANALYSIS RULES above (relatable, "you've been there" feel)
+- DOES NOT mention ${pName} or any product/brand name
+- IS a natural lead-in to scene 2's discovery
+- MUST match the visual moment in beat 1 (same concrete situation)
+- Pattern examples (do not copy literally — adapt to THIS product's pain):
+   - Energy: 'השעה 3 אחה"צ והקפה השלישי לא עוזר'
+   - Skincare: 'כל בוקר אני רואה אותם — הקווים האלה'
+   - Coffee: 'קפה נמס שוב? לא הולך לעבוד'
+Never use 'הבעיה הזאת' alone without naming what the problem is.
 
 ${storyDescription ? `STORY OVERRIDE (MANDATORY): ${storyDescription} — You MUST change scenes to match. Scene 4 must be exactly: ${storyDescription}. This overrides ALL default settings.` : ''}
 
 SCENE DURATIONS = [5, 5, 5, 5] = 20 seconds total.
 
 WINNING FORMULA:
-Scene 1 PAIN (0-5s): Person frustrated with the exact problem ${pName} solves. Strong hook.
+Scene 1 PAIN (0-5s): Person in a SPECIFIC, CONCRETE moment of the exact pain ${pName} solves (per PAIN ANALYSIS RULES above). Visually specific, contextually relevant to the product domain, no product visible. Strong hook.
 Scene 2 DISCOVERY (5-10s): Same person discovers ${pName}, holds it up to camera. Label visible.
 Scene 3 ACTIVE USE (10-15s): Same person ${pUse} - actively using the product. Showing result.
 Scene 4 CTA (15-20s): Same person excited, holds ${pName} up, points at camera. No-risk vibe.
