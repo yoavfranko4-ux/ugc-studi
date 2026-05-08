@@ -474,6 +474,11 @@ export async function POST(req) {
       Array.isArray(videoUrls) ? videoUrls.length : 0,
       Array.isArray(videoClipsB64) ? videoClipsB64.length : 0,
     )
+    // DEBUG (5s-vs-15s diagnosis): one compact line — what `clipDurations`
+    // arrived in the body, expectedCount, and the per-clip seconds the
+    // pipeline will actually use after the `clipDur(i)` fallback. Remove
+    // once the per-clip-duration regression is confirmed fixed end-to-end.
+    console.log('[Export DEBUG] clipDurations received:', JSON.stringify(clipDurations), 'expectedCount:', expectedCount, 'effective per-clip:', JSON.stringify(Array.from({ length: expectedCount }, (_, i) => clipDur(i))))
     const clipPaths = new Array(expectedCount).fill(null)
     const clipSources = new Array(expectedCount).fill(null)  // for cache keying: URL if we have it
 

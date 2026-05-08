@@ -1318,6 +1318,17 @@ async function runJob(jobId, body) {
       const beat3 = trimKlingForBeat(scenes[2]?.kling_prompt, 400);
       const beat4 = trimKlingForBeat(scenes[3]?.kling_prompt, 400);
 
+      // Pick the WIN-scene guidance for Beat 4 based on product category.
+      // Whitening products are classified as `health` by detectProductCategory
+      // but need the dedicated "white-teeth-at-a-social-event" framing — we
+      // detect them inline (rather than touching detectProductCategory) so
+      // the category function stays a pure detector.
+      const winText = `${productName || ''} ${productDesc || ''}`;
+      const isWhitening = WHITENING_RX.test(winText);
+      const { category: winCat } = detectProductCategory(productName, productDesc);
+      const winKey = isWhitening ? 'whitening' : winCat;
+      const winRule = WIN_SCENE_RULES[winKey] || WIN_SCENE_RULES.beauty;
+
       if (isBusiness) {
         const businessLabel = businessName || 'the location';
 
@@ -1333,7 +1344,7 @@ async function runJob(jobId, body) {
           ``,
           `Next, ${beat3}`,
           ``,
-          `Finally, ${beat4}`,
+          `Finally, ${beat4} — WIN SCENE: avatar enjoying the location outcome (relaxed, satisfied, in real use of the place) in a different moment/setting than Beat 1. Not a generic "smiling at the camera" shot.`,
           ``,
           `CRITICAL RULE: She never opens her mouth throughout. Lips stay completely closed. No talking, no lip movement, no sound. All emotion through eyes, eyebrows, and closed-mouth micro-expressions. Voiceover added externally — the visual must be silent.`
         ];
@@ -1354,7 +1365,7 @@ async function runJob(jobId, body) {
         ``,
         `Next, ${beat3}`,
         ``,
-        `Finally, ${beat4} — Product firmly held in one hand OR resting on a clear stable surface, NEVER floating in air.`,
+        `Finally, ${beat4} — WIN SCENE: ${winRule} Product, when shown, is firmly held in one hand OR resting on a clear stable surface, NEVER floating in air.`,
         ``,
         `CRITICAL RULE: She never opens her mouth throughout. Lips stay completely closed. No talking, no lip movement, no sound. All emotion through eyes, eyebrows, and closed-mouth micro-expressions. Voiceover added externally — the visual must be silent.`
       ];
@@ -1777,6 +1788,28 @@ const PRODUCT_BEAT1_PATTERNS = {
     ],
   },
 };
+
+// Beat-4 (WIN) outcome guidance per product category. The WIN scene must
+// show the AVATAR ENJOYING THE BENEFIT in a real-world situation that
+// resolves the Beat-1 pain — NOT a generic "smiling with product" beauty
+// shot. Product can be visible but is NOT the focus. Setting/lighting
+// shifts vs. Beat 1 to suggest passage of time. Each entry replaces the
+// generic Beat-4 guard line in the merged prompt. Categories without an
+// entry fall back to the `beauty` rule.
+const WIN_SCENE_RULES = {
+  energy: `Avatar at work or in active situation with full energy — focused, productive, finishing a task or on a confident call. Product visible but NOT the focus. Different setting/lighting from Beat 1.`,
+  coffee: `Avatar enjoying their morning at desk or in a quality moment with the perfect coffee — focused, content. Product visible but NOT the focus. Brighter, calmer setting than Beat 1.`,
+  fitness_supplement: `Avatar mid-exercise with great form — successful pull-up, lifting weight, or finishing a strong rep. Visible energy and pump. Product visible but NOT the focus. Gym/active setting, different from Beat 1.`,
+  skincare_aging: `Avatar in a social setting (date, meeting, selfie) showing glowing skin confidence. Bright, flattering lighting on the face. Product visible but NOT the focus. Different setting from the Beat-1 mirror moment.`,
+  whitening: `Avatar smiling wide at a date or social event, laughing, or taking a confident selfie — bright white teeth clearly visible. Product NOT the focus. Social situation, different from Beat 1.`,
+  cleaning: `Avatar relaxing in a clean, satisfied space — hosting guests or sitting back content with the result. Product visible but NOT the focus. Calm, post-cleaning atmosphere different from Beat 1.`,
+  beauty: `Avatar in a social situation with confidence — genuine smile, "after" transformation visible. Product visible but NOT the focus. Different setting/lighting from Beat 1 to suggest passage of time.`,
+};
+
+// Whitening products are classified as `health` by detectProductCategory,
+// but the WIN scene needs the dedicated "white teeth at a social event"
+// framing. Detect inline so we don't have to touch the category function.
+const WHITENING_RX = /אבקת\s*הלבנה|הלבנת\s*שיניים|teeth\s*whitening|whitening/i;
 
 // Beat-1 template builder. Categories listed in PRODUCT_BEAT1_PATTERNS use
 // the new dynamic pool (Option B). All other categories use the legacy

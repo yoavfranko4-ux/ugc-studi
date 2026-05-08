@@ -1515,6 +1515,19 @@ export default function Home() {
       const nbFrameUrls = orderedScenes.map(si => result.frames?.[si] || null)
       console.log('[Studio Export] nbFrameUrls:', nbFrameUrls.map((u, i) => ({ i, present: !!u, kind: !u ? 'null' : u.startsWith?.('data:') ? 'data-uri' : 'http' })))
 
+      // DEBUG (5s-vs-15s diagnosis): log what we're about to send so the
+      // server-side `[Export DEBUG] clipDurations received:` line can be
+      // cross-checked against what the client actually computed. Remove
+      // once the per-clip-duration regression is confirmed fixed.
+      console.log('[Studio Export DEBUG]', {
+        isFullVideoMode,
+        hasFullVideoUrl: !!result?.fullVideoUrl,
+        fullVideoDuration: result?.fullVideoDuration,
+        perClipDuration,
+        clipDurations,
+        orderedScenesCount: orderedScenes.length,
+      })
+
       const bgMusicTrack = MUSIC_TRACKS.find(t => t.id === bgMusic)
       const resp = await fetch('/api/export', {
         method: 'POST',
