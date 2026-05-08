@@ -259,8 +259,16 @@ const BEAT_4_PRODUCT_CTA_VERBS = ['תקנו', 'תזמינו', 'תיכנסו', '�
 const BEAT_4_PRODUCT_TRUST_PHRASES = ['תסמכו עליי', 'תסמכו עלי', 'אני מבטיח', 'לא תתחרטו'];
 const BEAT_4_BUSINESS_CTA_VERBS = ['תקבעו תור', 'תבואו', 'תיכנסו'];
 
+// Normalize a Beat-1 line for equality comparison: collapse whitespace and
+// trim trailing punctuation so a stray period from Claude doesn't trigger
+// a regen against the pre-set hook.
+function normalizeBeat1(s) {
+  return (s || '').replace(/[.!?…״"'()[\]\s]+/gu, ' ').trim();
+}
+
 function beatStructureViolations(scenes, identityName, opts = {}) {
   const mode = opts.mode === 'business' ? 'business' : 'product';
+  const expectedHook = opts.expectedHook || null;
   const violations = [];
   if (!Array.isArray(scenes) || scenes.length < 4) return violations;
   const v1 = (scenes[0]?.subtitle || scenes[0]?.voiceover || '').trim();
@@ -282,8 +290,17 @@ function beatStructureViolations(scenes, identityName, opts = {}) {
   }
 
   if (mode === 'product') {
-    // BEAT 1 — must contain the fixed template phrase "ניסיתי כבר מלא".
-    if (!v1.includes(BEAT_1_PRODUCT_REQUIRED_PHRASE)) {
+    // BEAT 1 — must match the pre-set hook verbatim. The hook is generated
+    // server-side by getHook() (category-specific pain pattern) and pinned
+    // into the Claude prompt; any divergence means Claude paraphrased and
+    // we trigger a regen. Falls back to the legacy "ניסיתי כבר מלא"
+    // contains-check only when no expectedHook was passed (callers should
+    // always pass it).
+    if (expectedHook) {
+      if (normalizeBeat1(v1) !== normalizeBeat1(expectedHook)) {
+        violations.push(`Beat 1 must use the pre-set hook verbatim. Expected: "${expectedHook}". Got: "${v1.slice(0, 100)}"`);
+      }
+    } else if (!v1.includes(BEAT_1_PRODUCT_REQUIRED_PHRASE)) {
       violations.push(`Beat 1 must contain the template phrase "${BEAT_1_PRODUCT_REQUIRED_PHRASE} {Hebrew plural} ו{negative outcome}". Got: "${v1.slice(0, 80)}"`);
     }
     // BEAT 2 — must START with "עד שגיליתי את" + name the product + end with one of the tail phrases.
@@ -430,12 +447,17 @@ STYLE DIRECTION (apply within all kling_prompts):
 
 STEP 0 — CATEGORY DETECTION (REQUIRED OUTPUT FIELD):
 Before writing the script, classify the product into EXACTLY ONE of these categories:
-  - "accessory" — כיפה, שרשרת, צמיד, שעון, משקפיים, טבעת, תיק, חגורה, כובע, צעיף, עניבה
-  - "beauty"    — קרם, בושם, איפור, סרום, מסכה, שמפו, מרכך, ליפסטיק, לק, מייבש שיער
-  - "health"    — אבקת הלבנה, ויטמינים, תוספים, משחת שיניים, דאודורנט, מי פה
-  - "fashion"   — חולצה, מכנסיים, נעליים, שמלה, ז'קט, חליפה, פיג'מה, גרביים
-  - "home"      — סיר, מטבח, מזרון, כרית, שמיכה, מנורה, מארגן
-  - "food"      — חטיף, משקה, תוסף תזונה, אוכל ארוז
+  - "accessory"          — כיפה, שרשרת, צמיד, שעון, משקפיים, טבעת, תיק, חגורה, כובע, צעיף, עניבה
+  - "beauty"             — קרם רגיל, בושם, איפור, סרום, מסכה, שמפו, מרכך, ליפסטיק, לק, מייבש שיער
+  - "health"             — אבקת הלבנה, ויטמינים, משחת שיניים, דאודורנט, מי פה
+  - "fashion"            — חולצה, מכנסיים, נעליים, שמלה, ז'קט, חליפה, פיג'מה, גרביים
+  - "home"               — סיר, מטבח, מזרון, כרית, שמיכה, מנורה, מארגן
+  - "food"               — חטיף, אוכל ארוז
+  - "energy"             — משקאות אנרגיה, BLAZE, Red Bull, Monster, סוכר/קפאין מוגבר
+  - "coffee"             — קפה, אספרסו, MOKA, KetoCoffee, bulletproof, cold brew
+  - "fitness_supplement" — pre-workout, אבקת חלבון, קריאטין, BCAA, mass gainer, PowerPump
+  - "skincare_aging"     — anti-aging, רטינול, נגד קמטים, ALMA, hyaluron, firming
+  - "cleaning"           — מנקה, מסיר כתמים, חיטוי, רצפה, אמבטיה, sanitiz
 
 Pick the closest one — DO NOT invent a new category. Return the chosen value in a top-level "category" JSON field. Default to the auto-detected one above unless you're confident it's wrong.
 
@@ -443,22 +465,16 @@ Pick the closest one — DO NOT invent a new category. Return the chosen value i
 
 Each beat is one voiceover_sceneN. DO NOT reorder, merge, or skip beats. Benefits NEVER appear before the product is introduced.
 
-BEAT 1 — CATEGORY-ANCHORED PRIOR-FRUSTRATION TEMPLATE (voiceover_scene1, ~10–14 Hebrew words):
-  TEMPLATE — copy this structure exactly: "ניסיתי כבר מלא {Hebrew_plural} {negative outcome tail for the category}"
-  • {Hebrew_plural} = the Hebrew plural form of the product type (e.g. כיפות, קרמים, אבקות הלבנה, חולצות, סירים, חטיפים). Use "${detectedPlural}" unless the auto-detection is clearly wrong.
-  • Negative-outcome tail by category — copy the matching one VERBATIM:
-      - accessory: "ושום דבר לא התאים לי ולא ידעתי מה לעשות"
-      - beauty:    "ושום דבר לא עבד לי באמת"
-      - health:    "ופשוט לא ראיתי תוצאות"
-      - fashion:   "ושום דבר לא נראה עליי טוב"
-      - home:      "ושום דבר לא עבד לי כמו שצריך"
-      - food:      "ושום דבר לא היה מספיק טעים"
+BEAT 1 — CATEGORY-ANCHORED PAIN HOOK (voiceover_scene1, ~6–14 Hebrew words):
+  The Beat-1 line is generated server-side from the product category and pinned in rule 4 below. You MUST use that EXACT line verbatim — do not paraphrase, extend, shorten, or add a closing thought. Do not change punctuation. Do not translate. The line is already gender-correct for this script.
+  Two pattern families exist (informational only — your job is just to echo whichever one the server picked):
+    • Legacy template: "ניסיתי כבר מלא {Hebrew plural} {negative outcome}" — used for accessory/beauty/health/fashion/home/food
+    • Dynamic moment-anchored hooks — used for energy / coffee / fitness_supplement / skincare_aging / cleaning. Examples of the SHAPE (not literal copies): "השעה 3 אחה״צ והקפה השלישי לא עוזר", "20 דקות באימון ואת כבר נגמרת", "כל בוקר את רואה את הקווים האלה", "הכתם הזה כבר חודש על השטיח". These open with a time/situation/observation, not with "ניסיתי".
   HARD REQUIREMENTS for Beat 1:
-    - MUST contain "ניסיתי כבר מלא" verbatim
-    - MUST be in first person
-    - MUST NOT contain the specific product name "${productName}" (mentioning the category — "כיפות" — is allowed; the brand/model name is not)
+    - MUST EXACTLY equal the pre-set Beat-1 line provided in rule 4 (verbatim, including punctuation and word order)
+    - MUST NOT contain the specific product name "${productName}" (the category noun is allowed; the brand/model name is not)
     - MUST NOT contain ANY of: "משהו חסר" / "משהו קטן" / "הבדל גדול" / "פתרון חכם" / "פתרון מושלם" / "כלום לא עבד" / "שום פתרון"
-  Final reminder — the EXACT pre-set Beat-1 line you'll be given in rule 4 below already follows this template. Use it verbatim.
+  Final reminder — the EXACT pre-set Beat-1 line you'll be given in rule 4 below is the ONLY allowed Beat 1 voiceover. Use it verbatim.
 
 BEAT 2 — PRODUCT DISCOVERY TEMPLATE (voiceover_scene2, ~5–7 Hebrew words):
   TEMPLATE — copy this structure exactly: "עד שגיליתי את ${productName} {tail}"
@@ -493,7 +509,7 @@ BEAT 4 — CTA TEMPLATE (voiceover_scene4, ~7–10 Hebrew words):
     - MUST contain one of these trust phrases: "תסמכו עליי" / "אני מבטיח" / "לא תתחרטו"
 
 SANITY CHECK before returning:
-  1. Beat 1 contains "ניסיתי כבר מלא" and does NOT mention "${productName}".
+  1. Beat 1 EXACTLY equals the pre-set hook from rule 4 (verbatim) and does NOT mention "${productName}".
   2. Beat 2 STARTS with "עד שגיליתי את ${productName}" and ENDS with "שפשוט שינה הכל" / "שפשוט שינתה הכל" / "שפשוט שינה לי הכל" / "שפשוט שינתה לי הכל".
   3. Beat 3 does NOT contain "עד שגיליתי" / "ואז גיליתי" / "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות".
   4. Beat 4 contains one of "תקנו" / "תזמינו" / "תיכנסו" / "תנסו" + "${productName}" + one of "תסמכו עליי" / "אני מבטיח" / "לא תתחרטו".
@@ -762,9 +778,9 @@ ACTION DESCRIPTION RULES:
 
 Return ONLY valid JSON (no markdown):
 {
-  "category": "one of: accessory / beauty / health / fashion / home / food (the value you chose in STEP 0)",
+  "category": "one of: accessory / beauty / health / fashion / home / food / energy / coffee / fitness_supplement / skincare_aging / cleaning (the value you chose in STEP 0)",
   "mode": "product",
-  "voiceover_scene1": "BEAT 1 — TEMPLATE 'ניסיתי כבר מלא {Hebrew_plural} {category-specific tail}'. Must contain 'ניסיתי כבר מלא'. Must NOT contain '${productName}'. Must NOT contain 'משהו חסר' / 'משהו קטן' / 'הבדל גדול' / 'פתרון חכם' / 'פתרון מושלם' / 'כלום לא עבד' / 'שום פתרון'.",
+  "voiceover_scene1": "BEAT 1 — MUST EXACTLY equal the pre-set hook from rule 4 (verbatim). The server picks one of two pattern families for you: legacy 'ניסיתי כבר מלא {Hebrew_plural} {category-specific tail}' (for accessory/beauty/health/fashion/home/food) OR a moment-anchored hook (for energy/coffee/fitness_supplement/skincare_aging/cleaning). Your job is to echo the exact line you're given. Must NOT contain '${productName}'. Must NOT contain 'משהו חסר' / 'משהו קטן' / 'הבדל גדול' / 'פתרון חכם' / 'פתרון מושלם' / 'כלום לא עבד' / 'שום פתרון'.",
   "voiceover_scene2": "BEAT 2 — TEMPLATE 'עד שגיליתי את ${productName} שפשוט שינה/שינתה (לי) הכל'. Must START with 'עד שגיליתי את' + the product name. Must END with 'שפשוט שינה הכל' / 'שפשוט שינתה הכל' / 'שפשוט שינה לי הכל' / 'שפשוט שינתה לי הכל' (match grammatical gender to the product).",
   "voiceover_scene3": "BEAT 3 — 2-3 concrete benefits of ${productName} that solve the Beat-1 pain. ~16-22 Hebrew words. Must NOT contain 'עד שגיליתי' / 'ואז גיליתי' / 'פתרון חכם' / 'פתרון מושלם' / 'התוצאות מטורפות'.",
   "voiceover_scene4": "BEAT 4 — CTA template 'תקנו את ${productName}, תסמכו עליי - {short promise}' (or use 'תזמינו' / 'תיכנסו' / 'תנסו'). Must contain '${productName}' + a CTA verb + a trust phrase ('תסמכו עליי' / 'אני מבטיח' / 'לא תתחרטו').",
@@ -848,13 +864,13 @@ Return ONLY valid JSON (no markdown):
     const MAX_BEAT_REGEN = 2;
     let lastViolations = [];
     for (let attempt = 0; attempt <= MAX_BEAT_REGEN; attempt++) {
-      const violations = beatStructureViolations(parsed.scenes, productName, { mode: 'product' });
+      const violations = beatStructureViolations(parsed.scenes, productName, { mode: 'product', expectedHook: hook });
       lastViolations = violations;
       if (violations.length === 0) break;
       if (attempt === MAX_BEAT_REGEN) break;
       console.warn(`[generateScript] 4-beat structure violations (regen ${attempt + 1}/${MAX_BEAT_REGEN}):`, violations);
       const bullets = violations.map((v, i) => `  ${i + 1}. ${v}`).join('\n');
-      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules:\n- voiceover_scene1 = BEAT 1 — must contain "ניסיתי כבר מלא {Hebrew plural} ו{negative outcome}", never names "${productName}".\n- voiceover_scene2 = BEAT 2 — must START with "עד שגיליתי את ${productName}" and END with "שפשוט שינה הכל" / "שפשוט שינתה הכל" / "שפשוט שינה לי הכל" / "שפשוט שינתה לי הכל".\n- voiceover_scene3 = BEAT 3 — 2-3 concrete benefits resolving the Beat-1 pain. NEVER contains "עד שגיליתי" / "ואז גיליתי" / "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות".\n- voiceover_scene4 = BEAT 4 — CTA verb ("תקנו" / "תזמינו" / "תיכנסו" / "תנסו") + product name + trust phrase ("תסמכו עליי" / "אני מבטיח" / "לא תתחרטו").`;
+      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules:\n- voiceover_scene1 = BEAT 1 — must EXACTLY equal the pre-set hook ("${hook}"), verbatim, and never names "${productName}".\n- voiceover_scene2 = BEAT 2 — must START with "עד שגיליתי את ${productName}" and END with "שפשוט שינה הכל" / "שפשוט שינתה הכל" / "שפשוט שינה לי הכל" / "שפשוט שינתה לי הכל".\n- voiceover_scene3 = BEAT 3 — 2-3 concrete benefits resolving the Beat-1 pain. NEVER contains "עד שגיליתי" / "ואז גיליתי" / "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות".\n- voiceover_scene4 = BEAT 4 — CTA verb ("תקנו" / "תזמינו" / "תיכנסו" / "תנסו") + product name + trust phrase ("תסמכו עליי" / "אני מבטיח" / "לא תתחרטו").`;
       const retry = parseResponse(await callClaude(extraInstruction));
       if (retry) parsed = retry;
       else break;
@@ -1621,6 +1637,15 @@ function detectProductCategory(productName, productDesc) {
   const m = (re, category, plural) => re.test(text) ? { category, plural } : null;
 
   return (
+    // === Dynamic-pattern categories (Option B) — must come BEFORE the
+    // legacy regexes below because skincare_aging steals "קרם" from beauty
+    // and fitness_supplement steals "תוסף" from health.
+    m(/אנרגי|energy\s*drink|red\s*bull|ראד\s*בול|מונסטר|monster|blaze/, 'energy', 'משקאות אנרגיה') ||
+    m(/coffee|קפה|אספרסו|espresso|moka|מוקה|bulletproof|בולטפרוף|cold\s*brew/, 'coffee', 'מוצרי קפה') ||
+    m(/pre.?workout|preworkout|פרי.?וורקאוט|powerpump|protein\s*powder|אבקת\s*חלבון|חלבון|creatine|קריאטין|bcaa|בי\.?סי\.?אי\.?אי|mass.?gainer|gainer/, 'fitness_supplement', 'תוספי אימון') ||
+    m(/anti.?aging|אנטי.?אייג|רטינול|retinol|wrinkle|קמט|קמטים|alma|ageless|firming|hyaluron|היאלורון/, 'skincare_aging', 'קרמים נגד קמטים') ||
+    m(/מנקה|ניקוי|cleaner|detergent|כביסה|רצפה|degreaser|disinfect|חיטוי|sanitiz|מסיר.*כתמ/, 'cleaning', 'מוצרי ניקוי') ||
+    // === Legacy categories ===
     // accessory
     m(/כיפה|כיפת|kipah|yarmulke/, 'accessory', 'כיפות') ||
     m(/שרשרת|necklace/, 'accessory', 'שרשראות') ||
@@ -1678,9 +1703,89 @@ function detectProductCategory(productName, productDesc) {
   );
 }
 
-// Beat-1 template "ניסיתי כבר מלא {plural} ו{negative outcome}" — the
-// negative-outcome tail is fixed per category.
-function buildProductBeat1(category, plural) {
+// Category-specific Beat-1 hook pools (Option B). For each new category we
+// keep both feminine and masculine variants explicitly so we don't depend on
+// toMasculine for the new phrasing (some constructions like "את צריכה" →
+// "אתה צריך" go beyond simple word-substitution). Entries are picked at
+// random per generation so users see varied hooks across regens. Categories
+// not listed here fall through to the legacy "ניסיתי כבר מלא ..." template.
+const PRODUCT_BEAT1_PATTERNS = {
+  energy: {
+    female: [
+      'השעה 3 אחה״צ והקפה השלישי לא עוזר',
+      'את מנסה להתעורר אבל הגוף לא מקשיב',
+      '10 בלילה ואת צריכה עוד לעבוד',
+      'התעוררת עייפה שוב',
+    ],
+    male: [
+      'השעה 3 אחה״צ והקפה השלישי לא עוזר',
+      'אתה מנסה להתעורר אבל הגוף לא מקשיב',
+      '10 בלילה ואתה צריך עוד לעבוד',
+      'התעוררת עייף שוב',
+    ],
+  },
+  coffee: {
+    female: [
+      'הקפה של הבוקר נותן לך שעה אנרגיה ואז זה נגמר',
+      'טעמת אספרסו טוב פעם, הקפה של הבית לא קרוב',
+      'קפה נמס שוב, זה לא הולך לעבוד',
+    ],
+    male: [
+      'הקפה של הבוקר נותן לך שעה אנרגיה ואז זה נגמר',
+      'טעמת אספרסו טוב פעם, הקפה של הבית לא קרוב',
+      'קפה נמס שוב, זה לא הולך לעבוד',
+    ],
+  },
+  fitness_supplement: {
+    female: [
+      'את מתחילה אימון בלי כוח',
+      '20 דקות באימון ואת כבר נגמרת',
+      'מגיעה לחדר כושר ואין לך אש',
+      'האימון נגמר ואת לא הרגשת אותו',
+    ],
+    male: [
+      'אתה מתחיל אימון בלי כוח',
+      '20 דקות באימון ואתה כבר נגמר',
+      'מגיע לחדר כושר ואין לך אש',
+      'האימון נגמר ואתה לא הרגשת אותו',
+    ],
+  },
+  skincare_aging: {
+    female: [
+      'כל בוקר את רואה את הקווים האלה',
+      'הקרם הזול הזה כבר לא עוזר',
+      'מסתכלת במראה, זו לא את לפני שנה',
+      'הפנים נראים עייפים גם אחרי שמונה שעות שינה',
+    ],
+    male: [
+      'כל בוקר אתה רואה את הקווים האלה',
+      'הקרם הזול הזה כבר לא עוזר',
+      'מסתכל במראה, זה לא אתה לפני שנה',
+      'הפנים נראים עייפים גם אחרי שמונה שעות שינה',
+    ],
+  },
+  cleaning: {
+    female: [
+      'הכתם הזה כבר חודש על השטיח',
+      'ניקית את האמבטיה אתמול וכבר חזר הלכלוך',
+      'המוצר הזול לא מסיר כלום',
+    ],
+    male: [
+      'הכתם הזה כבר חודש על השטיח',
+      'ניקית את האמבטיה אתמול וכבר חזר הלכלוך',
+      'המוצר הזול לא מסיר כלום',
+    ],
+  },
+};
+
+// Beat-1 template builder. Categories listed in PRODUCT_BEAT1_PATTERNS use
+// the new dynamic pool (Option B). All other categories use the legacy
+// "ניסיתי כבר מלא {plural} ו{negative outcome}" template.
+function buildProductBeat1(category, plural, voiceGender = 'female') {
+  const pool = PRODUCT_BEAT1_PATTERNS[category]?.[voiceGender];
+  if (pool && pool.length > 0) {
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
   const tailByCategory = {
     accessory: 'ושום דבר לא התאים לי ולא ידעתי מה לעשות',
     beauty: 'ושום דבר לא עבד לי באמת',
@@ -1695,7 +1800,9 @@ function buildProductBeat1(category, plural) {
 
 function getHook(productName, productDesc, voiceGender = 'female') {
   const { category, plural } = detectProductCategory(productName, productDesc);
-  const raw = buildProductBeat1(category, plural);
+  const raw = buildProductBeat1(category, plural, voiceGender);
+  // Dynamic-pool entries are already gender-correct; toMasculine becomes a
+  // safe no-op on them. Legacy templates are feminine-base and need conversion.
   return voiceGender === 'male' ? toMasculine(raw) : raw;
 }
 
