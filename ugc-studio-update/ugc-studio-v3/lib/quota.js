@@ -403,7 +403,7 @@ export async function insertVideoJob({ userId, jobId, productName, videoType, is
       job_id: jobId,
       product_name: productName || '',
       video_type: videoType || 'ugc',
-      status: 'pending',
+      status: 'processing',
       video_url: null,
       is_topup: !!isTopup,
       voice_regen_count: 0,

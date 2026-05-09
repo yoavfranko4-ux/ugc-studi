@@ -407,7 +407,7 @@ function logNbKlingOverlap(scenes, label = '') {
   });
 }
 
-async function generateScript(productName, productDesc, applicationArea, hook, voiceGender) {
+async function generateScript(productName, productDesc, applicationArea, hook, voiceGender, hookType = 'finally') {
   if (!ANTHROPIC_KEY) {
     console.error('[generateScript] FAILED — ANTHROPIC_API_KEY is not set in env, falling back to defaults');
     return null;
@@ -415,6 +415,19 @@ async function generateScript(productName, productDesc, applicationArea, hook, v
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
   const { category: detectedCategory, plural: detectedPlural } = detectProductCategory(productName, productDesc);
   console.log(`[generateScript] auto-detected category=${detectedCategory} plural=${detectedPlural} for "${productName}"`);
+  const hookDna = HOOK_DNA[hookType] || HOOK_DNA.finally;
+  console.log(`[generateScript] hook injected: ${hookType} (${hookDna.label})`);
+  const hookInstruction = `
+HOOK STYLE — ${hookDna.label} (${hookDna.description}):
+The visual DNA of all 4 scenes MUST reflect this hook style. Every nb_prompt and kling_prompt is shaped by these per-beat directives:
+
+- Scene 1 (PAIN beat): ${hookDna.beat1_directive}
+- Scene 2 (PRODUCT beat): ${hookDna.beat2_directive}
+- Scene 3 (SOLUTION beat): ${hookDna.beat3_directive}
+- Scene 4 (WIN beat): ${hookDna.beat4_directive}
+
+These directives are visual/cinematic constraints — they describe the avatar's posture, framing, gaze, and action energy for each beat. Weave them into the START of each scene's nb_prompt and kling_prompt. They take priority over the generic posture/framing language elsewhere in the prompt — but the anatomy rules, lip-lock rules (rule 9), and product-lock rules (rule 9a) still apply unchanged.
+`;
   const genderInstruction = voiceGender === 'male'
     ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'/'מובכת'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר. אל תערבב לשון נקבה.`
     : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה. אל תערבב לשון זכר.`;
@@ -519,6 +532,8 @@ SCENE 2 VISUAL NOTE:
 Scene 2's IMAGE is a product-only beauty shot (no avatar, no person). The voiceover plays over this clean product reveal — the discovery line ("עד שגיליתי את ${productName}") lands right as the product appears on screen. This is intentional.
 
 ${genderInstruction}
+
+${hookInstruction}
 
 STEP 0 — PRODUCT CATEGORY ANALYSIS (do this silently before writing):
 Read the product name and description and classify the product into one of these categories:
@@ -1207,7 +1222,7 @@ async function runJob(jobId, body) {
       voiceover = script?.voiceover || getBusinessDefaultVoiceover(businessName || '', businessDescription || '', hook, voiceGender);
     } else {
       hook = getHook(productName, productDesc, voiceGender);
-      script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender);
+      script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender, hookType);
       scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
       if (script) {
         script.voiceover_scene1 = hook;
