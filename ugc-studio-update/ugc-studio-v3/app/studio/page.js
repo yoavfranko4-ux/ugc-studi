@@ -527,6 +527,12 @@ export default function Home() {
           audioBase64: d.audio_base64 || null,
           hebrewVoice: d.hebrew_voice || '',
           voiceId: d.voice_id || null,
+          // Single-shot 15s layout markers. Saves before this commit didn't
+          // persist them, so older saved_edits rows restore as `null` here
+          // and exportMp4 then reads the real per-clip duration by probing
+          // the blob (auto-heal). Newer saves carry the real values.
+          fullVideoUrl: d.full_video_url || null,
+          fullVideoDuration: d.full_video_duration || null,
         }
         // Rebuild voiceover blob URL from saved base64
         if (d.audio_base64) {
@@ -1434,6 +1440,13 @@ export default function Home() {
         return (typeof u === 'string' && /^https?:\/\//i.test(u)) ? u : null
       })
 
+      // Per-clip duration probed from the blob via a temporary <video>
+      // element. This is the source of truth for clipDurations downstream
+      // and auto-heals saved_edits rows that pre-date persisting
+      // fullVideoUrl/fullVideoDuration. Falls back to perClipDuration on
+      // probe failure or timeout.
+      const clipDurationsProbed = new Array(orderedScenes.length).fill(null)
+
       const videoClipsB64 = []
       for (let idx = 0; idx < orderedScenes.length; idx++) {
         const si = orderedScenes[idx]
@@ -1458,6 +1471,36 @@ export default function Home() {
             console.error(`[Studio Export] clip ${idx} is only ${buf.byteLength} bytes — likely corrupt`)
             throw new Error(`קליפ ${idx + 1} פגום (${buf.byteLength} בייטים). צור סרטון חדש.`)
           }
+
+          // Probe duration from the bytes via a hidden <video>. 5s timeout —
+          // if metadata isn't readable that fast on a 15s clip something is
+          // already wrong with the file, and we'd rather fall back than hang.
+          try {
+            const probeBlob = new Blob([buf], { type: 'video/mp4' })
+            const probeUrl = URL.createObjectURL(probeBlob)
+            const probedDur = await new Promise((resolve) => {
+              const v = document.createElement('video')
+              v.preload = 'metadata'
+              v.muted = true
+              const cleanup = () => { try { URL.revokeObjectURL(probeUrl) } catch {} }
+              const timer = setTimeout(() => { cleanup(); resolve(0) }, 5000)
+              v.onloadedmetadata = () => {
+                clearTimeout(timer); cleanup()
+                resolve(Number.isFinite(v.duration) ? v.duration : 0)
+              }
+              v.onerror = () => { clearTimeout(timer); cleanup(); resolve(0) }
+              v.src = probeUrl
+            })
+            if (probedDur > 0.5) {
+              clipDurationsProbed[idx] = Math.round(probedDur * 100) / 100
+              console.log(`[Studio Export] clip ${idx} probed duration: ${clipDurationsProbed[idx]}s`)
+            } else {
+              console.warn(`[Studio Export] clip ${idx} probe returned ${probedDur}s — will fall back to perClipDuration`)
+            }
+          } catch (probeErr) {
+            console.warn(`[Studio Export] clip ${idx} probe threw:`, probeErr.message)
+          }
+
           const bytes = new Uint8Array(buf)
           let binary = ''
           for (let j = 0; j < bytes.length; j += 8192) {
@@ -1474,22 +1517,29 @@ export default function Home() {
       }
       console.log(`[Studio Export] SUMMARY — ${videoClipsB64.length} clips encoded, total base64 chars: ${videoClipsB64.reduce((a, b) => a + (b?.length || 0), 0)}`)
 
-      // Build subtitles array with timestamps. The /api/export route
-      // prefers wordTimestamps (word-level ASS) over this array when both
-      // are sent — this fallback path only matters if wordTimestamps is
-      // empty. Per-clip duration is 5s in the legacy 4-clip layout and
-      // whatever fullVideoDuration says (default 15) for the single-shot
-      // 15s layout.
+      // Build clipDurations + subtitles. Source of truth is the per-clip
+      // duration we probed off the actual blob — that auto-heals
+      // saved_edits rows that don't carry fullVideoUrl/fullVideoDuration.
+      // perClipDuration stays as the fallback for clips whose probe
+      // failed: 5s in the legacy 4-clip layout, whatever
+      // fullVideoDuration says (default 15) for the single-shot layout.
+      // The /api/export route prefers wordTimestamps (word-level ASS) over
+      // the subtitles array when both are sent, so this fallback only
+      // matters if wordTimestamps is empty.
       const isFullVideoMode = !!result?.fullVideoUrl
       const perClipDuration = isFullVideoMode ? (result?.fullVideoDuration || 15) : 5
+      const clipDurations = orderedScenes.map((_, idx) => {
+        const probed = clipDurationsProbed[idx]
+        return (Number.isFinite(probed) && probed > 0.5) ? probed : perClipDuration
+      })
       let timeOffset = 0
-      const subtitles = orderedScenes.map(i => {
+      const subtitles = orderedScenes.map((i, idx) => {
         const text = result.story?.scenes?.[i]?.subtitle || ''
-        const sub = { text, start: timeOffset, duration: perClipDuration }
-        timeOffset += perClipDuration
+        const dur = clipDurations[idx]
+        const sub = { text, start: timeOffset, duration: dur }
+        timeOffset += dur
         return sub
       })
-      const clipDurations = orderedScenes.map(() => perClipDuration)
 
       setExportProgress('שולח לשרת... 20%')
 
@@ -1596,6 +1646,13 @@ export default function Home() {
         videos: result.videos,
         frames: result.frames,
         story: result.story,
+        // Single-shot 15s layout markers — preserved verbatim (no defaults),
+        // so a legacy 4×5s saved row stays null and a fresh single-shot save
+        // carries the real duration. The export path also probes the blob
+        // for the actual per-clip seconds, so missing values here heal at
+        // export time.
+        full_video_url: result?.fullVideoUrl || null,
+        full_video_duration: result?.fullVideoDuration || null,
         hebrew_voice: result.hebrewVoice,
         audio_base64: result.audioBase64 || null,
         word_timestamps: result.wordTimestamps || null,
