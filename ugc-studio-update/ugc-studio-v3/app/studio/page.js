@@ -30,6 +30,16 @@ const TRANSITIONS = [
   { id: 'zoom', label: 'Zoom', desc: 'זום קל' },
 ]
 
+// === Hook Templates (Meta Ads 2026 viral hook research) ===
+// UI mirror of HOOK_DNA in app/api/agent/route.js — keep keys in sync.
+// Server validates hookType against HOOK_DNA and falls back to 'finally'.
+const HOOK_OPTIONS = [
+  { id: 'this_is_for',  label: 'THIS IS FOR...',  emoji: '🎯', description: 'פנייה לקהל ספציפי',           best_for: 'B2B, נישות, דמוגרפיה ממוקדת' },
+  { id: 'pov',          label: 'POV',             emoji: '👀', description: 'נקודת מבט / חוויה',           best_for: 'יופי, אופנה, lifestyle' },
+  { id: 'little_known', label: 'LITTLE KNOWN...', emoji: '🤫', description: 'פער סקרנות / סוד',            best_for: 'hacks, מוצרים חדשים, טרנדים' },
+  { id: 'finally',      label: 'FINALLY...',      emoji: '✨', description: 'בעיה שסוף סוף נפתרת',         best_for: 'בעיות יומיומיות, סקינקייר, תוספים' },
+]
+
 // === Web Audio SFX ===
 function createAudioContext() {
   return new (window.AudioContext || window.webkitAudioContext)()
@@ -311,6 +321,7 @@ export default function Home() {
   const [productImage, setProductImage] = useState(null)
   const [storyDescription, setStoryDescription] = useState('')
   const [selectedSetting, setSelectedSetting] = useState('auto')
+  const [selectedHook, setSelectedHook] = useState('finally')
   // Business mode state
   const [businessName, setBusinessName] = useState('')
   const [businessDescription, setBusinessDescription] = useState('')
@@ -1028,7 +1039,7 @@ export default function Home() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, elevenKey, voiceId, userId, setting: selectedSetting })
+        body: JSON.stringify({ ...bizPayload, avatarUrl: finalAvatarUrl, elevenKey, voiceId, userId, setting: selectedSetting, hookType: selectedHook })
       })
       if (!agentRes.ok) throw new Error('Agent failed')
       const { jobId } = await agentRes.json()
@@ -1966,6 +1977,26 @@ export default function Home() {
                     </div>
                   </div>
                 )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Hook Selector — Meta Ads 2026 viral hook templates */}
+      <div style={cardS}>
+        <div style={secTitle}>סגנון Hook לסרטון</div>
+        <div style={{ fontSize: 12, color: '#52525b', marginBottom: 12 }}>בחר את ה-hook שיתאים למוצר/קהל שלך</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+          {HOOK_OPTIONS.map(h => {
+            const sel = selectedHook === h.id
+            return (
+              <div key={h.id} onClick={() => setSelectedHook(h.id)} title={h.label}
+                style={{ padding: '14px 12px', background: sel ? 'rgba(255,0,128,0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${sel ? 'rgba(255,0,128,0.5)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 12, cursor: 'pointer', textAlign: 'center', boxShadow: sel ? '0 0 18px rgba(255,0,128,0.18)' : 'none', transition: 'all 300ms ease', direction: 'rtl' }}>
+                <div style={{ fontSize: 28, marginBottom: 6 }}>{h.emoji}</div>
+                <div style={{ fontSize: 14, color: sel ? '#F5F5F4' : '#e4e4e7', fontWeight: 700, marginBottom: 4, letterSpacing: 0.3 }}>{h.label}</div>
+                <div style={{ fontSize: 12, color: sel ? '#d4d4d8' : '#a1a1aa', marginBottom: 6 }}>{h.description}</div>
+                <div style={{ fontSize: 11, color: '#71717a' }}>הכי טוב ל: {h.best_for}</div>
               </div>
             )
           })}

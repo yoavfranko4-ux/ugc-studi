@@ -1153,11 +1153,14 @@ async function runJob(jobId, body) {
       avatarUrl, productImageUrl, voiceId,
       businessName, businessDescription, businessPhotos,
       setting: requestedSetting,
+      hookType: requestedHookType,
     } = body;
+    const hookType = requestedHookType && HOOK_DNA[requestedHookType] ? requestedHookType : 'finally';
     // Resolve setting → promptText. 'auto' (or missing/unknown) → empty string (AI decides)
     const settingKey = requestedSetting && SETTINGS[requestedSetting] ? requestedSetting : 'auto';
     const settingPromptText = SETTINGS[settingKey]?.promptText || '';
     console.log(`[Job ${jobId}] Setting selected: ${settingKey}${settingPromptText ? ' (injected)' : ' (auto — empty)'}`);
+    console.log(`[Job ${jobId}] Hook selected: ${hookType} (${HOOK_DNA[hookType].label})`);
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
     const prepareUrl = (u) => u
       ? (u.startsWith('http') || u.startsWith('data:')
@@ -1313,10 +1316,19 @@ async function runJob(jobId, body) {
     // "copyright restrictions" rejection on the 4-call layout).
     const buildMergedFullPrompt = () => {
       const isBusiness = videoType === 'business';
-      const beat1 = trimKlingForBeat(scenes[0]?.kling_prompt, 400);
-      const beat2 = trimKlingForBeat(scenes[1]?.kling_prompt, 400);
-      const beat3 = trimKlingForBeat(scenes[2]?.kling_prompt, 400);
-      const beat4 = trimKlingForBeat(scenes[3]?.kling_prompt, 400);
+      const beat1Raw = trimKlingForBeat(scenes[0]?.kling_prompt, 400);
+      const beat2Raw = trimKlingForBeat(scenes[1]?.kling_prompt, 400);
+      const beat3Raw = trimKlingForBeat(scenes[2]?.kling_prompt, 400);
+      const beat4Raw = trimKlingForBeat(scenes[3]?.kling_prompt, 400);
+
+      // HOOK_DNA injection (Meta Ads 2026 viral hook templates). Each
+      // directive is prepended to its beat — the WIN_SCENE_RULES line below
+      // still wraps beat4 with the category-specific outcome guidance.
+      const hookDna = HOOK_DNA[hookType] || HOOK_DNA.finally;
+      const beat1 = `${hookDna.beat1_directive} ${beat1Raw}`;
+      const beat2 = `${hookDna.beat2_directive} ${beat2Raw}`;
+      const beat3 = `${hookDna.beat3_directive} ${beat3Raw}`;
+      const beat4 = `${hookDna.beat4_directive} ${beat4Raw}`;
 
       // Pick the WIN-scene guidance for Beat 4 based on product category.
       // Whitening products are classified as `health` by detectProductCategory
@@ -1787,6 +1799,63 @@ const PRODUCT_BEAT1_PATTERNS = {
       'המוצר הזול לא מסיר כלום',
     ],
   },
+};
+
+// 4 viral hook templates from Meta Ads 2026 (Andromeda update) research.
+// Each entry prepends a directive to its corresponding beat (1-4) of the
+// merged 15s prompt — so the same script flow gains a distinct opening
+// energy and through-line. Default is `finally` (closest to the legacy
+// PAIN→DISCOVERY→USE→WIN behavior). Lookups outside this map fall back to
+// `finally`.
+const HOOK_DNA = {
+  this_is_for: {
+    label: "THIS IS FOR...",
+    emoji: "🎯",
+    description: "Calling out specific audience",
+    best_for: ["B2B", "niche", "specific demographics"],
+    beat1_directive: "Direct address to camera, pointing or looking at viewer with conviction. Confident, knowing expression. Text overlay implied: 'This is for...'",
+    beat2_directive: "Show the specific problem this exact audience faces. Tight close-up on the pain point. Frustration in eyes (NO LIP MOVEMENT).",
+    beat3_directive: "Product reveals as the specific solution for this audience. Hero shot - product alone for 1 second, then in use.",
+    beat4_directive: "Same person transformed - now belongs to the success group. Different setting/lighting from beat 1. Confident posture.",
+    voiceover_pattern: "This is for [audience] who want [desire]. Listen up...",
+    cta_style: "membership / belonging"
+  },
+  pov: {
+    label: "POV",
+    emoji: "👀",
+    description: "Point of view immersion",
+    best_for: ["beauty", "fashion", "lifestyle", "emotional"],
+    beat1_directive: "POV-style shot. Camera at eye-level, slight selfie angle. Subject's face shows desired emotional state (anticipation, joy). Text overlay implied: 'POV:'",
+    beat2_directive: "Setup the scenario - what just happened in this POV. Could be hand reaching for product, or environment shot.",
+    beat3_directive: "Product appears within the POV moment. Held firmly (never floating). Used naturally as part of the experience.",
+    beat4_directive: "Emotional payoff - the feeling they wanted to live. Different setting suggests passage of time. Authentic satisfaction in eyes.",
+    voiceover_pattern: "POV: you finally [desired state]...",
+    cta_style: "experiential / aspirational"
+  },
+  little_known: {
+    label: "LITTLE KNOWN...",
+    emoji: "🤫",
+    description: "Curiosity gap reveal",
+    best_for: ["hacks", "new products", "underground trends"],
+    beat1_directive: "Conspiratorial expression. Looking around as if sharing a secret. Slight lean toward camera. Mysterious, knowing look.",
+    beat2_directive: "Build mystery - hint without revealing. Hand near mouth gesture (but mouth closed - NO LIP MOVEMENT). Eyes communicate the secret.",
+    beat3_directive: "Dramatic product reveal. Product comes into frame from off-screen. Hero shot 1 second, then close interaction.",
+    beat4_directive: "Knowing smile, satisfied expression. The 'I told you' moment. Result is visible and impressive.",
+    voiceover_pattern: "Little known [product/hack] that [unexpected benefit]...",
+    cta_style: "exclusivity / insider"
+  },
+  finally: {
+    label: "FINALLY...",
+    emoji: "✨",
+    description: "Pain point finally solved",
+    best_for: ["everyday problems", "skincare", "supplements"],
+    beat1_directive: "Frustrated, exhausted expression. Hand on forehead or rubbing eyes. The 'I've tried everything' feeling.",
+    beat2_directive: "Quick montage feel - showing things that didn't work. Multiple frustrated reactions or product alternatives shown failing.",
+    beat3_directive: "Product reveal with visible relief. Shoulders drop. Eyes widen slightly. Hero shot of product 1 second.",
+    beat4_directive: "Genuine 'this actually works' moment. Authentic satisfaction (not over-acted). Calm confidence. Result clearly visible.",
+    voiceover_pattern: "Finally, a [product] that actually [delivers promise]...",
+    cta_style: "relief / solution-focused"
+  }
 };
 
 // Beat-4 (WIN) outcome guidance per product category. The WIN scene must
