@@ -206,16 +206,18 @@ function scriptHasForeignWords(fullText) {
   return FOREIGN_BORROWED_WORDS.some(re => re.test(fullText));
 }
 
-// Enforce the strict 4-beat UGC structure and return ALL violations found, so
+// Enforce the 4-beat UGC structure and return ALL violations found, so
 // the regeneration step can show Claude the complete list of what to fix.
 //
-// PRODUCT mode templates (canonical 4-beat):
-// - Beat 1: "ניסיתי כבר מלא {Hebrew plural} ו{negative outcome}"
-// - Beat 2: "עד שגיליתי את {productName} שפשוט שינה/שינתה (לי) הכל"
-// - Beat 3: 2-3 concrete benefits tied to the Beat-1 pain
-// - Beat 4: "תקנו/תזמינו/תיכנסו/תנסו את {productName}" + trust phrase
+// PRODUCT mode (natural UGC — scam-testimonial templates removed):
+// - Beat 1: pre-set hook from getHook() — must match verbatim
+// - Beat 2: natural product introduction — must mention productName, no
+//   mandated opener/tail; PRODUCT_VOICEOVER_FORBIDDEN_PHRASES are banned
+// - Beat 3: 2-3 concrete benefits tied to the Beat-1 pain — same bans
+// - Beat 4: natural close — must mention productName, no mandated CTA
+//   verb or trust phrase; PRODUCT_VOICEOVER_FORBIDDEN_PHRASES are banned
 //
-// BUSINESS mode templates:
+// BUSINESS mode (out of scope — kept as-is):
 // - Beat 1: opens with one of "הלכתי / הייתי / ניסיתי / אכלתי / התאמנתי",
 //   never names the business
 // - Beat 2: opens with "עד שהגעתי ל..." / "עד שגיליתי את..." / "ואז הגעתי ל...",
@@ -235,17 +237,44 @@ const BEAT_1_PRODUCT_REQUIRED_PHRASE = 'ניסיתי כבר מלא';
 // BUSINESS-mode Beat-1 verb whitelist (one must appear).
 const BEAT_1_BUSINESS_REQUIRED_VERBS = ['הלכתי', 'הייתי', 'ניסיתי', 'אכלתי', 'התאמנתי'];
 
-// Beat 2 — required openers (must start with one of these).
-const BEAT_2_PRODUCT_OPENER = 'עד שגיליתי את';
-const BEAT_2_PRODUCT_TAIL_PHRASES = [
+// Business mode keeps its discovery openers — those are legitimate
+// "I went there / I discovered the place" framings, not scam testimonial.
+const BEAT_2_BUSINESS_OPENERS = ['עד שהגעתי ל', 'עד שגיליתי את', 'ואז הגעתי ל'];
+
+// Forbidden phrases that mark scam-testimonial UGC. These must NOT appear
+// in ANY product-mode voiceover (scenes 1-4). Beat 1 hook is preset by
+// the server so it's pre-cleared; Beats 2-4 are Claude-generated and
+// historically defaulted to these patterns until we banned them inline
+// (Beat 2 used to MANDATE "עד שגיליתי את" + tail; Beat 4 used to MANDATE
+// a trust phrase). The validator now flags these as violations instead
+// of requiring them.
+const PRODUCT_VOICEOVER_FORBIDDEN_PHRASES = [
+  'עד שגיליתי',
+  'ואז גיליתי',
   'שפשוט שינה הכל',
   'שפשוט שינתה הכל',
   'שפשוט שינה לי הכל',
   'שפשוט שינתה לי הכל',
+  'פשוט שינה הכל',
+  'פשוט שינתה הכל',
+  'זה משנה הכל',
+  'משנה לי הכל',
+  'תסמכו עליי',
+  'תסמכו עלי',
+  'אני מבטיח',
+  'אני מבטיחה',
+  'לא תתחרטו',
+  'תקנו עכשיו',
+  'שווה כל שקל',
+  'פתרון חכם',
+  'פתרון מושלם',
+  'התוצאות מטורפות',
 ];
-const BEAT_2_BUSINESS_OPENERS = ['עד שהגעתי ל', 'עד שגיליתי את', 'ואז הגעתי ל'];
 
-// Beat 3 — discovery openers belong to Beat 2 only; ad-clichés banned.
+// Business mode (out of scope for the product-mode scam-cleanup) keeps
+// its narrower Beat-3 forbidden list — discovery phrases that belong in
+// Beat 2 of a business script + a couple of ad clichés. Business CTAs
+// are legitimate physical-location calls to action and stay required.
 const BEAT_3_FORBIDDEN_PHRASES = [
   'עד שגיליתי',
   'ואז גיליתי',
@@ -253,10 +282,6 @@ const BEAT_3_FORBIDDEN_PHRASES = [
   'פתרון מושלם',
   'התוצאות מטורפות',
 ];
-
-// Beat 4 — CTA verb + trust phrase.
-const BEAT_4_PRODUCT_CTA_VERBS = ['תקנו', 'תזמינו', 'תיכנסו', 'תנסו'];
-const BEAT_4_PRODUCT_TRUST_PHRASES = ['תסמכו עליי', 'תסמכו עלי', 'אני מבטיח', 'לא תתחרטו'];
 const BEAT_4_BUSINESS_CTA_VERBS = ['תקבעו תור', 'תבואו', 'תיכנסו'];
 
 // Normalize a Beat-1 line for equality comparison: collapse whitespace and
@@ -303,33 +328,29 @@ function beatStructureViolations(scenes, identityName, opts = {}) {
     } else if (!v1.includes(BEAT_1_PRODUCT_REQUIRED_PHRASE)) {
       violations.push(`Beat 1 must contain the template phrase "${BEAT_1_PRODUCT_REQUIRED_PHRASE} {Hebrew plural} ו{negative outcome}". Got: "${v1.slice(0, 80)}"`);
     }
-    // BEAT 2 — must START with "עד שגיליתי את" + name the product + end with one of the tail phrases.
-    if (!v2.startsWith(BEAT_2_PRODUCT_OPENER)) {
-      violations.push(`Beat 2 must START with "${BEAT_2_PRODUCT_OPENER} ${identityName} ...". Got: "${v2.slice(0, 80)}"`);
-    }
+    // BEAT 2 — must mention the product naturally. No mandatory opener or
+    // tail any more (the old "עד שגיליתי את ... שפשוט שינה הכל" template
+    // was the source of the scam-testimonial feel). Just require that the
+    // product is named here — Beat 2 is the natural product introduction.
     if (identityName && !v2.toLowerCase().includes(idLower)) {
-      violations.push(`Beat 2 must explicitly name the product "${identityName}". Got: "${v2.slice(0, 80)}"`);
+      violations.push(`Beat 2 must mention the product "${identityName}" naturally (e.g. "שותה ${identityName} בבוקר"). Got: "${v2.slice(0, 80)}"`);
     }
-    const v2Stripped = v2.replace(/[.!?…\s"')\]]+$/u, '');
-    const hasValidTail = BEAT_2_PRODUCT_TAIL_PHRASES.some(p => v2Stripped.endsWith(p));
-    if (!hasValidTail) {
-      violations.push(`Beat 2 must end with one of: ${BEAT_2_PRODUCT_TAIL_PHRASES.map(p => `"${p}"`).join(' / ')}. Got: "${v2.slice(-80)}"`);
-    }
-    // BEAT 3 — no discovery / ad-cliché phrases anywhere.
-    for (const phrase of BEAT_3_FORBIDDEN_PHRASES) {
-      if (v3.includes(phrase)) {
-        violations.push(`Beat 3 contains forbidden phrase "${phrase}" — that belongs in Beat 2 only, or it's an ad-cliché. Beat 3 should list concrete benefits that resolve the Beat-1 pain.`);
-      }
-    }
-    // BEAT 4 — CTA verb + product name + trust phrase.
-    if (!BEAT_4_PRODUCT_CTA_VERBS.some(verb => v4.includes(verb))) {
-      violations.push(`Beat 4 must contain a direct CTA verb — one of: ${BEAT_4_PRODUCT_CTA_VERBS.map(v => `"${v}"`).join(' / ')}. Got: "${v4.slice(0, 80)}"`);
-    }
+    // BEAT 4 — must reference the product. No mandatory CTA verb or trust
+    // phrase any more (the old "תקנו / תזמינו / תיכנסו / תנסו" + "תסמכו
+    // עליי / אני מבטיח / לא תתחרטו" requirements created the scam-testimonial
+    // close that the user explicitly wants gone). A natural close that
+    // names the product is enough.
     if (identityName && !v4.toLowerCase().includes(idLower)) {
       violations.push(`Beat 4 must reference the product "${identityName}" by name. Got: "${v4.slice(0, 80)}"`);
     }
-    if (!BEAT_4_PRODUCT_TRUST_PHRASES.some(p => v4.includes(p))) {
-      violations.push(`Beat 4 must include a trust phrase — one of: ${BEAT_4_PRODUCT_TRUST_PHRASES.map(p => `"${p}"`).join(' / ')}. Got: "${v4.slice(0, 80)}"`);
+    // FORBIDDEN-PHRASE CHECK — applies across ALL 4 voiceover scenes. If
+    // ANY scam-testimonial phrase appears, flag it; the regen instruction
+    // will show Claude exactly which phrases need to go.
+    const allVoiceover = `${v1} ${v2} ${v3} ${v4}`;
+    for (const phrase of PRODUCT_VOICEOVER_FORBIDDEN_PHRASES) {
+      if (allVoiceover.includes(phrase)) {
+        violations.push(`Forbidden scam-testimonial phrase "${phrase}" appears in the voiceover — it must NOT appear in any of voiceover_scene1..4. Rewrite naturally.`);
+      }
     }
   } else {
     // BUSINESS mode.
@@ -407,7 +428,7 @@ function logNbKlingOverlap(scenes, label = '') {
   });
 }
 
-async function generateScript(productName, productDesc, applicationArea, hook, voiceGender) {
+async function generateScript(productName, productDesc, applicationArea, hook, voiceGender, settingKey = 'auto') {
   if (!ANTHROPIC_KEY) {
     console.error('[generateScript] FAILED — ANTHROPIC_API_KEY is not set in env, falling back to defaults');
     return null;
@@ -415,6 +436,34 @@ async function generateScript(productName, productDesc, applicationArea, hook, v
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
   const { category: detectedCategory, plural: detectedPlural } = detectProductCategory(productName, productDesc);
   console.log(`[generateScript] auto-detected category=${detectedCategory} plural=${detectedPlural} for "${productName}"`);
+
+  // ── WIN-scene guidance for Beat 4 ──
+  // Mirror the same category/whitening detection used later in
+  // buildMergedFullPrompt so the Beat-4 nb_prompt + kling_prompt that
+  // generateScript emits are already action-based per category. Without
+  // this, rule 5a below would tell Claude "scene 4 = same location as
+  // scene 1, satisfied expression" — which directly contradicts
+  // WIN_SCENE_RULES and produces static "sitting in the gym" frames.
+  const winText = `${productName || ''} ${productDesc || ''}`;
+  const isWhitening = WHITENING_RX.test(winText);
+  const winKey = isWhitening ? 'whitening' : detectedCategory;
+  const baseWinRule = WIN_SCENE_RULES[winKey] || WIN_SCENE_RULES.beauty;
+  // Setting-aware action override: gym + energy/coffee/fitness_supplement
+  // = Avatar mid-exercise (pull-up / push-up / deadlift / box-jump),
+  // not a static post-workout pose. This is the specific bug the user
+  // hit ("BLAZE energy + setting=gym → scene 4 came out as sitting at
+  // a computer in the gym").
+  const ACTION_CATEGORIES = new Set(['energy', 'coffee', 'fitness_supplement']);
+  const isGymAction = settingKey === 'gym' && ACTION_CATEGORIES.has(detectedCategory);
+  const winRule = isGymAction
+    ? `Avatar performing energetic exercise in the gym — successful pull-up, push-up, deadlift, kettlebell swing, or box jump — visible energy and pump, "victory" pose at the top of the rep. Product, when shown, is on a bench or in the avatar's hand between sets, NEVER the focus. Different framing/angle from Beat 1.`
+    : baseWinRule;
+  // Categories whose WIN rule explicitly requires a different setting from
+  // Beat 1. For these we override rule 5a's "same location" default;
+  // remaining categories (accessory/beauty/fashion/home/food) keep rule 5a.
+  const WIN_OVERRIDES_RULE_5A = new Set(['energy', 'coffee', 'fitness_supplement', 'skincare_aging', 'cleaning', 'whitening']);
+  const winOverridesContinuity = isGymAction || WIN_OVERRIDES_RULE_5A.has(winKey);
+  console.log(`[generateScript] WIN scene: winKey=${winKey} isGymAction=${isGymAction} winOverridesRule5a=${winOverridesContinuity}`);
   const genderInstruction = voiceGender === 'male'
     ? `GENDER (CRITICAL — MALE SPEAKER): כתוב את כל הקריינות בלשון זכר בלבד. דוגמאות: 'הייתי מובך' (לא 'מביכה'/'מובכת'), 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוח', 'אני חייב', 'התאכזבתי', 'האמנתי', 'מחפש' (לא 'מחפשת'), 'מרוצה' (זכר), 'מוכן', 'משתמש'. כל פועל, תואר וכינוי חייב להיות בלשון זכר. הדובר הוא גבר. אל תערבב לשון נקבה.`
     : `GENDER (CRITICAL — FEMALE SPEAKER): כתוב את כל הקריינות בלשון נקבה בלבד. דוגמאות: 'הייתי מובכת', 'הרגשתי', 'ניסיתי', 'גיליתי', 'אני בטוחה', 'אני חייבת', 'התאכזבתי', 'האמנתי', 'מחפשת' (לא 'מחפש'), 'מרוצה' (נקבה), 'מוכנה', 'משתמשת'. כל פועל, תואר וכינוי חייב להיות בלשון נקבה. הדוברת היא אישה. אל תערבב לשון זכר.`;
@@ -444,6 +493,29 @@ STYLE DIRECTION (apply within all kling_prompts):
 - Background should be softly out of focus (shallow depth of field)
 - Mood: intimate, authentic, like she's showing this to a close friend
 - These descriptors enrich Rule 11 gestures, they don't replace them
+
+CRITICAL VOICEOVER RULES — NATURAL UGC, NOT SCAM TESTIMONIAL:
+The voiceover must sound like a real person sharing a genuine experience — first-person, present-tense, specific moments and feelings. NOT a paid-shill testimonial.
+
+❌ FORBIDDEN PHRASES (must NOT appear in ANY of the 4 scene voiceovers — these are scam-testimonial markers):
+- "עד שגיליתי" / "עד שגיליתי את" / "ואז גיליתי" / "ואז גיליתי את" / "גיליתי את"
+- "שפשוט שינה הכל" / "שפשוט שינתה הכל" / "שפשוט שינה לי הכל" / "שפשוט שינתה לי הכל"
+- "פשוט שינה הכל" / "פשוט שינתה הכל" / "זה משנה הכל" / "משנה לי הכל"
+- "תסמכו עליי" / "תסמכו עלי"
+- "אני מבטיח" / "אני מבטיחה"
+- "לא תתחרטו"
+- "תקנו עכשיו"
+- "שווה כל שקל"
+- "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות"
+If ANY of these appear in voiceover_scene1..4, the script will be rejected and regenerated.
+
+✅ WRITE LIKE A REAL PERSON:
+- First person, present tense ("שותה", "מרגיש", "עכשיו יש לי")
+- Specific moments and feelings ("אחרי 11 בבוקר אני כבר גמור", "אחרי עשר דקות מרגיש את ההבדל")
+- Concrete actions and times, not vague claims
+- Natural Hebrew, NOT translated marketing speak
+- A soft mention of "תנסו" is fine, but NEVER paired with a trust phrase
+- Goal: a friend telling another friend about something they actually use, not a paid ad
 
 STEP 0 — CATEGORY DETECTION (REQUIRED OUTPUT FIELD):
 Before writing the script, classify the product into EXACTLY ONE of these categories:
@@ -476,43 +548,48 @@ BEAT 1 — CATEGORY-ANCHORED PAIN HOOK (voiceover_scene1, ~6–14 Hebrew words):
     - MUST NOT contain ANY of: "משהו חסר" / "משהו קטן" / "הבדל גדול" / "פתרון חכם" / "פתרון מושלם" / "כלום לא עבד" / "שום פתרון"
   Final reminder — the EXACT pre-set Beat-1 line you'll be given in rule 4 below is the ONLY allowed Beat 1 voiceover. Use it verbatim.
 
-BEAT 2 — PRODUCT DISCOVERY TEMPLATE (voiceover_scene2, ~5–7 Hebrew words):
-  TEMPLATE — copy this structure exactly: "עד שגיליתי את ${productName} {tail}"
-  Where {tail} is one of (match grammatical gender to "${productName}"):
-    - "שפשוט שינה הכל"        (masculine product)
-    - "שפשוט שינתה הכל"        (feminine product)
-    - "שפשוט שינה לי הכל"     (masculine, "for me")
-    - "שפשוט שינתה לי הכל"     (feminine, "for me")
+BEAT 2 — NATURAL PRODUCT INTRODUCTION (voiceover_scene2, ~5–9 Hebrew words):
+  Beat 2 introduces "${productName}" the way a real person would mention something they actually use — by naming WHEN/HOW they take/drink/use/wear it, NOT as a "discovery moment". Think: a friend casually telling another friend about their routine.
+  Examples of the SHAPE (do not copy literally — adapt to the product):
+    - Energy drink: "שותה פחית ${productName} בבוקר"
+    - Coffee: "כל בוקר חולט לי ${productName} ויוצא"
+    - Pre-workout: "לוקח כפית ${productName} 20 דקות לפני האימון"
+    - Skincare: "מורח ${productName} בערב על העור"
+    - Whitening: "שמתי ${productName} על השיניים שלוש פעמים השבוע"
   HARD REQUIREMENTS for Beat 2:
-    - MUST START with "עד שגיליתי את"
     - MUST contain the exact product name "${productName}"
-    - MUST END with one of the four tail phrases above (no other tail is allowed)
-    - Do NOT list benefits here — Beat 2 is the discovery bridge only
+    - First-person verb (זכר/נקבה matching the speaker)
+    - Mentions a concrete moment, frequency, or routine — not just "I bought it"
+    - Do NOT list benefits here (those belong to Beat 3) — Beat 2 is the introduction
+    - Forbidden phrases from the CRITICAL VOICEOVER RULES block apply (no "עד שגיליתי" / "פשוט שינה הכל" etc.)
 
 BEAT 3 — BENEFITS THAT SOLVE THE BEAT-1 PAIN (voiceover_scene3, ~16–22 Hebrew words):
   - One sentence (or two short ones) listing 2–3 SPECIFIC benefits drawn from the product description above
   - Each benefit must connect back to the Beat-1 pain (cause → mechanism → relief)
   - Benefits must be concrete (size, comfort, effect, ingredient, time-to-result, build quality) — NOT vague claims
   HARD REQUIREMENTS for Beat 3:
-    - MUST NOT START with "עד שגיליתי" / "ואז גיליתי" — those belong to Beat 2 ONLY
-    - MUST NOT contain the phrases "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות" anywhere
+    - Forbidden phrases from the CRITICAL VOICEOVER RULES block apply (no "עד שגיליתי" / "ואז גיליתי" / "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות" / "פשוט שינה הכל" anywhere)
+    - Talk about the actual experience: "אחרי X דקות מרגיש Y", "עכשיו אני Y", "לא צריך X יותר"
 
-BEAT 4 — CTA TEMPLATE (voiceover_scene4, ~7–10 Hebrew words):
-  TEMPLATE — pick one of these structures:
-    - "תקנו את ${productName}, תסמכו עליי - {short promise}"
-    - "תזמינו את ${productName} עכשיו, לא תתחרטו"
-    - "תיכנסו עכשיו ותקנו את ${productName}, אני מבטיח/ה לכם"
-    - "תנסו את ${productName} {short promise}, תסמכו עליי"
+BEAT 4 — NATURAL CLOSE (voiceover_scene4, ~6–10 Hebrew words):
+  Beat 4 closes with the AVATAR'S CURRENT REALITY — what changed in their day-to-day. A soft recommendation is allowed but a hard scam-style CTA is not. The trust phrases ("תסמכו עליי" / "אני מבטיח" / "לא תתחרטו") and pushy verbs ("תקנו עכשיו") are FORBIDDEN.
+  Examples of the SHAPE (do not copy literally — adapt to the product):
+    - Energy: "עכשיו יש לי אנרגיה לכל היום"
+    - Coffee: "בלי הקפה הזה אני לא מתפקד בבוקר"
+    - Whitening: "החיוך שלי חזר ואני יודעת שזה ניכר בתמונות"
+    - Skincare: "שבוע ולחיים שלי כבר נראים אחרת"
+    - Soft recommendation (optional): "תנסו את ${productName} ותראו לבד" — only if it feels natural, no trust phrase
   HARD REQUIREMENTS for Beat 4:
-    - MUST contain one of: "תקנו" / "תזמינו" / "תיכנסו" / "תנסו"
-    - MUST contain the exact product name "${productName}"
-    - MUST contain one of these trust phrases: "תסמכו עליי" / "אני מבטיח" / "לא תתחרטו"
+    - MUST mention "${productName}" by name
+    - First-person, present-tense voice
+    - Forbidden phrases from the CRITICAL VOICEOVER RULES block apply
 
 SANITY CHECK before returning:
   1. Beat 1 EXACTLY equals the pre-set hook from rule 4 (verbatim) and does NOT mention "${productName}".
-  2. Beat 2 STARTS with "עד שגיליתי את ${productName}" and ENDS with "שפשוט שינה הכל" / "שפשוט שינתה הכל" / "שפשוט שינה לי הכל" / "שפשוט שינתה לי הכל".
-  3. Beat 3 does NOT contain "עד שגיליתי" / "ואז גיליתי" / "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות".
-  4. Beat 4 contains one of "תקנו" / "תזמינו" / "תיכנסו" / "תנסו" + "${productName}" + one of "תסמכו עליי" / "אני מבטיח" / "לא תתחרטו".
+  2. Beat 2 mentions "${productName}" naturally as part of a concrete routine/moment (no "עד שגיליתי", no "פשוט שינה הכל").
+  3. Beat 3 lists 2-3 concrete benefits and contains NONE of the forbidden phrases.
+  4. Beat 4 mentions "${productName}" and closes naturally — NO "תסמכו עליי", "אני מבטיח", "לא תתחרטו", "תקנו עכשיו", "שווה כל שקל", "זה משנה הכל".
+  5. ZERO forbidden phrases (from the CRITICAL VOICEOVER RULES block) appear anywhere across voiceover_scene1..4.
 If any of these fail, rewrite before returning.
 
 SCENE 2 VISUAL NOTE:
@@ -556,9 +633,9 @@ CRITICAL RULES:
 
 1. UGC HOOK FORMULA — MIRRORS THE 4-BEAT STRUCTURE ABOVE:
 - Scene 1 (BEAT 1 — כאב / specific pain): Start with a SPECIFIC, CATEGORY-ANCHORED pain. NEVER mention the product name, brand name, or list any benefit. The viewer must know what domain this is from word one ("זה בדיוק אני!").
-- Scene 2 (BEAT 2 — גילוי / discovery): Voiceover is SHORT (4-6 words) and MUST open with "עד ש" or "ואז גיליתי" and name ${productName}. Visually, scene 2 is a clean product-only beauty shot — NO avatar, NO person in frame. NO benefits spoken yet.
-- Scene 3 (BEAT 3 — יתרונות / benefits + emotional payoff): Avatar uses ${productName}. Voiceover states 2-3 concrete benefits and closes with an emotional line that resolves the pain from scene 1. DO NOT open scene 3 with "עד שגיליתי" — the discovery already happened in scene 2.
-- Scene 4 (BEAT 4 — CTA / קריאה לפעולה): Direct call to action WITH a personal testimonial close ("זה שינה לי את היום" / "זה שווה כל שקל" / "אי אפשר להתחרט"). Never a bare "תנסו".
+- Scene 2 (BEAT 2 — הצגת המוצר / natural product introduction): Voiceover is SHORT (~5-9 words) — a real-person mention of WHEN / HOW the avatar uses ${productName} (e.g. "שותה פחית ${productName} בבוקר"). Visually, scene 2 is a clean product-only beauty shot — NO avatar, NO person in frame. NO benefits spoken yet, NO scam-discovery framing.
+- Scene 3 (BEAT 3 — יתרונות / benefits + emotional payoff): Avatar uses ${productName}. Voiceover states 2-3 concrete benefits and closes with an emotional line that resolves the pain from scene 1. ZERO forbidden phrases.
+- Scene 4 (BEAT 4 — סגירה טבעית / natural close): The avatar's current reality after using ${productName}. Soft recommendation OK, scam-testimonial close NOT OK. Forbidden phrases: "תסמכו עליי" / "אני מבטיח" / "לא תתחרטו" / "תקנו עכשיו" / "שווה כל שקל" / "זה משנה הכל".
 
 ⚠️ ABSOLUTE RULES FOR SCENE 1:
 - NEVER start scene 1 with the product name "${productName}" or any brand name
@@ -611,10 +688,10 @@ The output will be read by ElevenLabs V3 Hebrew TTS. Prefer everyday high-freque
 - Use everyday spoken Hebrew, not written/literary Hebrew
 
 3. VOICEOVER TIMING — STRICT (matches the 4-BEAT word budgets):
-- Scene 1 / BEAT 1 (pain): ~12-15 Hebrew words, ~5 sec — SPECIFIC category pain
-- Scene 2 / BEAT 2 (discovery): ~4-6 Hebrew words, ~2-3 sec — MUST start with "עד ש" or "ואז גיליתי" + ${productName}. DELIBERATELY SHORT — do not pad with benefits.
+- Scene 1 / BEAT 1 (pain): ~12-15 Hebrew words, ~5 sec — SPECIFIC category pain (pre-set hook)
+- Scene 2 / BEAT 2 (natural product introduction): ~5-9 Hebrew words, ~2-3 sec — names ${productName} as part of a real moment/routine. NO "עד שגיליתי" / "פשוט שינה הכל" / scam-discovery framing.
 - Scene 3 / BEAT 3 (benefits + emotional payoff): ~18-22 Hebrew words, ~7-8 sec — 2-3 benefits + line resolving the pain
-- Scene 4 / BEAT 4 (CTA + testimonial): ~8-10 Hebrew words, ~3-4 sec — emotional CTA with testimonial close
+- Scene 4 / BEAT 4 (natural close): ~6-10 Hebrew words, ~3-4 sec — avatar's current reality after using ${productName}. NO "תסמכו עליי" / "אני מבטיח" / "לא תתחרטו" / "תקנו עכשיו" / "שווה כל שקל".
 - Write at NATURAL SPEAKING PACE — each scene must feel complete for its beat.
 - The 4 beats join into one flowing paragraph for TTS — silence between beats is fine, but the TOTAL should be ~17-20 seconds.
 
@@ -647,17 +724,22 @@ You MUST use this EXACT text as voiceover_scene1. Do NOT modify it.
 - NEVER put ANY product in a car scene UNLESS it is explicitly a car accessory. Cars are ONLY for car accessories.
 - THE SETTING MAP ABOVE APPLIES TO SCENES 1, 2, 3 ONLY. Scene 4 follows the simpler continuity rule in 5a.
 
-5a. SCENE 4 — CONTINUATION, NOT A NEW SCENE (OVERRIDES rule 5 for scene 4):
-Scene 4 should feel like the SAME person in the SAME place, just LATER — one continuous moment, not a fresh aspirational location. Inventing a new scene (sunset restaurant, beach, fancy dinner) reads as AI-generated; staying put reads as a real lived moment.
+5a. SCENE 4 — WIN PAYOFF (category-specific, NOT a generic "smiling at camera" shot):
+Scene 4 must show the avatar ENJOYING THE BENEFIT in a real-world moment that resolves the Beat-1 pain. The product can be visible but is NOT the focus — the focus is the WIN itself (the action, the confidence, the relief).
 
-Scene-4 setting rules:
-- DEFAULT: same indoor location as scene 1 (home / kitchen / bathroom / bedroom / office — wherever the pain happened). Same lighting, same room, same casual everyday vibe. The avatar simply has a satisfied expression now.
-- CAR PRODUCTS ONLY: if ${productName} is a car product (רכב / אוטו / car accessory), scene 4 may show the avatar sitting in the driver's seat with natural in-car lighting through the windshield. This is the ONE category-specific override.
-- DO NOT invent restaurants, beaches, golden-hour terraces, Shabbat dinners, parties, or other "lifestyle" locations the avatar wasn't already in.
-- The product is still naturally visible on/with the avatar (worn / held / used) OR its EFFECT is visible (confident smile for whitening, styled outfit for fashion, glowing skin for skincare).
-- Lighting matches scene 1 — same window daylight + warm room practical. No candlelight, no golden hour, no restaurant warmth UNLESS scene 1 was already in that lighting.
+WIN guidance for THIS product (auto-selected from category=${winKey}):
+${winRule}
 
-Scene-4 TONE: satisfied, quietly confident, content in the moment — NOT a frozen posed grin. A closed-lip warm smile in the same room reads more authentic than a big forced smile in a fancy new location.
+${winOverridesContinuity
+  ? `Setting/lighting may shift vs. Beat 1 to suggest passage of time — that is the whole point of the WIN scene for this category. Do NOT keep scene 4 in the same static room as scene 1; show the payoff happening.`
+  : `Scene 4 should feel like the SAME person in the SAME place as scene 1, just LATER — one continuous moment, not a fresh aspirational location. Inventing a new scene (sunset restaurant, beach, fancy dinner) reads as AI-generated; staying put reads as a real lived moment. Same window daylight + warm room practical. No candlelight, no golden hour, no restaurant warmth UNLESS scene 1 was already in that lighting.`
+}
+
+Scene-4 ACTION RULE (CRITICAL): scene 4 is action-based, not a static pose. The avatar is DOING something that demonstrates the WIN — performing the exercise, enjoying the moment, smiling wide at someone, or actively living the payoff. NEVER "sitting at a computer in the gym" or any other passive/conflicting frame.
+
+CAR PRODUCTS ONLY: if ${productName} is a car product (רכב / אוטו / car accessory), scene 4 may show the avatar in the driver's seat with natural in-car lighting through the windshield. Otherwise do not invent vehicles.
+
+Scene-4 TONE: confident, in-the-moment, doing — NOT a frozen posed grin. The expression flows from the action.
 
 6. EVERY nb_prompt for scenes 1/3 MUST start with: "CRITICAL ANATOMY: exactly one person in the frame with exactly two arms and two hands, no extra limbs, no disembodied hands, no third arm, no floating hands, no hands appearing from outside the frame, no partial limbs entering from edges, anatomically perfect human body." AND MUST end with: "exactly one person in frame, no extra hands, no disembodied limbs, no hands entering from edges, no third arm, correct human anatomy, exactly two arms, no floating hands, anatomically correct body, NEVER show a phone or mobile device in any scene, NEVER in a car, NEVER in a vehicle". SCENE 4 follows the same anatomy rule BUT its ending must OMIT "NEVER in a car, NEVER in a vehicle" — scene 4 may legitimately show the car for car-accessory products (see rule 5a). The no-phone rule stays for scene 4. If the avatar holds a product, say "holding the product with ONE hand only, other hand visible and relaxed at side". Avoid describing multiple items held at once or hands doing multiple simultaneous actions.
 
@@ -781,9 +863,9 @@ Return ONLY valid JSON (no markdown):
   "category": "one of: accessory / beauty / health / fashion / home / food / energy / coffee / fitness_supplement / skincare_aging / cleaning (the value you chose in STEP 0)",
   "mode": "product",
   "voiceover_scene1": "BEAT 1 — MUST EXACTLY equal the pre-set hook from rule 4 (verbatim). The server picks one of two pattern families for you: legacy 'ניסיתי כבר מלא {Hebrew_plural} {category-specific tail}' (for accessory/beauty/health/fashion/home/food) OR a moment-anchored hook (for energy/coffee/fitness_supplement/skincare_aging/cleaning). Your job is to echo the exact line you're given. Must NOT contain '${productName}'. Must NOT contain 'משהו חסר' / 'משהו קטן' / 'הבדל גדול' / 'פתרון חכם' / 'פתרון מושלם' / 'כלום לא עבד' / 'שום פתרון'.",
-  "voiceover_scene2": "BEAT 2 — TEMPLATE 'עד שגיליתי את ${productName} שפשוט שינה/שינתה (לי) הכל'. Must START with 'עד שגיליתי את' + the product name. Must END with 'שפשוט שינה הכל' / 'שפשוט שינתה הכל' / 'שפשוט שינה לי הכל' / 'שפשוט שינתה לי הכל' (match grammatical gender to the product).",
-  "voiceover_scene3": "BEAT 3 — 2-3 concrete benefits of ${productName} that solve the Beat-1 pain. ~16-22 Hebrew words. Must NOT contain 'עד שגיליתי' / 'ואז גיליתי' / 'פתרון חכם' / 'פתרון מושלם' / 'התוצאות מטורפות'.",
-  "voiceover_scene4": "BEAT 4 — CTA template 'תקנו את ${productName}, תסמכו עליי - {short promise}' (or use 'תזמינו' / 'תיכנסו' / 'תנסו'). Must contain '${productName}' + a CTA verb + a trust phrase ('תסמכו עליי' / 'אני מבטיח' / 'לא תתחרטו').",
+  "voiceover_scene2": "BEAT 2 — natural product introduction (~5-9 Hebrew words). A real-person mention of WHEN / HOW the avatar uses '${productName}' (e.g. 'שותה פחית ${productName} בבוקר', 'מורח ${productName} בערב'). MUST contain '${productName}'. MUST NOT contain any forbidden phrase from the CRITICAL VOICEOVER RULES block — specifically NO 'עד שגיליתי', NO 'פשוט שינה הכל', NO 'זה משנה הכל'.",
+  "voiceover_scene3": "BEAT 3 — 2-3 concrete benefits of ${productName} that solve the Beat-1 pain. ~16-22 Hebrew words. MUST NOT contain any forbidden phrase from the CRITICAL VOICEOVER RULES block.",
+  "voiceover_scene4": "BEAT 4 — natural close (~6-10 Hebrew words). Avatar's current reality after using ${productName} (e.g. 'עכשיו יש לי אנרגיה לכל היום'). MUST mention '${productName}'. Soft 'תנסו' is OK, but ZERO trust-phrases / scam-CTAs. MUST NOT contain 'תסמכו עליי', 'אני מבטיח', 'לא תתחרטו', 'תקנו עכשיו', 'שווה כל שקל', 'זה משנה הכל'.",
   "setting": "one-line description of the setting",
   "scenes": [
     {
@@ -806,8 +888,8 @@ Return ONLY valid JSON (no markdown):
     },
     {
       "type": "תוצאה",
-      "nb_prompt": "Unedited still frame pulled from a handheld iPhone selfie video, not a photograph. SAME LOCATION AS SCENE 1 — the avatar is in the same indoor everyday setting (home / kitchen / bathroom / bedroom / office, whichever scene 1 used) with the same casual home atmosphere. This is one continuous moment, not a new scene. Avatar wears a natural closed-lip warm smile (mouth stays closed, corners of mouth lifted, eyes soften and crinkle at the outer corners), caught between expressions not a finished pose, satisfied and quietly confident. Product is naturally visible — either still worn/held/used from scene 3, or its EFFECT is visible (confident smile for whitening, styled outfit on body, glowing skin). Same window daylight + warm room practical lighting as scene 1 — NO candlelight, NO golden hour, NO restaurant warmth, NO new fancy location (UNLESS ${productName} is a car product, in which case the avatar may be sitting in the driver's seat with natural in-car lighting through the windshield). Shot on iPhone 15 Pro front camera, native wide lens around 26mm, autofocus hunts gently with focus pulsing, real unretouched skin with visible pores, subtle uneven skin tone, slight natural oil sheen on nose and forehead, faint pink flush on cheeks, subtle darker half-moons under the eyes, tiny flyaway hairs catching the light, natural facial asymmetry, subtle barrel distortion at corners, auto white balance, faint luminance grain, faint rolling-shutter skew, flat washed-out color, uncolor-graded, low saturation, handheld one-hand micro-shake with subtle motion blur on hair strands, soft focus across the whole frame, framing slightly off-center and tilted a few degrees, head not dead-level, no airbrushing, no beauty filter, no 8k, no LUT, looks like a real person on their front camera not a render, correct human anatomy, no burned-in subtitles or captions or on-screen text or graphic overlays, NEVER show a phone or mobile device in any scene",
-      "kling_prompt": "Avatar in the SAME indoor location as scene 1 (or the driver's seat of their car if ${productName} is a car product), satisfied and quietly confident moment. Physics of motion: closed-lip warm smile forms gradually with corners of mouth lifting and skin softening around the outer eyes in genuine quiet confidence, small subtle nod with hair following the head movement and catching the light, eyes briefly break contact with the lens then refocus on the camera, optional small hand-on-heart gesture or relaxed gesture toward camera. Same room ambience as scene 1 — soft window daylight, warm room practical, occasional ambient micro-motion in the home setting. Product naturally visible in frame; if held, fingers remain firmly anchored with visible grip tension (no hand morphing, no melted fingers). PRODUCT LOCK: The product maintains EXACT same appearance throughout the entire video — same shape, same color, same logo, same text, same material, same position. It is a rigid physical object that does not morph. Every frame shows the identical product from the reference frame. [FORM-SPECIFIC LOCK — pick based on product type: (WEARABLE) product stays firmly in place on the head/body/wrist throughout, does not rotate, slide, or translate, fabric texture and any printed/embroidered design stay identical / (HELD) product stays firmly held with consistent grip, label, branding, and dimensions identical across every frame / (APPLIED / CONSUMED) product container and any dispensed amount stay identical, no label rewriting / (ENVIRONMENTAL) product remains in exactly the same position in the scene with identical shape, color, and surface details, only the light or surrounding motion may change]. no product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no product becoming a different object, no product identity drift, no gradual transformation into a similar-but-different item. Handheld iPhone front-camera feel with mild one-hand wobble, autofocus pulses gently. Silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
+      "nb_prompt": "Unedited still frame pulled from a handheld iPhone selfie video, not a photograph. WIN PAYOFF (category=${winKey}): ${winRule} The avatar is ACTIVELY DOING the WIN action described above — this is action-based, not a static smile-at-camera pose. Caught mid-action, expression flows from the action (eyes confident or focused, brow softened, closed-lip natural smile if the action calls for it; mouth stays closed). Product, when shown, is naturally in-frame — held, worn, on a bench, or its EFFECT visible — but is NOT the focus of the shot. Lighting and setting reflect the WIN moment (different from scene 1 if the WIN guidance calls for it). Shot on iPhone 15 Pro front camera, native wide lens around 26mm, autofocus hunts gently with focus pulsing, real unretouched skin with visible pores, subtle uneven skin tone, slight natural oil sheen on nose and forehead, faint pink flush on cheeks, tiny flyaway hairs catching the light, natural facial asymmetry, subtle barrel distortion at corners, auto white balance, faint luminance grain, faint rolling-shutter skew, flat washed-out color, uncolor-graded, low saturation, handheld one-hand micro-shake with subtle motion blur on hair strands, soft focus across the whole frame, framing slightly off-center and tilted a few degrees, head not dead-level, no airbrushing, no beauty filter, no 8k, no LUT, looks like a real person on their front camera not a render, correct human anatomy, no burned-in subtitles or captions or on-screen text or graphic overlays, NEVER show a phone or mobile device in any scene",
+      "kling_prompt": "WIN PAYOFF moment (category=${winKey}): ${winRule} Avatar performs the WIN action with full physical commitment — this is action-based motion, NOT a static satisfied pose. Physics of motion: the action unfolds with realistic body mechanics (muscles engaged, weight shift, breath cycle visible), hair follows the motion and catches the light, eyes stay focused on the action or break contact with camera with quiet confidence, expression flows from the action with closed lips. Setting/lighting reflect the WIN moment. Product naturally visible if at all; if held, fingers remain firmly anchored with visible grip tension (no hand morphing, no melted fingers). PRODUCT LOCK: The product maintains EXACT same appearance throughout the entire video — same shape, same color, same logo, same text, same material, same position. It is a rigid physical object that does not morph. Every frame shows the identical product from the reference frame. [FORM-SPECIFIC LOCK — pick based on product type: (WEARABLE) product stays firmly in place on the head/body/wrist throughout, does not rotate, slide, or translate, fabric texture and any printed/embroidered design stay identical / (HELD) product stays firmly held with consistent grip, label, branding, and dimensions identical across every frame / (APPLIED / CONSUMED) product container and any dispensed amount stay identical, no label rewriting / (ENVIRONMENTAL) product remains in exactly the same position in the scene with identical shape, color, and surface details, only the light or surrounding motion may change]. no product morphing, no shape changing, no color shifting, no logo transformation, no text changing, no material distortion, no product becoming a different object, no product identity drift, no gradual transformation into a similar-but-different item. Handheld iPhone front-camera feel with mild one-hand wobble, autofocus pulses gently. Silent, no talking, no lip movement, mouth closed or naturally relaxed, maintain consistent facial features, no face distortion, stable face anatomy, smooth natural motion only, no mouth movement, avatar is not speaking, natural micro-movements breathing only, handheld iPhone wobble no stabilizer, no sudden jumps, product shape and colors unchanged from reference, no burned-in subtitles, no caption cards, no on-screen text, no graphic overlays",
       "subtitle": "same as voiceover_scene4"
     }
   ]
@@ -870,7 +952,7 @@ Return ONLY valid JSON (no markdown):
       if (attempt === MAX_BEAT_REGEN) break;
       console.warn(`[generateScript] 4-beat structure violations (regen ${attempt + 1}/${MAX_BEAT_REGEN}):`, violations);
       const bullets = violations.map((v, i) => `  ${i + 1}. ${v}`).join('\n');
-      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE STRICT 4-BEAT STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules:\n- voiceover_scene1 = BEAT 1 — must EXACTLY equal the pre-set hook ("${hook}"), verbatim, and never names "${productName}".\n- voiceover_scene2 = BEAT 2 — must START with "עד שגיליתי את ${productName}" and END with "שפשוט שינה הכל" / "שפשוט שינתה הכל" / "שפשוט שינה לי הכל" / "שפשוט שינתה לי הכל".\n- voiceover_scene3 = BEAT 3 — 2-3 concrete benefits resolving the Beat-1 pain. NEVER contains "עד שגיליתי" / "ואז גיליתי" / "פתרון חכם" / "פתרון מושלם" / "התוצאות מטורפות".\n- voiceover_scene4 = BEAT 4 — CTA verb ("תקנו" / "תזמינו" / "תיכנסו" / "תנסו") + product name + trust phrase ("תסמכו עליי" / "אני מבטיח" / "לא תתחרטו").`;
+      const extraInstruction = `\n\nPREVIOUS ATTEMPT VIOLATED THE 4-BEAT STRUCTURE. Fix ALL of these specific issues and return a corrected script:\n${bullets}\n\nReminder of the rules (NATURAL UGC, NOT SCAM TESTIMONIAL):\n- voiceover_scene1 = BEAT 1 — must EXACTLY equal the pre-set hook ("${hook}"), verbatim, and never names "${productName}".\n- voiceover_scene2 = BEAT 2 — natural product introduction (~5-9 words) that names "${productName}" as part of a real routine/moment. NEVER use "עד שגיליתי" / "ואז גיליתי" / "פשוט שינה הכל" / "פשוט שינתה הכל" / "זה משנה הכל".\n- voiceover_scene3 = BEAT 3 — 2-3 concrete benefits resolving the Beat-1 pain. NEVER contains the forbidden phrases.\n- voiceover_scene4 = BEAT 4 — natural close (~6-10 words) that names "${productName}" and shows the avatar's current reality. NEVER use "תסמכו עליי" / "תסמכו עלי" / "אני מבטיח" / "אני מבטיחה" / "לא תתחרטו" / "תקנו עכשיו" / "שווה כל שקל".\n- ZERO forbidden phrases anywhere in the voiceover.`;
       const retry = parseResponse(await callClaude(extraInstruction));
       if (retry) parsed = retry;
       else break;
@@ -1204,7 +1286,7 @@ async function runJob(jobId, body) {
       voiceover = script?.voiceover || getBusinessDefaultVoiceover(businessName || '', businessDescription || '', hook, voiceGender);
     } else {
       hook = getHook(productName, productDesc, voiceGender);
-      script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender);
+      script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender, settingKey);
       scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
       if (script) {
         script.voiceover_scene1 = hook;
