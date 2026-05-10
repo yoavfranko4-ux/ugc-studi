@@ -1236,6 +1236,28 @@ async function runJob(jobId, body) {
       businessName, businessDescription, businessPhotos,
       setting: requestedSetting,
     } = body;
+    // Hard-fail gates: refuse to spend tokens / minutes generating a video
+    // that's missing the references the user actually paid for. Without these
+    // checks, an upload that aborts mid-flight produces a silent fallback to
+    // Tier 2 with no product image — the bug from Job 9b23fbf2.
+    if (!avatarUrl) {
+      console.error(`[Job ${jobId}] CRITICAL: missing avatarUrl — refusing to generate`);
+      await supabase
+        .from('jobs')
+        .update({ status: 'error', error: 'אווטאר לא נבחר. אנא חזור ובחר אווטאר.' })
+        .eq('id', jobId);
+      await updateVideoJobStatus(jobId, 'failed', null);
+      return;
+    }
+    if (videoType === 'ugc' && !productImageUrl) {
+      console.error(`[Job ${jobId}] CRITICAL: ugc mode but no productImageUrl — refusing to generate (would have produced video without product)`);
+      await supabase
+        .from('jobs')
+        .update({ status: 'error', error: 'תמונת המוצר חסרה. אנא חזור והעלה תמונה ונסה שוב.' })
+        .eq('id', jobId);
+      await updateVideoJobStatus(jobId, 'failed', null);
+      return;
+    }
     // Resolve setting → promptText. 'auto' (or missing/unknown) → empty string (AI decides)
     const settingKey = requestedSetting && SETTINGS[requestedSetting] ? requestedSetting : 'auto';
     const settingPromptText = SETTINGS[settingKey]?.promptText || '';
@@ -1492,8 +1514,10 @@ async function runJob(jobId, body) {
         return null;
       }
       if (!refAvatarUrl || !refProductUrl) {
-        console.log(`[Job ${jobId}] Tier 1 skipped: missing avatar (${!!refAvatarUrl}) or product (${!!refProductUrl}) reference URL`);
-        return null;
+        // Should never get here for UGC mode due to hard-fail in runJob, but
+        // keep this as defense-in-depth. Throwing makes the failure loud
+        // instead of a silent fallback to Tier 2 with no product reference.
+        throw new Error(`Missing required references for Tier 1 — avatar=${!!refAvatarUrl} product=${!!refProductUrl}`);
       }
       try {
         console.log(`[Job ${jobId}] Tier 1: Trying Marketing Studio UGC...`);

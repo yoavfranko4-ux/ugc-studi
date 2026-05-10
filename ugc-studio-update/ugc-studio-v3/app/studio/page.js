@@ -948,6 +948,7 @@ export default function Home() {
     if (!currentCheck) return alert('בחר דמות')
     if (mode === 'ugc') {
       if (!productName || !productDesc) return alert('הכנס שם ותיאור מוצר')
+      if (!productImage) return alert('תמונת המוצר חסרה. אנא העלה תמונת מוצר ונסה שוב.')
     } else {
       if (!businessName || !businessDescription) return alert('הכנס שם ותיאור עסק')
       if (businessPhotos.length === 0) return alert('העלה לפחות תמונה אחת של העסק')
@@ -970,6 +971,32 @@ export default function Home() {
     setLoadedEditId(null);
     pausedStateRef.current = null;
     addLog('Agent מתחיל לעבוד...')
+    // 3-attempt retry wrapper for /api/upload. Per-attempt 60s AbortController
+    // timeout; backoff 1s/2s/3s between attempts. Throws on final failure so
+    // the outer catch surfaces an alert and returns the user to the form.
+    const uploadWithRetry = async (formData, label) => {
+      const maxRetries = 3
+      let lastError
+      for (let i = 0; i < maxRetries; i++) {
+        const ac = new AbortController()
+        const timer = setTimeout(() => ac.abort(), 60000)
+        try {
+          const res = await fetch('/api/upload', { method: 'POST', body: formData, signal: ac.signal })
+          clearTimeout(timer)
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const data = await res.json()
+          const url = data?.url || data?.access_url
+          if (!url) throw new Error('No URL in response')
+          return url
+        } catch (e) {
+          clearTimeout(timer)
+          lastError = e
+          addLog(`ניסיון ${i+1}/${maxRetries} ל-${label} נכשל: ${e.message}`, 'err')
+          if (i < maxRetries - 1) await new Promise(r => setTimeout(r, 1000 * (i + 1)))
+        }
+      }
+      throw new Error(`העלאת ${label} נכשלה אחרי ${maxRetries} ניסיונות. בדוק חיבור אינטרנט ונסה שוב. (${lastError?.message || 'unknown'})`)
+    }
     try {
       const currentAvatarUrl = customAvatar || selectedAvatar?.url
       addLog('Avatar: ' + (currentAvatarUrl ? currentAvatarUrl.slice(0,40) : 'NONE'), currentAvatarUrl ? '' : 'err')
@@ -982,9 +1009,7 @@ export default function Home() {
         for (let i = 0; i < bc.length; i++) ba[i] = bc.charCodeAt(i)
         const blob = new Blob([ba], { type: mime })
         const fd = new FormData(); fd.append('file', blob, 'avatar.jpg')
-        const up = await fetch('/api/upload', { method: 'POST', body: fd })
-        const upData = await up.json()
-        finalAvatarUrl = upData.url || upData.access_url
+        finalAvatarUrl = await uploadWithRetry(fd, 'אווטאר')
         addLog('אווטאר הועלה', 'ok')
       }
       addLog('שולח בקשה ל-Agent...'); setAgentStatus({ script: 'active' })
@@ -997,10 +1022,14 @@ export default function Home() {
         const pblob = new Blob([pba], { type: pm })
         const pfd = new FormData(); pfd.append('file', pblob, 'product.jpg')
         addLog('מעלה תמונת מוצר...')
-        const pup = await fetch('/api/upload', { method: 'POST', body: pfd })
-        const pupData = await pup.json()
-        productImageUrl = pupData.url || pupData.access_url
+        productImageUrl = await uploadWithRetry(pfd, 'תמונת מוצר')
         addLog('מוצר הועלה', 'ok')
+      }
+      // Defense-in-depth: if UGC mode but upload didn't run or returned falsy,
+      // refuse to call /api/agent — this is what causes the silent "no product"
+      // video that triggered the original bug report.
+      if (mode === 'ugc' && !productImageUrl) {
+        throw new Error('תמונת המוצר לא הועלתה בהצלחה. אנא נסה שוב.')
       }
       // In business mode the businessPhotos are already data URLs — send them directly
       // (the agent route accepts data: URLs via the same prepareUrl path)
@@ -1990,12 +2019,28 @@ export default function Home() {
         </div>
       </div>
 
-      <button onClick={runAgent} style={bigBtn}>
-        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          הפעל Agent — צור 4 סצנות מחוברות
-        </span>
-      </button>
+      {(() => {
+        const missingProductImage = mode === 'ugc' && !productImage
+        return (
+          <>
+            <button
+              onClick={runAgent}
+              disabled={missingProductImage}
+              style={{ ...bigBtn, opacity: missingProductImage ? 0.5 : 1, cursor: missingProductImage ? 'not-allowed' : 'pointer' }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                הפעל Agent — צור 4 סצנות מחוברות
+              </span>
+            </button>
+            {missingProductImage && (
+              <div style={{ textAlign: 'center', color: '#f59e0b', fontSize: 13, marginTop: 8, direction: 'rtl' }}>
+                ⚠ אנא העלה תמונת מוצר לפני יצירת הסרטון
+              </div>
+            )}
+          </>
+        )
+      })()}
 
       {/* User video history — last 12 completed videos. API returns up to 50; UI slices to 12. */}
       <div style={{ ...cardS, marginTop: 24 }}>
