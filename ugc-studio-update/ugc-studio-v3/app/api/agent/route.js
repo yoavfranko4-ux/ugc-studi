@@ -271,6 +271,169 @@ const PRODUCT_VOICEOVER_FORBIDDEN_PHRASES = [
   'התוצאות מטורפות',
 ];
 
+// ============================================================
+// QUALITY RANDOMIZATION SYSTEM
+// Per-job randomness for camera/lighting/format so two videos of
+// the same product look different. Picked once per job in runJob
+// and threaded through generateScript + buildMergedFullPrompt so
+// the choice reaches both Nano-Banana stills and Seedance motion.
+// ============================================================
+
+function pickRandom(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// Negative block appended to the final merged prompt. Stops Higgsfield
+// from baking text/captions/lower-thirds into the rendered video.
+const NEGATIVE_PROMPT_BLOCK = 'NEGATIVE: no text overlay, no captions, no subtitles, no on-screen text, no watermarks, no lower-thirds, no graphic typography, no brand callout banners, no logos overlaid, no animated text. Clean image only.';
+
+// Camera direction pools — picked per-beat in runJob. Beat→pool mapping:
+//   Beat 1 (PAIN)      → intimate_static OR emotional_close
+//   Beat 2 (DISCOVERY) → reveal_motion
+//   Beat 3 (BENEFITS)  → energetic_handheld OR emotional_close
+//   Beat 4 (WIN)       → reveal_motion OR product_hero
+const CAMERA_MOVES = {
+  intimate_static: [
+    'static lock-off, eye-level, slight headroom',
+    'tight medium-close, locked tripod feel',
+    'fixed frame, subject centered, no movement',
+  ],
+  reveal_motion: [
+    'slow push-in toward subject, 4-second arc',
+    'gentle pull-out revealing context',
+    'dolly forward, low angle ascending',
+  ],
+  energetic_handheld: [
+    'handheld bob with natural sway, vlogger style',
+    'loose follow-cam, slightly shaky organic feel',
+    'POV walk with subtle camera bounce',
+  ],
+  product_hero: [
+    'orbital pan 90 degrees around product, 3-second arc',
+    'macro push-in to product detail, rack focus pull',
+    'slow rotating showcase, shallow depth of field',
+  ],
+  emotional_close: [
+    'slow zoom to eyes, anticipation reveal',
+    'match-cut between product and face',
+    'tight close-up handheld, gentle breathing room',
+  ],
+};
+
+// Pick a camera move for a given beat (1..4). Beats randomly pick
+// from one of the allowed category pools listed above.
+function pickCameraForBeat(beatNumber) {
+  const categoriesByBeat = {
+    1: ['intimate_static', 'emotional_close'],
+    2: ['reveal_motion'],
+    3: ['energetic_handheld', 'emotional_close'],
+    4: ['reveal_motion', 'product_hero'],
+  };
+  const cats = categoriesByBeat[beatNumber] || ['intimate_static'];
+  const cat = pickRandom(cats);
+  return pickRandom(CAMERA_MOVES[cat]);
+}
+
+// Lighting pools keyed by SETTINGS key. Keys match
+// lib/settings-prompts.js exactly: auto/kitchen/bedroom/gym/bathroom/
+// nature/car/street/office. `default` is the fallback for auto +
+// any unknown key.
+const LIGHTING_BY_SETTING = {
+  kitchen: [
+    'soft north-facing window light, 10am natural daylight',
+    'warm pendant overhead plus cool window light, contrast',
+    'morning sun streaming through window, golden tones',
+  ],
+  gym: [
+    'overhead LED panels, cool 4500K, energetic atmosphere',
+    'afternoon golden light through gym windows',
+    'dramatic side-lighting from window, gym shadows',
+  ],
+  bathroom: [
+    'warm vanity lights, 3000K, intimate evening',
+    'cool morning daylight from frosted window',
+    'soft bathroom ambient, mirror reflections',
+  ],
+  bedroom: [
+    'soft bedside warm lamp, 2700K, cozy',
+    'golden hour through curtains, dust particles visible',
+    'cool morning window light, fresh atmosphere',
+  ],
+  office: [
+    'cinematic 3-point lighting, key from window',
+    'evening lamp warmth plus background practicals',
+    'afternoon sun through curtains, soft shadows',
+    'warm desk lamp plus cool monitor glow',
+  ],
+  street: [
+    'natural daylight, partly cloudy diffusion',
+    'golden hour sidelight, long shadows',
+    'overcast diffused light, even tones',
+  ],
+  nature: [
+    'golden hour sidelight through trees, dappled shadows',
+    'overcast diffused outdoor light, even tones',
+    'fresh morning daylight, cool color temperature',
+  ],
+  car: [
+    'natural daylight through windshield, soft side fill',
+    'overcast diffusion through windows, even interior light',
+    'late afternoon sun through driver window, warm side light',
+  ],
+  default: [
+    'cinematic 3-point lighting, key from window',
+    'afternoon sun through curtains, soft shadows',
+    'warm overhead pendants plus window practicals',
+    'natural daylight, partly cloudy diffusion',
+  ],
+};
+
+// UGC format flavors — one picked per job. Sets the overall tone
+// of the script (pacing, energy, register) so back-to-back generations
+// of the same product feel like different creators made them.
+const UGC_FORMAT_FLAVORS = [
+  {
+    name: 'entertainment',
+    description: 'challenge/dare energy, product is the punchline',
+    camera_category: 'energetic_handheld',
+    energy_level: 'high',
+    pacing_note: 'fast cuts, 1.5-2s per beat',
+  },
+  {
+    name: 'intimate_review',
+    description: 'honest talking-head style, talking to viewer',
+    camera_category: 'intimate_static',
+    energy_level: 'medium',
+    pacing_note: 'smooth, 3-4s per beat',
+  },
+  {
+    name: 'asmr_sensory',
+    description: 'close-up sensory, focus on hands and textures',
+    camera_category: 'product_hero',
+    energy_level: 'low',
+    pacing_note: 'slow contemplative, 4-5s per beat',
+  },
+  {
+    name: 'lifestyle_moment',
+    description: 'casual everyday life scene with product',
+    camera_category: 'emotional_close',
+    energy_level: 'medium',
+    pacing_note: 'natural rhythm, 2-3s per beat',
+  },
+  {
+    name: 'discovery_reveal',
+    description: 'moment of discovery, surprise element',
+    camera_category: 'reveal_motion',
+    energy_level: 'medium-high',
+    pacing_note: 'build-up momentum, 2-4s per beat',
+  },
+];
+
+// Authentic UGC skin/feel cues appended to nb_prompt instructions
+// so Higgsfield produces real-skin video rather than airbrushed AI.
+const AUTHENTIC_UGC_CUES = 'authentic handheld feel, natural skin texture with visible pores and slight imperfections, no makeup over-correction, real shadows under eyes, asymmetric features visible, mid-frame natural movement not posed, slight imperfections in framing - feels like iPhone selfie not cinematic camera';
+
 // Business mode (out of scope for the product-mode scam-cleanup) keeps
 // its narrower Beat-3 forbidden list — discovery phrases that belong in
 // Beat 2 of a business script + a couple of ad clichés. Business CTAs
@@ -428,7 +591,19 @@ function logNbKlingOverlap(scenes, label = '') {
   });
 }
 
-async function generateScript(productName, productDesc, applicationArea, hook, voiceGender, settingKey = 'auto') {
+async function generateScript(productName, productDesc, applicationArea, hook, voiceGender, settingKey = 'auto', randomization = null) {
+  // Randomization context — picked once per job in runJob and passed in.
+  // When null (legacy callers / fallback), we self-roll so the function
+  // still works standalone without breaking older call sites.
+  const randomFormat = randomization?.format || pickRandom(UGC_FORMAT_FLAVORS);
+  const cameraByBeat = randomization?.cameraByBeat || {
+    1: pickCameraForBeat(1),
+    2: pickCameraForBeat(2),
+    3: pickCameraForBeat(3),
+    4: pickCameraForBeat(4),
+  };
+  const lightingPool = LIGHTING_BY_SETTING[settingKey] || LIGHTING_BY_SETTING.default;
+  const lighting = randomization?.lighting || pickRandom(lightingPool);
   if (!ANTHROPIC_KEY) {
     console.error('[generateScript] FAILED — ANTHROPIC_API_KEY is not set in env, falling back to defaults');
     return null;
@@ -436,6 +611,7 @@ async function generateScript(productName, productDesc, applicationArea, hook, v
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
   const { category: detectedCategory, plural: detectedPlural } = detectProductCategory(productName, productDesc);
   console.log(`[generateScript] auto-detected category=${detectedCategory} plural=${detectedPlural} for "${productName}"`);
+  console.log(`[generateScript] randomization: format=${randomFormat.name} lighting="${lighting}" camera[1]="${cameraByBeat[1]}" camera[2]="${cameraByBeat[2]}" camera[3]="${cameraByBeat[3]}" camera[4]="${cameraByBeat[4]}"`);
 
   // ── WIN-scene guidance for Beat 4 ──
   // Mirror the same category/whitening detection used later in
@@ -493,6 +669,38 @@ STYLE DIRECTION (apply within all kling_prompts):
 - Background should be softly out of focus (shallow depth of field)
 - Mood: intimate, authentic, like she's showing this to a close friend
 - These descriptors enrich Rule 11 gestures, they don't replace them
+
+UGC FORMAT FLAVOR (this whole script must read in this register):
+${randomFormat.name} — ${randomFormat.description}
+Pacing: ${randomFormat.pacing_note}
+Energy: ${randomFormat.energy_level}
+
+PER-BEAT CAMERA DIRECTIONS (inject verbatim into the matching scene's kling_prompt):
+- Scene 1 (Beat 1 / PAIN): "${cameraByBeat[1]}"
+- Scene 2 (Beat 2 / PRODUCT REVEAL): "${cameraByBeat[2]}"
+- Scene 3 (Beat 3 / BENEFITS): "${cameraByBeat[3]}"
+- Scene 4 (Beat 4 / WIN): "${cameraByBeat[4]}"
+Each kling_prompt must open with the line "CAMERA: <directive>." using the directive listed above for its scene. Do not pick a different camera move; do not omit it.
+
+SCENE LIGHTING (inject verbatim into every nb_prompt AND kling_prompt):
+"${lighting}"
+This lighting describes the whole job's look. Repeat it in all 4 nb_prompts and all 4 kling_prompts so Nano-Banana stills and Seedance motion match.
+
+PHYSICS-FIRST WRITING (applies inside every kling_prompt):
+Don't write static descriptions. Describe what force does to a body. Examples:
+- WEAK: "Avatar holds the product"
+  STRONG: "Avatar's fingers wrap around the can, knuckles visible from the grip pressure, thumb brushing the label"
+- WEAK: "She drinks the coffee"
+  STRONG: "Steam rises as she lifts the cup, eyes close briefly at the first sip, shoulders drop with relief"
+- WEAK: "He picks up the box"
+  STRONG: "Hands cradle the package, fingertips finding the ribbon edge, slight lean forward with anticipation"
+Always include: weight, tension, micro-movements, breath, texture interaction, fabric movement. Make every motion feel physically real.
+
+AUTHENTIC UGC SKIN CUES (append to every nb_prompt's style section, scenes 1/3/4):
+"${AUTHENTIC_UGC_CUES}"
+
+NO ON-SCREEN TEXT (CRITICAL):
+NEVER describe text overlays, captions, subtitles, lower-thirds, watermarks, or any graphic typography in any nb_prompt or kling_prompt. The video must render clean visuals only — voiceover and burned-in subtitles are added externally downstream. Phrases like "text appears", "caption reads", "subtitle shows", "overlay says", "logo banner" are forbidden inside any prompt field. The existing "no burned-in subtitles..." negatives at the end of each prompt stay in place.
 
 CRITICAL VOICEOVER RULES — NATURAL UGC, NOT SCAM TESTIMONIAL:
 The voiceover must sound like a real person sharing a genuine experience — first-person, present-tense, specific moments and feelings. NOT a paid-shill testimonial.
@@ -1227,6 +1435,56 @@ async function buildStaticFallbackVideo(imageUrl, durationSec = 5) {
 // lib/higgsfield-client.js (uploadToHiggsfield). Pass through http(s) URLs,
 // resolve relative paths to https, and accept data: URIs inline.
 
+// Producibility linter — scans the final merged prompt for descriptions
+// that would force Higgsfield to bake text on screen or invent lip-sync
+// motion (we drive lips externally via the voiceover track, so any
+// "she says/speaks/talks" hint is a visual contradiction). Returns the
+// list of violations; logs but does NOT block the run — these warnings
+// surface in Railway logs so we can iterate on Claude's prompts when
+// false positives appear.
+function lintFinalPrompt(prompt, jobId) {
+  const violations = [];
+  if (!prompt) return violations;
+
+  // Strip the "no X" / "no Y" negative phrases before scanning so the
+  // explicit NEGATIVE_PROMPT_BLOCK itself doesn't trigger the linter.
+  // Pattern: word "no" / "NEVER" followed by a comma-separated list of
+  // banned items, terminated at a period or NEGATIVE: marker.
+  const scanned = prompt.replace(/\bno\s+[^.,\n]+/gi, '').replace(/NEGATIVE:[\s\S]*$/i, '');
+
+  const textOverlayPatterns = [
+    /text overlay/i,
+    /caption(?:s)?(?: appear| visible| on screen)/i,
+    /subtitle(?:s)?(?: appear| visible| on screen)/i,
+    /on-screen text/i,
+    /lower.third/i,
+    /watermark/i,
+  ];
+  textOverlayPatterns.forEach((pattern) => {
+    if (pattern.test(scanned)) {
+      violations.push(`Text overlay reference detected: ${pattern}`);
+    }
+  });
+
+  const lipSyncPatterns = [
+    /(?:she|he|avatar|woman|man)\s+says/i,
+    /(?:she|he|avatar|woman|man)\s+speaks/i,
+    /(?:she|he|avatar|woman|man)\s+talks/i,
+    /mouth opens/i,
+    /lip[s]?\s+move/i,
+  ];
+  lipSyncPatterns.forEach((pattern) => {
+    if (pattern.test(scanned)) {
+      violations.push(`Lip-sync violation: ${pattern}`);
+    }
+  });
+
+  if (violations.length > 0) {
+    console.warn(`[Job ${jobId}] Prompt linter found ${violations.length} issues:`, violations);
+  }
+  return violations;
+}
+
 async function runJob(jobId, body) {
   try {
     const {
@@ -1262,6 +1520,25 @@ async function runJob(jobId, body) {
     const settingKey = requestedSetting && SETTINGS[requestedSetting] ? requestedSetting : 'auto';
     const settingPromptText = SETTINGS[settingKey]?.promptText || '';
     console.log(`[Job ${jobId}] Setting selected: ${settingKey}${settingPromptText ? ' (injected)' : ' (auto — empty)'}`);
+
+    // Per-job randomization — picked ONCE here and threaded through
+    // generateScript (so Claude bakes camera/lighting into nb/kling prompts)
+    // and buildMergedFullPrompt (so the merged 15s prompt repeats the same
+    // choices to Seedance). Two runs of the same product → different format,
+    // different lighting, different camera moves per beat.
+    const randomFormat = pickRandom(UGC_FORMAT_FLAVORS);
+    const cameraByBeat = {
+      1: pickCameraForBeat(1),
+      2: pickCameraForBeat(2),
+      3: pickCameraForBeat(3),
+      4: pickCameraForBeat(4),
+    };
+    const lightingPool = LIGHTING_BY_SETTING[settingKey] || LIGHTING_BY_SETTING.default;
+    const lighting = pickRandom(lightingPool);
+    const randomization = { format: randomFormat, cameraByBeat, lighting };
+    console.log(`[Job ${jobId}] UGC format flavor: ${randomFormat.name}`);
+    console.log(`[Job ${jobId}] Lighting pick: "${lighting}"`);
+    console.log(`[Job ${jobId}] Camera per beat: 1="${cameraByBeat[1]}" | 2="${cameraByBeat[2]}" | 3="${cameraByBeat[3]}" | 4="${cameraByBeat[4]}"`);
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ugc-studi-production.up.railway.app';
     const prepareUrl = (u) => u
       ? (u.startsWith('http') || u.startsWith('data:')
@@ -1308,7 +1585,7 @@ async function runJob(jobId, body) {
       voiceover = script?.voiceover || getBusinessDefaultVoiceover(businessName || '', businessDescription || '', hook, voiceGender);
     } else {
       hook = getHook(productName, productDesc, voiceGender);
-      script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender, settingKey);
+      script = await generateScript(productName, productDesc, applicationArea, hook, voiceGender, settingKey, randomization);
       scenes = script?.scenes || getDefaultScenes(productName, applicationArea, productDesc);
       if (script) {
         script.voiceover_scene1 = hook;
@@ -1433,47 +1710,69 @@ async function runJob(jobId, body) {
       const winKey = isWhitening ? 'whitening' : winCat;
       const winRule = WIN_SCENE_RULES[winKey] || WIN_SCENE_RULES.beauty;
 
+      // Per-beat camera directions + scene lighting, picked once per job
+      // up in runJob. Repeating them here is what makes Seedance honor the
+      // same look the nb_prompts were rendered against.
+      const cam1 = cameraByBeat[1];
+      const cam2 = cameraByBeat[2];
+      const cam3 = cameraByBeat[3];
+      const cam4 = cameraByBeat[4];
+
       if (isBusiness) {
         const businessLabel = businessName || 'the location';
 
         const lines = [
           ...(settingPromptText ? [settingPromptText, ``] : []),
+          `SCENE LIGHTING (all beats): ${lighting}.`,
+          ``,
           `Vertical 9:16 selfie-style UGC location moment, shot on iPhone front camera, natural daylight at the location, handheld authentic energy, "showing my favorite spot" vibe, real skin tones with subtle imperfections, no filters, lived-in real-world environment.`,
           ``,
           `The woman from Image 2 — same face, same hair, same warm presence throughout — visiting or working at ${businessLabel} (Image 1). The location stays identical to the reference image — same storefront, same signage, same atmosphere, no alterations.`,
           ``,
-          `Action sequence: ${beat1}`,
+          `Action sequence (CAMERA: ${cam1}): ${beat1}`,
           ``,
-          `Then, ${beat2}`,
+          `Then (CAMERA: ${cam2}), ${beat2}`,
           ``,
-          `Next, ${beat3}`,
+          `Next (CAMERA: ${cam3}), ${beat3}`,
           ``,
-          `Finally, ${beat4} — WIN SCENE: avatar enjoying the location outcome (relaxed, satisfied, in real use of the place) in a different moment/setting than Beat 1. Not a generic "smiling at the camera" shot.`,
+          `Finally (CAMERA: ${cam4}), ${beat4} — WIN SCENE: avatar enjoying the location outcome (relaxed, satisfied, in real use of the place) in a different moment/setting than Beat 1. Not a generic "smiling at the camera" shot.`,
           ``,
-          `CRITICAL RULE: She never opens her mouth throughout. Lips stay completely closed. No talking, no lip movement, no sound. All emotion through eyes, eyebrows, and closed-mouth micro-expressions. Voiceover added externally — the visual must be silent.`
+          `CRITICAL RULE: She never opens her mouth throughout. Lips stay completely closed. No talking, no lip movement, no sound. All emotion through eyes, eyebrows, and closed-mouth micro-expressions. Voiceover added externally — the visual must be silent.`,
+          ``,
+          NEGATIVE_PROMPT_BLOCK
         ];
-        return lines.join('\n');
+        const joined = lines.join('\n');
+        lintFinalPrompt(joined, jobId);
+        return joined;
       }
 
       const productLabel = productName || 'the product';
 
       const lines = [
         ...(settingPromptText ? [settingPromptText, ``] : []),
+        `SCENE LIGHTING (all beats): ${lighting}.`,
+        ``,
+        `UGC FORMAT FLAVOR: ${randomFormat.name} — ${randomFormat.description}. Pacing: ${randomFormat.pacing_note}. Energy: ${randomFormat.energy_level}.`,
+        ``,
         `Vertical 9:16 selfie-style UGC product moment, shot on iPhone front camera, natural daylight, handheld authentic energy, warm natural light, real skin tones with subtle imperfections, no filters, lived-in real-world environment.`,
         ``,
         `The woman from Image 2 — same face, same hair, same warm presence throughout. She holds ${productLabel} (Image 1) — keep the product identical to the reference image, same colors, same shape, same branding details, no alterations.`,
         ``,
-        `Action sequence: ${beat1} — NO product visible in this beat (empty hands or hands on head, product NEVER appears yet).`,
+        `Action sequence (CAMERA: ${cam1}): ${beat1} — NO product visible in this beat (empty hands or hands on head, product NEVER appears yet).`,
         ``,
-        `Then, ${beat2}`,
+        `Then (CAMERA: ${cam2}), ${beat2}`,
         ``,
-        `Next, ${beat3}`,
+        `Next (CAMERA: ${cam3}), ${beat3}`,
         ``,
-        `Finally, ${beat4} — WIN SCENE: ${winRule} Product, when shown, is firmly held in one hand OR resting on a clear stable surface, NEVER floating in air.`,
+        `Finally (CAMERA: ${cam4}), ${beat4} — WIN SCENE: ${winRule} Product, when shown, is firmly held in one hand OR resting on a clear stable surface, NEVER floating in air.`,
         ``,
-        `CRITICAL RULE: She never opens her mouth throughout. Lips stay completely closed. No talking, no lip movement, no sound. All emotion through eyes, eyebrows, and closed-mouth micro-expressions. Voiceover added externally — the visual must be silent.`
+        `CRITICAL RULE: She never opens her mouth throughout. Lips stay completely closed. No talking, no lip movement, no sound. All emotion through eyes, eyebrows, and closed-mouth micro-expressions. Voiceover added externally — the visual must be silent.`,
+        ``,
+        NEGATIVE_PROMPT_BLOCK
       ];
-      return lines.join('\n');
+      const joined = lines.join('\n');
+      lintFinalPrompt(joined, jobId);
+      return joined;
     };
 
     // Merged reference image list — avatar + product (or business photo)
@@ -1833,12 +2132,22 @@ const PRODUCT_BEAT1_PATTERNS = {
       'את מנסה להתעורר אבל הגוף לא מקשיב',
       '10 בלילה ואת צריכה עוד לעבוד',
       'התעוררת עייפה שוב',
+      'אחרי הצהריים אני כבר גמורה לגמרי',
+      'עוד שעתיים של עבודה ואני בקושי פתוחה',
+      'המוח שלי כבה אחרי 2 בצהריים',
+      'הקפה כבר מזמן לא עושה את העבודה',
+      'עוד יום כזה ואני נופלת',
     ],
     male: [
       'השעה 3 אחה״צ והקפה השלישי לא עוזר',
       'אתה מנסה להתעורר אבל הגוף לא מקשיב',
       '10 בלילה ואתה צריך עוד לעבוד',
       'התעוררת עייף שוב',
+      'אחרי הצהריים אני כבר גמור לגמרי',
+      'עוד שעתיים של עבודה ואני בקושי פתוח',
+      'המוח שלי כבה אחרי 2 בצהריים',
+      'הקפה כבר מזמן לא עושה את העבודה',
+      'עוד יום כזה ואני נופל',
     ],
   },
   coffee: {
@@ -1846,11 +2155,21 @@ const PRODUCT_BEAT1_PATTERNS = {
       'הקפה של הבוקר נותן לך שעה אנרגיה ואז זה נגמר',
       'טעמת אספרסו טוב פעם, הקפה של הבית לא קרוב',
       'קפה נמס שוב, זה לא הולך לעבוד',
+      'כל בוקר אותו דבר - חמש כפיות סוכר ועדיין עייפה',
+      'הקפה במשרד טעים כמו מים חמים',
+      'אני שותה קפה ועדיין לא מתעוררת',
+      'חצי כוס וכבר מרגישה את החמיצות',
+      'אין לי כוח לטחנה בבית כל בוקר',
     ],
     male: [
       'הקפה של הבוקר נותן לך שעה אנרגיה ואז זה נגמר',
       'טעמת אספרסו טוב פעם, הקפה של הבית לא קרוב',
       'קפה נמס שוב, זה לא הולך לעבוד',
+      'כל בוקר אותו דבר - חמש כפיות סוכר ועדיין עייף',
+      'הקפה במשרד טעים כמו מים חמים',
+      'אני שותה קפה ועדיין לא מתעורר',
+      'חצי כוס וכבר מרגיש את החמיצות',
+      'אין לי כוח לטחנה בבית כל בוקר',
     ],
   },
   fitness_supplement: {
@@ -1859,12 +2178,20 @@ const PRODUCT_BEAT1_PATTERNS = {
       '20 דקות באימון ואת כבר נגמרת',
       'מגיעה לחדר כושר ואין לך אש',
       'האימון נגמר ואת לא הרגשת אותו',
+      'אני באמצע סט ופתאום נגמר לי הכוח',
+      'חמש דקות באימון וכבר אני מתנשפת',
+      'התחלתי חזק ועכשיו בקושי מרימה',
+      'ההתאוששות בין סטים לוקחת חצי שעה',
     ],
     male: [
       'אתה מתחיל אימון בלי כוח',
       '20 דקות באימון ואתה כבר נגמר',
       'מגיע לחדר כושר ואין לך אש',
       'האימון נגמר ואתה לא הרגשת אותו',
+      'אני באמצע סט ופתאום נגמר לי הכוח',
+      'חמש דקות באימון וכבר אני מתנשף',
+      'התחלתי חזק ועכשיו בקושי מרים',
+      'ההתאוששות בין סטים לוקחת חצי שעה',
     ],
   },
   skincare_aging: {
@@ -1873,12 +2200,18 @@ const PRODUCT_BEAT1_PATTERNS = {
       'הקרם הזול הזה כבר לא עוזר',
       'מסתכלת במראה, זו לא את לפני שנה',
       'הפנים נראים עייפים גם אחרי שמונה שעות שינה',
+      'כל בוקר אותו דבר - עייפות בעיניים בלי סוף',
+      'אני לא יודעת מה לעשות עם הקמטים האלה',
+      'כל קרם שניסיתי לא עזר באמת',
     ],
     male: [
       'כל בוקר אתה רואה את הקווים האלה',
       'הקרם הזול הזה כבר לא עוזר',
       'מסתכל במראה, זה לא אתה לפני שנה',
       'הפנים נראים עייפים גם אחרי שמונה שעות שינה',
+      'כל בוקר אותו דבר - עייפות בעיניים בלי סוף',
+      'אני לא יודע מה לעשות עם הקמטים האלה',
+      'כל קרם שניסיתי לא עזר באמת',
     ],
   },
   cleaning: {
